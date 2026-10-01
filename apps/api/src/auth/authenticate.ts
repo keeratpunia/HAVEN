@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { verifyAccessToken } from './jwt.js';
 import type { Principal } from './principal.js';
 import { AppError } from '../lib/errors.js';
+import type { RevocationCache } from './principal-loader.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -19,6 +20,13 @@ declare module 'fastify' {
 
 export interface AuthenticateOptions {
   jwtSecretBase64: string;
+  /**
+   * Checks the session-revoked/user-inactive condition (SDD §9.5: "the auth hook
+   * rejects tokens whose session is revoked or whose user is inactive — cached 30s").
+   * Optional only so call sites with no DB (bootstrap-era infra tests) still build —
+   * every real server wires one up.
+   */
+  revocationCache?: RevocationCache;
 }
 
 /**
@@ -55,10 +63,20 @@ export function createAuthenticateHook(options: AuthenticateOptions) {
     if (header.startsWith('Bearer ')) {
       const token = header.slice('Bearer '.length).trim();
       const claims = await verifyAccessToken(token, options.jwtSecretBase64);
-      request.principal =
+      const principal: Principal =
         claims.typ === 'user'
           ? { type: 'user', userId: claims.sub, sessionId: claims.sid, roles: claims.roles }
           : { type: 'visitor', visitorId: claims.sub, sessionId: claims.sid };
+
+      if (options.revocationCache) {
+        const userId = principal.type === 'user' ? principal.userId : null;
+        const valid = await options.revocationCache.isValid(principal.sessionId, userId);
+        if (!valid) {
+          throw new AppError('SESSION_REVOKED', 401, 'Your session has been signed out.');
+        }
+      }
+
+      request.principal = principal;
       return;
     }
 

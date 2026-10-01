@@ -463,6 +463,95 @@ Source for all of Part 1: SDD §2.7.
   scope to edit the SDD in this pass. Items 2–5 fill in implementation detail the SDD
   doesn't specify, so there is nothing contradictory to update.
 
+### DEC-007 — Authentication milestone: OTP visitor placeholder identity, Kysely typing, Google/SMS integration boundaries, and two transaction-rollback bugs found by integration tests
+
+- **Date:** 2026-10-01
+- **Context:** Implementing the complete authentication foundation (SDD §9.5, §9.6,
+  §12.4/§12.5): guest phone OTP, resident/staff Google sign-in, access/refresh tokens,
+  sessions, revocation, deactivation, invite phone/email matching, and
+  `authorize()` integration for `/me`.
+- **Findings / decisions:**
+  1. **New visitor identity at OTP sign-in.** `haven.visitors.full_name`/`gender` are
+     `NOT NULL`, but OTP verification only proves a phone number. The SDD says OTP
+     verify "creates the visitor if new ... response includes `profileComplete`" but
+     doesn't specify what a brand-new row should contain before the guest fills in a
+     profile. **Decision:** create with placeholder `full_name = 'Guest'` and
+     `gender = 'undisclosed'` (an existing `haven.gender` value, not a new one);
+     `profileComplete` is exactly "the placeholder name has been replaced." `PATCH
+     /me` is how a guest later sets the real values (`src/auth/visitor-service.ts`).
+  2. **`Database` Kysely types are hand-written (`apps/api/src/db/types.ts`), not
+     `kysely-codegen`-generated**, scoped to the tables this milestone's queries
+     actually touch (`users`, `residents`, `role_assignments`, `staff_invites`,
+     `visitors`, `otp_challenges`, `sessions`, `visits`, `hostels`, `rooms`). Mirrors
+     DEC-004/DEC-005's Docker-unavailability finding: `kysely-codegen` needs a live DB
+     to introspect, and this sandbox's Docker/Supabase-local stack remains unreliable.
+     Transcribed directly from `supabase/migrations/20261001000001_init.sql` (the
+     actual enum values, not guessed ones — an earlier draft of this file guessed
+     wrong enum members for `gender`/`visit_type`/`visit_origin`/`zone`/`actor_type`
+     and was caught by integration tests against the real schema, not by inspection).
+     A later milestone that queries the schema broadly should replace this file
+     wholesale with a real `kysely-codegen` run, not keep hand-extending it table by
+     table.
+  3. **Google ID-token verification and SMS delivery are both injectable boundaries,
+     per the task's explicit instruction not to hardcode fake production credentials.**
+     `GoogleIdTokenVerifier` (`src/auth/google.ts`) has a real implementation
+     (`google-auth-library`, used whenever the server runs for real) and a
+     `FakeGoogleIdTokenVerifier` double used only by tests — never wired into
+     production code. `SMS_PROVIDER=console` writes the OTP code via a direct
+     `console.log`, deliberately **not** through the Pino logger (whose entire purpose
+     is redacting PII/secrets before they're persisted) — gated to
+     `APP_ENV !== 'production'` and throwing if misconfigured otherwise.
+     `SMS_PROVIDER=msg91` throws clearly, stating no real MSG91 credentials exist in
+     this environment, rather than faking a provider call.
+  4. **Staff invite acceptance happens two ways in `POST /auth/google`**: explicitly
+     (a `staffInviteToken` naming one invite, enforcing `INVITE_EMAIL_MISMATCH` when
+     the signed-in email doesn't match) and implicitly (any other still-pending,
+     unexpired invite addressed to the signed-in email is auto-accepted on every sign-
+     in). The SDD states "accepts any pending staff invite for that email" without
+     requiring a token, so the implicit path is the literal reading; the explicit path
+     exists because `staffInviteToken` is a documented optional request field and
+     needs *some* behaviour when present.
+  5. **Two genuine transaction-rollback bugs, found only by integration tests against
+     a real Postgres, not by unit tests or by inspection:** both `verifyOtp`'s
+     attempts-increment-then-throw and `rotateRefreshToken`'s
+     revoke-then-throw-on-reuse originally ran inside the *caller's* transaction
+     (`withTx`/`db.transaction()`). Since the function both wrote a row and then threw
+     an `AppError` within that same transaction, Kysely rolled the whole transaction
+     back on the throw — silently erasing the OTP attempt count and the reuse-
+     triggered session revocation every time, defeating brute-force protection and
+     refresh-token-theft detection respectively. **Decision:** both functions now take
+     a plain `Kysely<Database>` instead of a `Transaction<Database>`, so their writes
+     commit independently of whatever the caller does next; callers that need the
+     verify-then-issue-tokens flow to still read as one logical operation call
+     `verifyOtp`/`rotateRefreshToken` first, then open a separate `withTx` for the
+     parts that genuinely do need atomicity (visitor/session creation). This is the
+     specific mechanism DEC-005's "found by running the server, not by unit tests
+     alone" lesson generalizes to: a function that must survive its own failure path
+     cannot share a transaction with code that might fail for unrelated reasons.
+  6. **Integration tests run against a real embedded Postgres** (`embedded-postgres`,
+     same substitute for unavailable Docker as DEC-004), one instance shared by all
+     `*.integration.test.ts` files via Vitest `globalSetup`
+     (`apps/api/test/global-setup.ts`), each file resetting all `haven` schema tables
+     in `beforeEach`. This requires `fileParallelism: false` and `isolate: false` in
+     `vitest.config.ts` — running files concurrently against one shared, truncated-
+     between-tests database produced spurious FK violations and deadlocks until
+     sequential execution was forced; this was found empirically, not predicted.
+  7. **Visit codes in tests must match `^V[0-9A-HJKMNP-TV-Z]{6}$`** (Crockford-style
+     base32, excludes I/L/O/U) — a naive random/base36 generator intermittently
+     produced invalid codes and failed the DB check constraint; test fixtures now
+     generate from the exact alphabet.
+- **Why:** items 1–4 fill in behaviour the SDD states at a level above what the code
+  needs (exact placeholder values, exact injection seams) without contradicting it;
+  item 5 is a correctness bug that would have shipped silently if integration tests
+  hadn't exercised the real rollback semantics — recorded because CLAUDE.md §1.3
+  requires every SDD-relevant finding disclosed, and this one directly affects whether
+  `OTP_LOCKED` and refresh-reuse detection (both named in the task's own test list)
+  actually work; items 6–7 are environment/tooling choices in the same spirit as
+  DEC-004/DEC-005.
+- **SDD updated?** No — nothing here contradicts the SDD's stated behaviour; items 1–4
+  are implementation detail the SDD doesn't specify this precisely, and item 5 is a
+  bug in this codebase, not the SDD.
+
 Template for a new entry:
 
 ```markdown

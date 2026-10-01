@@ -7,12 +7,12 @@ import { z } from 'zod';
  * *server process itself* (`server.ts`/`app.ts`) genuinely needs it — not
  * speculatively, and not just because some other script in the repo uses it.
  * `JWT_SECRET` was added in the API-foundation milestone because the authentication
- * hook (`apps/api/src/auth/jwt.ts`) now actually verifies tokens with it. Still not
- * validated here: OTP_PEPPER, DATA_ENCRYPTION_KEY, GOOGLE_CLIENT_IDS, SMS_PROVIDER,
- * EXPO_ACCESS_TOKEN, TURNSTILE_SECRET, SENTRY_DSN, WORKER_ENABLED — those wait for the
- * auth-flow/gate/notify milestones that actually make the *server* use them (OTP
- * request/verify and Google sign-in aren't implemented yet — only JWT
- * verification/issuance, which every later auth method shares, is).
+ * hook (`apps/api/src/auth/jwt.ts`) now actually verifies tokens with it. `OTP_PEPPER`,
+ * `GOOGLE_CLIENT_IDS`, and `SMS_PROVIDER` were added in the authentication milestone
+ * because the OTP and Google sign-in handlers now use them. Still not validated here:
+ * DATA_ENCRYPTION_KEY, EXPO_ACCESS_TOKEN, TURNSTILE_SECRET, SENTRY_DSN,
+ * WORKER_ENABLED — those wait for the gate/notify milestones that actually make the
+ * *server* use them.
  *
  * `DATA_ENCRYPTION_KEY` and `SEED_SUPER_ADMIN_EMAIL`/`SEED_WARDEN_EMAIL` are
  * deliberately NOT here even though `apps/api/scripts/seed.ts` needs them now — the
@@ -50,6 +50,27 @@ const EnvSchema = z.object({
     .refine((value) => Buffer.from(value, 'base64').length >= 32, {
       message: 'JWT_SECRET must decode to at least 32 bytes (base64)',
     }),
+
+  // HMAC pepper for OTP code hashing (SDD §9.5: `HMAC_SHA256(OTP_PEPPER, phone + '|' +
+  // code)`). Added this milestone — the OTP request/verify handlers now use it.
+  OTP_PEPPER: z
+    .string()
+    .min(1, 'OTP_PEPPER is required')
+    .refine((value) => Buffer.from(value, 'base64').length >= 32, {
+      message: 'OTP_PEPPER must decode to at least 32 bytes (base64)',
+    }),
+
+  // Allowed Google OAuth client IDs (web + Android), comma list — the `aud` the
+  // verified Google ID token must match (SDD §9.5).
+  GOOGLE_CLIENT_IDS: z
+    .string()
+    .min(1, 'GOOGLE_CLIENT_IDS is required')
+    .transform((value) => value.split(',').map((id) => id.trim())),
+
+  // `console` prints OTP codes to stdout for local/dev convenience (SDD §9.5); `msg91`
+  // sends real SMS. Never `msg91` without real credentials, never `console` in
+  // production (enforced in otp-service.ts, not just by this enum).
+  SMS_PROVIDER: z.enum(['console', 'msg91']).default('console'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

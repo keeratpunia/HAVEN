@@ -7,6 +7,7 @@ import { createDb } from '../src/db/index.js';
 import { createLogger } from '../src/lib/logger.js';
 
 const VALID_JWT_SECRET = Buffer.alloc(32, 7).toString('base64');
+const VALID_OTP_PEPPER = Buffer.alloc(32, 3).toString('base64');
 
 function testEnv(overrides: Record<string, string> = {}) {
   __resetEnvCacheForTests();
@@ -14,6 +15,8 @@ function testEnv(overrides: Record<string, string> = {}) {
     DATABASE_URL: 'postgres://user:pass@localhost:6543/postgres',
     DATABASE_DIRECT_URL: 'postgres://user:pass@localhost:5432/postgres',
     JWT_SECRET: VALID_JWT_SECRET,
+    OTP_PEPPER: VALID_OTP_PEPPER,
+    GOOGLE_CLIENT_IDS: 'test-client-id',
     LOG_LEVEL: 'silent',
     ...overrides,
   });

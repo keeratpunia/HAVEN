@@ -82,7 +82,7 @@ finished requirement (same discipline as §0 and §0b above):**
 - Session revocation (SDD §9.5: "deactivation takes effect within 30s",
   `SESSION_REVOKED`) is not implemented — the auth hook verifies JWT signatures only,
   it does not check a `sessions`/`users.is_active` row. **TC-SEC-05 and TC-SEC-06 stay
-  unmarked.**
+  unmarked.** (Closed in the authentication milestone — see §0e.)
 - No real route exists under `/v1` — it is registered as an empty prefix boundary.
 
 ## 0d. Rules engine milestone (2026-10-01)
@@ -122,19 +122,84 @@ allow / 14:20 deny) don't algebraically match the SDD's own 30-minute rule (§4.
 three-way-corroborated 30-minute rule; the test suite documents the discrepancy
 in-line rather than quietly matching whichever number was more convenient.
 
+## 0e. Authentication milestone (2026-10-01)
+
+Implements the complete authentication foundation per SDD §9.5 (guest phone OTP,
+resident/staff Google sign-in, access/refresh tokens, sessions, revocation,
+deactivation) and §9.6 (invite phone matching, for the claim half only — invite
+*creation* stays out of scope, see below). 154 tests (unit + integration against a
+real embedded Postgres — see `docs/DECISIONS.md` DEC-007), including 22 integration
+test files exercising the real SQL. Two genuine transaction-rollback bugs were found
+by those integration tests and fixed — see DEC-007 item 5 — not found by unit tests or
+inspection alone.
+
+What exists now, closing every gap §0c flagged as deferred:
+- `POST /auth/otp/request` / `POST /auth/otp/verify` (`src/auth/otp-service.ts`,
+  `src/auth/routes.ts`): 6-digit code via `crypto.randomInt`, `HMAC_SHA256(OTP_PEPPER,
+  phone+'|'+code)` storage, 5-min TTL, 30s resend cooldown, 3/phone/10min +
+  10/IP/hour request limits, 5-wrong-attempts locks the code, non-production test
+  phones `+919999900001`-`09` accept `123456`, `SMS_PROVIDER=console` dev delivery.
+  `guest_login` creates/finds a visitor and issues tokens; `phone_verify` (an
+  authenticated user verifying their own phone) updates `users.phone`.
+- `POST /auth/google` (`src/auth/google-service.ts`): verifies the ID token via an
+  injectable `GoogleIdTokenVerifier` (real `google-auth-library` implementation in
+  production, a fake double in tests — DEC-007 item 3), requires `email_verified`,
+  upserts `users` by `google_sub`, auto-accepts any pending staff invite for the
+  signed-in email (explicit `staffInviteToken` enforces `INVITE_EMAIL_MISMATCH` on a
+  mismatched email; implicit acceptance needs no token at all).
+- Sessions and refresh rotation (`src/auth/sessions.ts`): 32-random-byte base64url
+  refresh tokens, SHA-256 stored, rotated on every use, reuse of an already-rotated
+  token revokes the whole session (`SESSION_REVOKED`).
+- The 30-second-cached session-revoked/user-inactive check (`src/auth/principal-
+  loader.ts`'s `RevocationCache`), wired into the authentication hook
+  (`src/auth/authenticate.ts`) — closes the exact gap §0c flagged. **TC-SEC-05 and
+  TC-SEC-06 are now Done.**
+- `GET/PATCH /me` with real `authorize()` policies (`src/auth/policy-rules.ts`:
+  `me.read`/`me.update`, denying any resource whose owner id doesn't match the calling
+  principal) — the first real policies registered against the mechanism §0c built.
+- `POST /invites/{token}/claim` (`src/auth/invites.ts`): phone-matching only
+  (`INVITE_PHONE_MISMATCH`, `INVITE_ALREADY_CLAIMED`, `INVITE_EXPIRED`) against an
+  existing `visits` row — invite *creation* (a host/visits-module action) is out of
+  scope for this milestone; tests construct fixture visit rows directly.
+- `apps/api/src/db/types.ts`: hand-written Kysely `Database` types for the tables this
+  milestone queries (DEC-007 item 2) — the `Database` interface is no longer an empty
+  placeholder for these tables.
+
+**What this explicitly does NOT do, so no later reviewer mistakes it for more than it
+is (same discipline as §0, §0b, §0c, §0d above):**
+- FR-04/FR-05 (resident registration: room number, ID card photo, selfie, warden
+  approve/reject) are **not** implemented — only the phone-verification *half* of
+  FR-04 (via `phone_verify` purpose) exists. FR-04/FR-05 stay unmarked.
+- FR-06 (staff invite *creation*, 48h expiry) is not implemented — only invite
+  *acceptance* (an existing `staff_invites` row via Google sign-in) exists. Tests
+  insert fixture invite rows directly. FR-06 stays unmarked.
+- FR-07's "warden deactivates staff / marks resident left" action itself is not
+  implemented (no handler sets `users.is_active = false` or
+  `residents.status = 'left'`) — only the *consequence* (a deactivated user's existing
+  session is rejected within 30s) is implemented and tested. FR-07 stays unmarked.
+- Device/gate-token authentication is still unimplemented (unchanged from §0c) — this
+  milestone did not touch it.
+- `SMS_PROVIDER=msg91` is not implemented (DEC-007 item 3) — only `console` works.
+- Cloudflare Turnstile gating on `POST /auth/otp/request` (CLAUDE.md §4, SDD §16.1
+  T10) is **not implemented** — `TURNSTILE_SECRET` is still unvalidated/unused. The
+  per-phone/per-IP rate limits (TC-SEC-09) are implemented and tested; the additional
+  Turnstile control is not. This is a real, open gap, not an oversight to paper over.
+- `GET /invites/{token}` (the public, pre-claim read endpoint from SDD §12.7) is not
+  implemented — only the authenticated claim endpoint.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-01 | M | Guest signs in with 6-digit SMS OTP | — | — | — |
+| FR-01 | M | Guest signs in with 6-digit SMS OTP | `src/auth/otp-service.ts`, `src/auth/routes.ts` | `test/otp-service.integration.test.ts`, `test/auth-routes.integration.test.ts` | Done |
 | FR-02 | M | First-time guest profile: name, gender, 18+, consent, profile selfie | — | — | — |
-| FR-03 | M | Residents and staff sign in with Google | — | — | — |
-| FR-04 | M | Resident phone OTP, room number, ID card photo, selfie, awaits verification | — | — | — |
+| FR-03 | M | Residents and staff sign in with Google | `src/auth/google-service.ts`, `src/auth/google.ts` | `test/google-service.integration.test.ts`, `test/auth-routes.integration.test.ts` | Done |
+| FR-04 | M | Resident phone OTP, room number, ID card photo, selfie, awaits verification | `src/auth/otp-service.ts` (`phone_verify` purpose only) | `test/otp-service.integration.test.ts` | WIP — phone verification only; room/photo/submit not built |
 | FR-05 | M | Warden sees pending residents, approves/rejects in one tap; ID card deleted on decision | — | — | — |
-| FR-06 | S | Warden invites office by email; super admin invites wardens; 48h expiry bound to email | — | — | — |
-| FR-07 | M | Warden deactivates staff / marks resident left; sessions end immediately | — | — | — |
+| FR-06 | S | Warden invites office by email; super admin invites wardens; 48h expiry bound to email | `src/auth/google-service.ts` (acceptance only) | `test/google-service.integration.test.ts` | WIP — invite acceptance only; invite creation not built |
+| FR-07 | M | Warden deactivates staff / marks resident left; sessions end immediately | `src/auth/principal-loader.ts` (`RevocationCache`), `src/auth/authenticate.ts` | `test/sessions.integration.test.ts`, `test/auth-routes.integration.test.ts` | WIP — session-end-within-30s consequence only; the deactivate/mark-left action itself not built |
 | FR-08 | S | Guest/resident edit name, retake profile photo | — | — | — |
 | FR-09 | S | Guest/resident request account deletion | — | — | — |
 
@@ -342,11 +407,11 @@ in-line rather than quietly matching whichever number was more convenient.
 | TC-SEC-02 | Guest requests a visit they aren't on | 404 | — | — |
 | TC-SEC-03 | Office lists charges | no phone or photo fields in JSON | — | — |
 | TC-SEC-04 | Warden of hostel X uses `X-Hostel-Id` of hostel Y | 403 | — | — |
-| TC-SEC-05 | Deactivated user's access token after 30s | `SESSION_REVOKED` | — | — |
-| TC-SEC-06 | Reused refresh token | 401 and whole session revoked | — | — |
+| TC-SEC-05 | Deactivated user's access token after 30s | `SESSION_REVOKED` | `test/sessions.integration.test.ts`, `test/auth-routes.integration.test.ts` | Done |
+| TC-SEC-06 | Reused refresh token | 401 and whole session revoked | `test/sessions.integration.test.ts` | Done |
 | TC-SEC-07 | `UPDATE haven.gate_events` as `haven_api` | permission error | `supabase/tests/004_api_role_and_rls.sql` | Done |
 | TC-SEC-08 | Audit row for a visit update | contains no `invited_phone`, `invited_name` | `supabase/tests/003_audit_pii_stripping.sql` | Done — the test exercises the shared `audit_row()` trigger via `haven.gates` (lat/lng) rather than a literal visit update, because no audit trigger is attached to `haven.users` and a *visit* update needs API-level `evaluateEntry`/state-machine code that doesn't exist yet to reach meaningfully; the strip-list (`invited_phone`, `invited_name` included) is the same function for every audited table, so this proves the mechanism TC-SEC-08 is about |
-| TC-SEC-09 | 4th OTP request in 10 min for one phone | `RATE_LIMITED` | — | — |
+| TC-SEC-09 | 4th OTP request in 10 min for one phone | `RATE_LIMITED` | `test/otp-service.integration.test.ts` | Done — rate limiting only; Turnstile gating (CLAUDE.md §4) not implemented, see §0e |
 | TC-SEC-10 | Upload a PNG with EXIF GPS | stored file has no EXIF | — | — |
 | TC-SEC-11 | Same photo bytes uploaded twice by one visitor | `PHOTO_REUSED` | — | — |
 
@@ -354,11 +419,11 @@ in-line rather than quietly matching whichever number was more convenient.
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
-| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 0 | 0 | 50 | 0 |
+| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 2 (FR-01, FR-03) | 3 (FR-04, FR-06, FR-07) | 45 | 0 |
 | NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
 | BR | 20 | 0 | 15 (BR-01..07, 09..11, 15..17, 19..20) | 5 (BR-08, 12, 13, 14, 18) | 0 |
 | E | 24 | 1 (E-19) | 0 | 23 | 0 |
-| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 18 (TC-RULE ×16, TC-SEC-07, TC-SEC-08) | 0 | 33 | 0 |
+| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 21 (TC-RULE ×16, TC-SEC-05, TC-SEC-06, TC-SEC-07, TC-SEC-08, TC-SEC-09) | 0 | 30 | 0 |
 
 Corrected during the rules-engine milestone: this table had silently gone stale after
 the API-foundation milestone set NFR-13 to WIP without updating the summary row —

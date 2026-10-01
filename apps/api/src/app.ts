@@ -5,10 +5,16 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 import { createAuthenticateHook } from './auth/authenticate.js';
+import { RevocationCache } from './auth/principal-loader.js';
+import { registerAuthRoutes } from './auth/routes.js';
+import type { GoogleIdTokenVerifier } from './auth/google.js';
+import { RealGoogleIdTokenVerifier } from './auth/google.js';
 import type { Env } from './config.js';
 import type { Database } from './db/index.js';
 import { pingDb } from './db/index.js';
 import { AppError, toErrorEnvelope } from './lib/errors.js';
+import type { Clock } from './lib/clock.js';
+import { SystemClock } from './lib/clock.js';
 import type { Logger } from './lib/logger.js';
 import { generateRequestId } from './lib/request-id.js';
 import { configureZodValidation, extractZodValidationIssues } from './lib/validation.js';
@@ -25,6 +31,14 @@ export interface BuildAppOptions {
    * test). Real callers never pass this — `server.ts` always uses the SDD default.
    */
   rateLimit?: { max: number; timeWindowMs: number };
+  /** Overridable so tests can use a `FakeClock`; real callers never pass this. */
+  clock?: Clock;
+  /**
+   * Overridable so tests can inject a `FakeGoogleIdTokenVerifier` instead of making a
+   * real network call to Google with real client credentials (see `auth/google.ts`).
+   * Real callers never pass this — it's built from `env.GOOGLE_CLIENT_IDS`.
+   */
+  googleVerifier?: GoogleIdTokenVerifier;
 }
 
 const BOOT_TIME = new Date();
@@ -70,6 +84,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const { env, logger, db } = options;
   const checkDb = options.checkDb ?? pingDb;
   const rateLimitConfig = options.rateLimit ?? DEFAULT_RATE_LIMIT;
+  const clock = options.clock ?? new SystemClock();
+  const googleVerifier =
+    options.googleVerifier ?? new RealGoogleIdTokenVerifier(env.GOOGLE_CLIENT_IDS);
+  const revocationCache = new RevocationCache(db, clock);
 
   const app = Fastify({
     // Cast: our pino instance (packages' own pino types) is runtime-compatible with
@@ -110,7 +128,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   // --- Authentication (SDD §8.2 step 2 of the pipeline) ---
-  app.addHook('onRequest', createAuthenticateHook({ jwtSecretBase64: env.JWT_SECRET }));
+  app.addHook(
+    'onRequest',
+    createAuthenticateHook({ jwtSecretBase64: env.JWT_SECRET, revocationCache }),
+  );
 
   app.setErrorHandler((err: FastifyError | AppError, request, reply) => {
     if (err instanceof AppError) {
@@ -184,11 +205,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     return { ok: true, db: true, bootTime: BOOT_TIME.toISOString() };
   });
 
-  // API versioning boundary (SDD §12): every business route a later milestone adds
-  // registers inside this prefix. Empty today — no feature module exists yet.
+  // API versioning boundary (SDD §12): every business route registers inside this
+  // prefix. The auth module is the first real feature module; visits/gate/admin follow
+  // in later milestones.
   await app.register(
-    async () => {
-      /* feature modules (auth, visits, gate, admin, ...) register their routes here, in M1+ */
+    async (v1) => {
+      await registerAuthRoutes(v1, { env, db, clock, googleVerifier });
     },
     { prefix: '/v1' },
   );
