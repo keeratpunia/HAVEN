@@ -24,6 +24,22 @@ export type VisitType = 'quick_drop' | 'day' | 'overnight_room' | 'guest_room';
 export type VisitOrigin = 'invite' | 'walk_in' | 'host_assisted' | 'overnight_request';
 export type Zone = 'gate' | 'visitors_room' | 'room' | 'guest_room';
 export type ActorType = 'user' | 'visitor' | 'gate_device' | 'system';
+export type VisitStatusDb =
+  | 'pending_host'
+  | 'pending_warden'
+  | 'approved'
+  | 'inside'
+  | 'completed'
+  | 'rejected'
+  | 'expired'
+  | 'cancelled';
+export type GateEventKind = 'entry' | 'exit' | 'entry_denied';
+export type ApproverRole = 'host' | 'warden';
+export type Decision = 'approved' | 'rejected';
+export type ChargeKind = 'overnight_room' | 'guest_room' | 'fine';
+export type ChargeStatus = 'pending' | 'confirmed' | 'paid' | 'waived';
+export type NotifChannel = 'push' | 'sms' | 'in_app';
+export type NotifStatus = 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
 
 interface HostelsTable {
   id: Generated<string>;
@@ -142,6 +158,20 @@ interface SessionsTable {
   revoke_reason: string | null;
 }
 
+interface BansTable {
+  id: Generated<string>;
+  visitor_id: string;
+  hostel_id: string | null;
+  reason: string;
+  starts_at: Generated<Date>;
+  ends_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  created_by: string;
+  created_at: Generated<Date>;
+  lifted_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  lifted_by: string | null;
+  lift_reason: string | null;
+}
+
 interface VisitsTable {
   id: Generated<string>;
   code: string;
@@ -152,7 +182,7 @@ interface VisitsTable {
   invited_phone: string | null;
   invited_gender: Gender | null;
   type: VisitType;
-  status: string;
+  status: VisitStatusDb;
   origin: VisitOrigin;
   zone: Zone;
   window_start: ColumnType<Date, string, string>;
@@ -160,10 +190,118 @@ interface VisitsTable {
   nights: Generated<number>;
   invite_token_hash: Buffer | null;
   rules_version: number;
+  location_unverified: Generated<boolean>;
+  exit_location_unverified: Generated<boolean>;
+  overstay_since: ColumnType<Date | null, string | null | undefined, string | null>;
+  overstay_escalated_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  host_confirmed_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  host_disputed_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  dispute_resolved_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  dispute_resolved_by: string | null;
+  first_entry_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  last_entry_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  last_exit_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  closed_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  close_reason: 'checked_out' | 'host_marked_left' | 'forced' | 'window_ended' | null;
+  cancel_reason: string | null;
   created_by_type: ActorType;
   created_by_id: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
+}
+
+interface ApprovalsTable {
+  id: Generated<string>;
+  visit_id: string;
+  approver_id: string;
+  approver_role: ApproverRole;
+  decision: Decision;
+  reason: string | null;
+  adjusted_window_end: ColumnType<Date | null, string | null | undefined, string | null>;
+  decided_at: Generated<Date>;
+}
+
+interface GatesTable {
+  id: Generated<string>;
+  hostel_id: string;
+  code: string;
+  name: Generated<string>;
+  lat: number | null;
+  lng: number | null;
+  radius_m: Generated<number>;
+  max_accuracy_m: Generated<number>;
+  secret_enc: Buffer;
+  secret_version: Generated<number>;
+  prev_secret_enc: Buffer | null;
+  secret_rotated_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  location_set_by: string | null;
+  location_set_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  is_active: Generated<boolean>;
+}
+
+interface GateEventsTable {
+  id: Generated<string>;
+  visit_id: string;
+  hostel_id: string;
+  gate_id: string;
+  scan_session_id: string | null;
+  kind: GateEventKind;
+  actor_type: ActorType;
+  actor_id: string | null;
+  photo_media_id: string | null;
+  location_verified: boolean;
+  distance_m: number | null;
+  accuracy_m: number | null;
+  rule_codes: Generated<string[]>;
+  at: Generated<Date>;
+}
+
+interface ChargesTable {
+  id: Generated<string>;
+  hostel_id: string;
+  resident_id: string;
+  visit_id: string | null;
+  kind: ChargeKind;
+  units: number | null;
+  unit_price_inr: number | null;
+  amount_inr: number;
+  description: string;
+  status: Generated<ChargeStatus>;
+  created_by: string | null;
+  created_at: Generated<Date>;
+  confirmed_by: string | null;
+  confirmed_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  paid_recorded_by: string | null;
+  paid_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  receipt_no: string | null;
+  waived_by: string | null;
+  waived_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  waive_reason: string | null;
+}
+
+interface NotificationsTable {
+  id: Generated<string>;
+  hostel_id: string | null;
+  recipient_type: 'user' | 'visitor' | 'phone';
+  recipient_id: string | null;
+  recipient_phone: string | null;
+  kind: string;
+  channel: NotifChannel;
+  visit_id: string | null;
+  title: string | null;
+  body: string;
+  data: Generated<Record<string, unknown>>;
+  sms_template_id: string | null;
+  status: Generated<NotifStatus>;
+  attempts: Generated<number>;
+  next_attempt_at: Generated<Date>;
+  cancel_if_opened: string | null;
+  dedupe_key: string | null;
+  provider_ref: string | null;
+  last_error: string | null;
+  sent_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  opened_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  created_at: Generated<Date>;
 }
 
 export interface Database {
@@ -174,7 +312,13 @@ export interface Database {
   'haven.staff_invites': StaffInvitesTable;
   'haven.residents': ResidentsTable;
   'haven.visitors': VisitorsTable;
+  'haven.bans': BansTable;
   'haven.otp_challenges': OtpChallengesTable;
   'haven.sessions': SessionsTable;
   'haven.visits': VisitsTable;
+  'haven.approvals': ApprovalsTable;
+  'haven.gates': GatesTable;
+  'haven.gate_events': GateEventsTable;
+  'haven.charges': ChargesTable;
+  'haven.notifications': NotificationsTable;
 }

@@ -7,6 +7,7 @@ import type { Kysely } from 'kysely';
 import { createAuthenticateHook } from './auth/authenticate.js';
 import { RevocationCache } from './auth/principal-loader.js';
 import { registerAuthRoutes } from './auth/routes.js';
+import { registerVisitPolicies } from './visits/policy.js';
 import type { GoogleIdTokenVerifier } from './auth/google.js';
 import { RealGoogleIdTokenVerifier } from './auth/google.js';
 import type { Env } from './config.js';
@@ -208,6 +209,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // API versioning boundary (SDD §12): every business route registers inside this
   // prefix. The auth module is the first real feature module; visits/gate/admin follow
   // in later milestones.
+  // The visits module has no HTTP routes yet (service + repository only, see
+  // docs/TRACEABILITY.md) — its authorize() policies still register at boot so the
+  // mechanism is ready the moment a route calls it, same as every other module.
+  registerVisitPolicies();
+
   await app.register(
     async (v1) => {
       await registerAuthRoutes(v1, { env, db, clock, googleVerifier });

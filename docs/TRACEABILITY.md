@@ -187,6 +187,104 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 - `GET /invites/{token}` (the public, pre-claim read endpoint from SDD §12.7) is not
   implemented — only the authenticated claim endpoint.
 
+## 0f. Visit domain and state machine milestone (2026-10-01)
+
+Implements the complete HAVEN visit state machine and visits service/repository per
+SDD §7 — exactly the 8 `visit_status` values and the 19 transitions in §7.1's table
+(4 creation rows + 15 update rows), no invented states. 95 new tests (270 exhaustive
+state-machine unit tests + 28 service-level integration tests + 7 dedicated
+concurrency-race tests), all against a real embedded Postgres (same infrastructure as
+the authentication milestone's `test/global-setup.ts`).
+
+What exists now:
+- `apps/api/src/visits/stateMachine.ts`: the single transition map SDD §7.1 names by
+  exact file path. `assertTransition(from, trigger)` is the one gate every service
+  mutation calls first; `apps/api/src/visits/stateMachine.test.ts` exhaustively checks
+  **every** `(from, trigger)` pair over all 9 possible `from` values (`'new'` + the 8
+  real statuses) × all 19 trigger names — not just the 19 listed rows, every
+  combination not listed is asserted to throw `INVALID_TRANSITION` (409).
+- `apps/api/src/visits/repository.ts`: the SDD §7.3 optimistic-concurrency pattern
+  (`UPDATE ... WHERE id = $id AND status = $expected RETURNING *`, zero rows →
+  `INVALID_TRANSITION` 409) as the *only* place `haven.visits.status` is written, plus
+  translating the `visits_one_inside_per_visitor` unique-constraint violation (BR-15)
+  into `409 ALREADY_INSIDE`.
+- `apps/api/src/visits/policy.ts`: real `authorize()` registrations for every one of
+  the 19 triggers (host-only, visitor-self-only, warden-only, or system-only resource
+  checks) — the visits module's first real permission matrix, not a placeholder.
+- `apps/api/src/visits/service.ts`: one function per trigger, each following the exact
+  sequence the task specified — validate state (`assertTransition`) → `authorize()` →
+  business rules (`evaluateCreate`/`evaluateEntry`/`evaluateExit` from
+  `packages/shared`, now genuinely called against real DB-loaded host/visitor/booking
+  data for the first time — closing the gap §0d flagged: "nothing calls it yet") →
+  atomic state change → gate event / notification / charge side effects named in SDD
+  §7.1's own table → return the updated row. Every mutation runs inside one `withTx`
+  transaction (SDD §7: "inside one database transaction that also writes the gate
+  event and audit row").
+- `apps/api/src/visits/sideEffects.ts`: gate-event, notification-outbox (insert-only,
+  CLAUDE.md §3.5 — nothing sends), and charge-lifecycle (pending → waived/confirmed)
+  helpers, called from the service per transition.
+- `apps/api/src/visits/context.ts`: loads real `HostState` (from `haven.residents`)
+  and ban status (from `haven.bans`) for the rules engine — no more hand-built fixture
+  contexts once past the test boundary.
+- **A real bug found by exhaustive-but-correct testing, not shipped**: an early draft
+  of `approveWalkIn` called `evaluateEntry` the same way `checkIn` does. Since a
+  walk-in never passes through `approved` (SDD §7.1 — it goes `pending_host ->
+  inside` directly), `evaluateEntry`'s own `VISIT_NOT_APPROVED` check (step 3) would
+  have denied *every* walk-in approval, unconditionally. Caught before this file was
+  updated to claim anything was "Done," by writing the walk-in integration tests and
+  watching them fail for the right reason. Fixed by not calling `evaluateEntry` from
+  `approveWalkIn` at all — see the function's own doc comment in `service.ts` for the
+  full reasoning, kept there specifically so this isn't reintroduced.
+
+**Concurrency — the task's explicit focus, SDD §7.3**: `apps/api/test/visits-
+concurrency.integration.test.ts` fires genuinely concurrent requests (`Promise.
+allSettled`, real separate DB connections from the same pg pool) against the same row
+or constraint, for every race the task named:
+- host approval vs. the 10-minute timeout — exactly one wins, loser gets
+  `409 INVALID_TRANSITION` (SDD §7.3's own worked example).
+- duplicate approval, duplicate check-in, duplicate check-out — each: exactly one
+  succeeds, the rest get `409`, and exactly one gate event is written (not zero, not
+  two) — proving the side effects are as atomic as the status column.
+- simultaneous conflicting actions (guest cancels while host approves).
+- two different visits trying to make the **same visitor** `inside` at once — the
+  `visits_one_inside_per_visitor` partial unique index (BR-15) catches it for real
+  under a live race; the loser gets `409 ALREADY_INSIDE`.
+- a 10-way concurrent check-in stress case (not just 2-way) on one visit: exactly 1
+  wins, 9 get `409`.
+
+**What this explicitly does NOT do, so no later reviewer mistakes it for more than it
+is (same discipline as §0, §0b, §0c, §0d, §0e above):**
+- **No HTTP routes.** The task explicitly scoped this milestone to "service and
+  repository... do not build UI yet" — nothing here is reachable over the network.
+  Every FR row this milestone touches in §1 below is marked WIP, never Done, for
+  exactly this reason.
+- **No scheduled jobs.** `expireWalkIn`, `expireApprovedVisit`,
+  `completeApprovedVisitWithoutReturn` are the *transitions* a cron job would call
+  (BR-12, part of BR-13/FR-71/FR-72); nothing calls them on a schedule.
+- **No gate/scan-session module.** Gate-involving triggers (`checkIn`, `checkOut`,
+  `approveWalkIn`, `createHostAssistedEntry`) accept a plain `{gateId,
+  locationVerified, distanceM?, accuracyM?, photoMediaId?}` struct the future gate
+  module would supply from a real scan session — there is no QR/token verification,
+  geofence check, or mock-location detection here.
+- **Window derivation is the caller's job.** `createWalkIn`/`createOvernightRequest`
+  take `windowStart`/`windowEnd` directly rather than deriving them from "now" /
+  `arrivalDate`+`departureDate` per the SDD's own formulas (§12.6) — that derivation,
+  and the `POST /v1/visits/preview` endpoint that would show it to a host before
+  submission (SDD F6 step 2), are route-layer work, not built here.
+- **Dispute handling (SDD F9, FR-42/FR-43) is not implemented at all** — "Not my
+  guest" doesn't change `visits.status` (it stays `inside`), so it isn't one of SDD
+  §7.1's 19 transitions and was correctly out of scope for a state-machine milestone;
+  it belongs with the warden-dispute-resolution module, not here.
+- **Host-assisted entry does not dedupe visitors** across repeated host-assisted
+  visits for the same phoneless guest (SDD F4: "matched by host + name") — every call
+  creates a new `haven.visitors` row. A documented simplification, not a correctness
+  bug for anything this milestone tests.
+- **Charge "recalculation"** (SDD §7.1's wording for `approved -> completed` /
+  `inside -> completed`) is implemented as "confirm the charge as originally priced,"
+  not as re-deriving the amount from actual nights stayed — the SDD doesn't specify a
+  different formula, and no requirement here tests a stay that was shorter/longer
+  than booked.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -207,12 +305,12 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-10 | M | Verified host creates pre-invite (name, phone, type, date, window) | — | — | — |
+| FR-10 | M | Verified host creates pre-invite (name, phone, type, date, window) | `apps/api/src/visits/service.ts`'s `createPreInvite` | `apps/api/test/visits-service.integration.test.ts` | WIP — the service call (validate, create `approved` visit, issue invite token) is implemented and tested against a real DB; no HTTP route, so a host cannot actually do this yet |
 | FR-11 | M | Host shares invite link via native share sheet | — | — | — |
-| FR-12 | M | Opening invite link requires OTP to invited number; other numbers refused | — | — | — |
-| FR-13 | M | Host edits window / cancels visit until guest checks in | — | — | — |
-| FR-14 | M | Host requests overnight/guest-room with quota + charge preview | — | — | — |
-| FR-15 | M | Warden approves/rejects overnight/guest-room requests; approval creates pending charge | — | — | — |
+| FR-12 | M | Opening invite link requires OTP to invited number; other numbers refused | `apps/api/src/auth/invites.ts`'s `claimInvite` (built in the authentication milestone) | `apps/api/test/invites.integration.test.ts` | WIP — phone-matching claim logic exists and is tested; still no route, and "opening invite link" (the public pre-claim read) isn't built either, see §0e |
+| FR-13 | M | Host edits window / cancels visit until guest checks in | `cancelApprovedVisit`, `cancelOvernightRequest`, `cancelWalkIn` (`visits/service.ts`) | `visits-service.integration.test.ts` | WIP — cancel exists for every pre-entry state; *editing* the window is not implemented at all; no route |
+| FR-14 | M | Host requests overnight/guest-room with quota + charge preview | `createOvernightRequest` (`visits/service.ts`) | `visits-service.integration.test.ts` (incl. `QUOTA_EXCEEDED`) | WIP — the request itself, with real quota enforcement, is implemented; the `POST /v1/visits/preview` charge/quota *preview* endpoint (SDD F6 step 2) is not built |
+| FR-15 | M | Warden approves/rejects overnight/guest-room requests; approval creates pending charge | `approveOvernight`, `rejectOvernight` (`visits/service.ts`) | `visits-service.integration.test.ts` (incl. pending-charge assertion) | WIP — service logic implemented and tested against a real DB, including the pending charge; no HTTP route for the warden to actually act through |
 | FR-16 | M | Host sees all visits: upcoming, inside, history, status, charges | — | — | — |
 
 ### 5.3 Gate
@@ -222,12 +320,12 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 | FR-20 | M | Gate device shows rotating QR + countdown + hostel name + instruction | — | — | — |
 | FR-21 | M | Scanning QR opens guest web app; requests location, validates token + GPS first | — | — | — |
 | FR-22 | S | Guest app offers an in-app scanner on home screen | — | — | — |
-| FR-23 | M | App offers Check in / Check out / Request entry based on visit state | — | — | — |
+| FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `checkIn`, `checkOut` (`visits/service.ts`) implement the underlying state transitions | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts` | WIP — the transitions the app would call exist and are tested, including concurrency; no gate/scan-session route or UI |
 | FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | — | — | — |
-| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | — | — | — |
-| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | — | — | — |
+| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) implements the submit step only | `visits-service.integration.test.ts` | WIP — room search / resident picker / live photo capture are all UI/gate-module work not built here; only the resulting `pending_host` visit creation (given a chosen host) exists |
+| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `approveWalkIn` (`visits/service.ts`) is the server-side half (status flips to `inside`) | `visits-service.integration.test.ts` | WIP — no live/polling/SSE status screen exists; only the state change it would observe |
 | FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | — | — | — |
-| FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | — | — | — |
+| FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `createHostAssistedEntry` (`visits/service.ts`) covers "creates a visitor + checks in"; checkout reuses `checkOut` | `visits-service.integration.test.ts` | WIP — the two state transitions are implemented and tested (including straight-to-`inside` creation); QR scanning, GPS, and live photo capture are gate-module/UI work not built here |
 | FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | — | — | — |
 | FR-30 | M | Gate device keeps screen awake; recovers automatically after network loss | — | — | — |
 
@@ -240,7 +338,7 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 | FR-42 | M | Host push for every check-in with photo compare; Yes/Not my guest (30 min window) | — | — | — |
 | FR-43 | M | "Not my guest" disputes the visit; alerts warden immediately (push + SMS) | — | — | — |
 | FR-44 | M | Host push on guest check-out and on guest overstay | — | — | — |
-| FR-45 | M | Host can mark "My guest has left"; logged and flagged to warden | — | — | — |
+| FR-45 | M | Host can mark "My guest has left"; logged and flagged to warden | `hostMarksGuestLeft` (`apps/api/src/visits/service.ts`) | `apps/api/test/visits-service.integration.test.ts` | WIP — the transition (`inside -> completed`, `close_reason = host_marked_left`) is implemented and tested; "flagged to warden" (a dashboard indicator) is not built — no route, no dashboard |
 
 ### 5.5 Warden and office
 
@@ -249,7 +347,7 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 | FR-50 | M | Dashboard: live counts/lists, updates within 5s | — | — | — |
 | FR-51 | M | Emergency roll call: everyone inside, printable/exportable | — | — | — |
 | FR-52 | M | Visit detail: full timeline with photos, GPS distance, notifications, flags | — | — | — |
-| FR-53 | M | Warden force check-out with reason | — | — | — |
+| FR-53 | M | Warden force check-out with reason | `wardenForcesCheckout` (`apps/api/src/visits/service.ts`) | `apps/api/test/visits-service.integration.test.ts` (incl. "reason required" and the non-warden authorization boundary) | WIP — the transition (`inside -> completed`, `close_reason = forced`, reason required) is implemented and tested; no HTTP route |
 | FR-54 | M | Warden bans guest (hostel/all, timed/permanent); suspends resident hosting | — | — | — |
 | FR-55 | S | Warden edits rules config via form; each save is a new version | — | — | — |
 | FR-56 | M | Warden pairs/revokes gate devices; sets gate location by 5-reading average | — | — | — |
@@ -262,11 +360,11 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-70 | M | Walk-in requests expire after 10 min; both parties told | — | — | — |
-| FR-71 | M | Approved-never-entered visits expire at window_end | — | — | — |
+| FR-70 | M | Walk-in requests expire after 10 min; both parties told | `expireWalkIn` (`apps/api/src/visits/service.ts`) | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts` | WIP — the transition itself (callable by a system/`null` principal, per SDD §7.1's "System" actor) is implemented and tested, including its race against host approval; no scheduled job calls it yet, and no notification is sent ("both parties told" has no SDD-named N-code to send) |
+| FR-71 | M | Approved-never-entered visits expire at window_end | `expireApprovedVisit` (`apps/api/src/visits/service.ts`) | `visits-service.integration.test.ts` | WIP — the transition and charge-waiving side effect are implemented and tested; no scheduled job calls it yet |
 | FR-72 | M | Overstay detection every 5 min; alerts host/guest; escalates to warden after 30 min | — | — | — |
 | FR-73 | M | Night sweep at 22:00 lists day/quick guests still inside to the warden | — | — | — |
-| FR-74 | M | Every state change and admin action written to append-only audit log | `supabase/migrations/20261001000001_init.sql` — `audit_row()` + 9 `t_audit_*` triggers on every table SDD §11.6 lists (visits, residents, role_assignments, bans, charges, gates, gate_devices, hostel_rules, staff_invites), plus `forbid_mutation()` making `gate_events`/`audit_log`/`approvals`/`hostel_rules` append-only | `supabase/tests/002_constraints_and_triggers.sql`, `supabase/tests/003_audit_pii_stripping.sql` | WIP — DB-level mechanism fires and is tested; still needs the API to set `haven.actor_type`/`haven.actor_id`/`haven.request_id` per transaction (SDD §11.6) before this is a complete, truthful audit trail |
+| FR-74 | M | Every state change and admin action written to append-only audit log | `supabase/migrations/20261001000001_init.sql` — `audit_row()` + 9 `t_audit_*` triggers on every table SDD §11.6 lists (visits, residents, role_assignments, bans, charges, gates, gate_devices, hostel_rules, staff_invites), plus `forbid_mutation()` making `gate_events`/`audit_log`/`approvals`/`hostel_rules` append-only. **Every `haven.visits` state change now sets real actor context** — every `visits/service.ts` mutation runs inside `lib/tx.ts`'s `withTx`, which sets `haven.actor_type`/`haven.actor_id`/`haven.request_id` from the real `Principal` (or `system` for job-triggered transitions) before the UPDATE/INSERT, so `audit_row()` attributes correctly for visits specifically | `supabase/tests/002_constraints_and_triggers.sql`, `supabase/tests/003_audit_pii_stripping.sql` | WIP — the mechanism is correct and exercised for every visits transition; other SDD §11.6 tables (residents, bans, charges, gate devices, ...) still have no API caller setting actor context yet, so this remains incomplete hostel-wide |
 | FR-75 | S | Personal data purged per retention schedule (§16.5) | — | — | — |
 
 ## 2. Non-functional requirements (NFR-xx) — SDD §17.1
@@ -292,26 +390,26 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 
 | ID | Rule (summary) | Enforced at | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| BR-01 | No admission without verified, non-suspended host approval | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_NOT_VERIFIED`/`HOST_SUSPENDED` checks, `packages/shared/src/rules/evaluate-create.ts`, `evaluate-entry.ts` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` (incl. TC-RULE-13/14) | WIP — rule logic implemented and tested; no API route calls it yet |
-| BR-02 | Day/quick-drop guests must check in before 20:00 | Entry | `evaluateEntry` — `AFTER_ENTRY_CUTOFF` | `evaluate-entry.test.ts` (worked example + exact-boundary tests) | WIP |
-| BR-03 | No guest may check in at/after 22:00 | Entry | `evaluateEntry` — `AFTER_HARD_CUTOFF` | `evaluate-entry.test.ts` (worked example + exact-boundary tests) | WIP |
-| BR-04 | Day visit windows between visiting_start and day_visit_latest_end, one date | Create | `evaluateCreate` — `WINDOW_INVALID` (crosses-dates + visiting-hours checks) | `evaluate-create.test.ts` | WIP |
-| BR-05 | Overnight in room: max 3 nights/host/calendar month (IST) | Create | `evaluateCreate` — `QUOTA_EXCEEDED`, using `nightsBetween`/`quotaUsed` | `evaluate-create.test.ts` (worked examples incl. Oct/Nov boundary), `nights.test.ts` | WIP |
-| BR-06 | Overnight in room: at most one overnight guest per host at a time | Create | `evaluateCreate` — `OVERNIGHT_OVERLAP` | `evaluate-create.test.ts` (TC-RULE-15 + boundary tests) | WIP |
-| BR-07 | Opposite/undisclosed gender → visitors_room zone, no overnight/guest_room | Create + display | `evaluateCreate` — `TYPE_NOT_ALLOWED_FOR_GENDER` + `computeZone`, `packages/shared/src/rules/zone.ts` | `zone.test.ts`, `evaluate-create.test.ts` | WIP |
-| BR-08 | Overnight ₹50/night, guest room ₹150/night; pending charge on warden approval. **₹150 is an SDD working default awaiting warden confirmation, not yet a final decision** — see `docs/DECISIONS.md` Q8 note | Approval | — | — | — (charge calculation is explicitly not one of the SDD §4.4's 5 rules-engine functions — see `docs/TRACEABILITY.md` §0d) |
-| BR-09 | Banned guests cannot be invited, request entry, or check in | Create + entry | `evaluateCreate`/`evaluateEntry` — `VISITOR_BANNED` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP |
-| BR-10 | Suspended hosts cannot create/approve; future visits cancelled on suspension start | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_SUSPENDED` check only | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — the suspension *check* is implemented; "future visits cancelled" is a separate side effect no code implements yet |
-| BR-11 | Host max `max_active_day_guests` (default 3) day/quick guests inside at once | Create + approval | `evaluateCreate` — `HOST_DAY_LIMIT` (deny, today only); `evaluateEntry` — `HOST_DAY_LIMIT` (flag) | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP |
-| BR-12 | Walk-in expires if host doesn't decide within 10 min | Job | — | — | — |
+| BR-01 | No admission without verified, non-suspended host approval | Create + entry | `evaluateCreate`/`evaluateEntry`, now called for real by `apps/api/src/visits/service.ts` (`createPreInvite`, `createWalkIn`, `createOvernightRequest`, `checkIn`, ...) | `evaluate-create.test.ts`, `evaluate-entry.test.ts` (incl. TC-RULE-13/14), `apps/api/test/visits-service.integration.test.ts` ("HOST_NOT_VERIFIED") | WIP — called by the visits service against a real DB in every creation/entry trigger; still no HTTP route |
+| BR-02 | Day/quick-drop guests must check in before 20:00 | Entry | `evaluateEntry` — `AFTER_ENTRY_CUTOFF`, called by `visits/service.ts`'s `checkIn` | `evaluate-entry.test.ts` (worked example + exact-boundary tests) | WIP — same as BR-01 |
+| BR-03 | No guest may check in at/after 22:00 | Entry | `evaluateEntry` — `AFTER_HARD_CUTOFF`, called by `visits/service.ts`'s `checkIn` | `evaluate-entry.test.ts` (worked example + exact-boundary tests) | WIP — same as BR-01 |
+| BR-04 | Day visit windows between visiting_start and day_visit_latest_end, one date | Create | `evaluateCreate` — `WINDOW_INVALID`, called by `visits/service.ts`'s creation triggers | `evaluate-create.test.ts`, `visits-service.integration.test.ts` ("WINDOW_INVALID") | WIP — same as BR-01 |
+| BR-05 | Overnight in room: max 3 nights/host/calendar month (IST) | Create | `evaluateCreate` — `QUOTA_EXCEEDED`, using `nightsBetween`/`quotaUsed`, fed real existing-booking data by `visits/repository.ts`'s `findActiveOvernightBookings` | `evaluate-create.test.ts` (worked examples incl. Oct/Nov boundary), `nights.test.ts`, `visits-service.integration.test.ts` ("QUOTA_EXCEEDED") | WIP — same as BR-01 |
+| BR-06 | Overnight in room: at most one overnight guest per host at a time | Create | `evaluateCreate` — `OVERNIGHT_OVERLAP` | `evaluate-create.test.ts` (TC-RULE-15 + boundary tests) | WIP — now called by `createOvernightRequest`; no HTTP route |
+| BR-07 | Opposite/undisclosed gender → visitors_room zone, no overnight/guest_room | Create + display | `evaluateCreate` — `TYPE_NOT_ALLOWED_FOR_GENDER` + `computeZone`, result persisted as `visits.zone` by `visits/repository.ts`'s `insertVisit` | `zone.test.ts`, `evaluate-create.test.ts` | WIP — same as BR-01 |
+| BR-08 | Overnight ₹50/night, guest room ₹150/night; pending charge on warden approval. **₹150 is an SDD working default awaiting warden confirmation, not yet a final decision** — see `docs/DECISIONS.md` Q8 note | Approval | `apps/api/src/visits/sideEffects.ts` (`createPendingCharge`/`waiveChargeForVisit`/`confirmChargeForVisit`), called by `visits/service.ts`'s `approveOvernight`/`cancelApprovedVisit`/`checkOut`/etc. | `visits-service.integration.test.ts` ("pending charge created", "charge is waived", "charge confirmed") | WIP — charge *lifecycle* (create pending / waive / confirm) now exists and is tested end to end at the service layer; this is still not one of SDD §4.4's 5 rules-engine functions, it's plain service code, and there is no warden-facing route yet |
+| BR-09 | Banned guests cannot be invited, request entry, or check in | Create + entry | `evaluateCreate`/`evaluateEntry` — `VISITOR_BANNED`, fed by `visits/context.ts`'s `isVisitorBanned` against `haven.bans` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — same as BR-01 |
+| BR-10 | Suspended hosts cannot create/approve; future visits cancelled on suspension start | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_SUSPENDED` check, fed by `visits/context.ts`'s `loadHostState` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — the suspension *check* is wired to real DB data now; "future visits cancelled" is a separate side effect no code implements yet |
+| BR-11 | Host max `max_active_day_guests` (default 3) day/quick guests inside at once | Create + approval | `evaluateCreate` — `HOST_DAY_LIMIT` (deny, today only); `evaluateEntry` — `HOST_DAY_LIMIT` (flag); counted for real by `visits/repository.ts`'s `countHostActiveDayGuests` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — same as BR-01 |
+| BR-12 | Walk-in expires if host doesn't decide within 10 min | Job | The *transition itself* (`pending_host -> expired`, trigger `walk_in_timeout`) exists as `apps/api/src/visits/service.ts`'s `expireWalkIn` | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts` ("host approval vs. 10-minute timeout") | WIP — the state transition a job would call is implemented and tested, including its race against approval; no scheduled job calls it yet |
 | BR-13 | Overstay when inside past `window_end + 15 min` | Job | — | — | — (the *job* that flags overstay is unrelated to this milestone; `evaluateExit`'s `LATE_EXIT` flag is a distinct, SDD-explicit check at the moment of exit — see TC-RULE-16 below) |
 | BR-14 | At 22:00, every inside day/quick guest listed to warden | Job | — | — | — |
-| BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | `supabase/migrations/20261001000001_init.sql` (`visits_one_inside_per_visitor`) **and now also** `evaluateEntry` — `ALREADY_INSIDE`, `packages/shared/src/rules/evaluate-entry.ts` | `supabase/tests/002_constraints_and_triggers.sql`, `evaluate-entry.test.ts` | WIP — two independent layers now implement this (DB constraint + rules-engine check); still needs the API to wire both into the actual check-in handler |
-| BR-16 | Pre-invites ≤7 days ahead; overnight requests ≤30 days ahead | Create | `evaluateCreate` — `TOO_FAR_AHEAD` | `evaluate-create.test.ts` (exact day-count boundaries for both limits) | WIP |
-| BR-17 | Check-out never refused for rule reasons; failed GPS on exit allowed but flagged | Exit | `evaluateExit` — never returns `deny`; `LOCATION_UNVERIFIED` flag, `packages/shared/src/rules/evaluate-exit.ts` | `evaluate-exit.test.ts` | WIP |
+| BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | `supabase/migrations/20261001000001_init.sql` (`visits_one_inside_per_visitor`) **and** `evaluateEntry`'s `ALREADY_INSIDE` check, **both now wired into** `apps/api/src/visits/repository.ts` (catches the constraint violation, maps to `409 ALREADY_INSIDE`) and `visits/service.ts`'s `checkIn`/`approveWalkIn` | `supabase/tests/002_constraints_and_triggers.sql`, `evaluate-entry.test.ts`, `visits-concurrency.integration.test.ts` ("two visits attempting to make the same visitor inside at once") — the last one races two real concurrent `checkIn` calls against the real constraint, not a mock | Done — both layers are now wired into the real check-in path and proven under an actual concurrent-request race, not just unit-tested in isolation |
+| BR-16 | Pre-invites ≤7 days ahead; overnight requests ≤30 days ahead | Create | `evaluateCreate` — `TOO_FAR_AHEAD` | `evaluate-create.test.ts` (exact day-count boundaries for both limits) | WIP — now called by the visits service; no HTTP route |
+| BR-17 | Check-out never refused for rule reasons; failed GPS on exit allowed but flagged | Exit | `evaluateExit` — never returns `deny`; `LOCATION_UNVERIFIED` flag, called by `visits/service.ts`'s `checkOut` | `evaluate-exit.test.ts`, `visits-service.integration.test.ts` | WIP — same as BR-01 |
 | BR-18 | Warden manual fine, minimum ₹400 for unregistered guest | Warden action | — | — | — |
-| BR-19 | Overnight window: visiting_start on arrival date to 22:00; checkout by overnight_checkout_time | Create + entry | `evaluateEntry`'s `AFTER_HARD_CUTOFF`/`TOO_EARLY`/`WINDOW_ENDED` correctly gate an overnight visit *given* a correctly-derived `windowStart`/`windowEnd` | `evaluate-entry.test.ts` (overnight worked examples) | WIP — the engine honours the window; deriving `windowStart`/`windowEnd` from `arrivalDate`/`departureDate` per this BR's formula is API-layer work (SDD §12.6) not yet built |
-| BR-20 | Guest may arrive up to 30 min before window_start | Entry | `evaluateEntry` — `TOO_EARLY`, `packages/shared/src/rules/evaluate-entry.ts` | `evaluate-entry.test.ts` | WIP — see `docs/DECISIONS.md` DEC-006 for a documented SDD contradiction between this BR's "30 min" and the §4.6 worked example's literal clock digits, resolved in favour of the 30-minute rule |
+| BR-19 | Overnight window: visiting_start on arrival date to 22:00; checkout by overnight_checkout_time | Create + entry | `evaluateEntry`'s `AFTER_HARD_CUTOFF`/`TOO_EARLY`/`WINDOW_ENDED` correctly gate an overnight visit *given* a correctly-derived `windowStart`/`windowEnd` | `evaluate-entry.test.ts` (overnight worked examples), `visits-service.integration.test.ts` (overnight check-in/out) | WIP — the engine honours the window given one; `createOvernightRequest`'s caller still supplies `windowStart`/`windowEnd` directly rather than deriving them from `arrivalDate`/`departureDate` per this BR's formula (SDD §12.6) — that derivation is still API-layer/route work, not yet built |
+| BR-20 | Guest may arrive up to 30 min before window_start | Entry | `evaluateEntry` — `TOO_EARLY`, called by `visits/service.ts`'s `checkIn` | `evaluate-entry.test.ts`, `visits-service.integration.test.ts` ("TOO_EARLY check-in") | WIP — see `docs/DECISIONS.md` DEC-006 for a documented SDD contradiction between this BR's "30 min" and the §4.6 worked example's literal clock digits, resolved in favour of the 30-minute rule |
 
 ## 4. Edge cases (E-xx) — SDD §17.3
 
@@ -419,9 +517,9 @@ is (same discipline as §0, §0b, §0c, §0d above):**
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
-| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 2 (FR-01, FR-03) | 3 (FR-04, FR-06, FR-07) | 45 | 0 |
+| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 2 (FR-01, FR-03) | 17 (FR-04, FR-06, FR-07, FR-10, FR-12, FR-13, FR-14, FR-15, FR-23, FR-25, FR-26, FR-28, FR-45, FR-53, FR-70, FR-71, FR-74) | 31 | 0 |
 | NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
-| BR | 20 | 0 | 15 (BR-01..07, 09..11, 15..17, 19..20) | 5 (BR-08, 12, 13, 14, 18) | 0 |
+| BR | 20 | 1 (BR-15) | 16 (BR-01..12, 16, 17, 19, 20) | 3 (BR-13, 14, 18) | 0 |
 | E | 24 | 1 (E-19) | 0 | 23 | 0 |
 | TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 21 (TC-RULE ×16, TC-SEC-05, TC-SEC-06, TC-SEC-07, TC-SEC-08, TC-SEC-09) | 0 | 30 | 0 |
 

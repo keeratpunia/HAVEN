@@ -552,6 +552,68 @@ Source for all of Part 1: SDD §2.7.
   are implementation detail the SDD doesn't specify this precisely, and item 5 is a
   bug in this codebase, not the SDD.
 
+### DEC-008 — Visit domain/state machine milestone: a real `evaluateEntry` misuse caught by testing, and five scope boundaries
+
+- **Date:** 2026-10-01
+- **Context:** Implementing the complete SDD §7 visit state machine and visits
+  service/repository — exactly the 8 `visit_status` values and 19 transitions in
+  §7.1's table, service + repository only, no HTTP routes (per the task's own scope).
+- **Findings / decisions:**
+  1. **Genuine bug, caught before being shipped, not an SDD issue**: an early draft of
+     `approveWalkIn` (`pending_host -> inside`) called `evaluateEntry` the same way
+     `checkIn` (`approved -> inside`) does. `evaluateEntry`'s step 3 denies with
+     `VISIT_NOT_APPROVED` whenever `visitStatus !== 'approved'` — but a walk-in never
+     passes through `approved` at all (SDD §7.1's own table: `pending_host -> inside`
+     directly). Calling it from `approveWalkIn` would have denied *every* walk-in
+     approval, unconditionally. Found by writing the walk-in integration tests in
+     `apps/api/test/visits-service.integration.test.ts` and watching the "host
+     approves" test fail for exactly this reason, before this file or
+     `docs/TRACEABILITY.md` claimed anything was working. **Decision**: `approveWalkIn`
+     no longer calls `evaluateEntry`; it re-checks only the two conditions that still
+     apply (visitor banned, visitor already inside elsewhere) directly. The function's
+     own doc comment in `apps/api/src/visits/service.ts` explains why, specifically so
+     a future refactor doesn't reintroduce the call by analogy with `checkIn`.
+  2. **No HTTP routes, no scheduled jobs, no gate/scan-session module** — all
+     explicitly out of scope per the task ("Then implement the visits service and
+     repository. Do not build UI yet."). System-triggered transitions
+     (`expireWalkIn`, `expireApprovedVisit`, `completeApprovedVisitWithoutReturn`) are
+     implemented as directly-callable functions a future cron job would invoke, not
+     wired to any schedule. Gate-involving transitions accept a plain
+     `{gateId, locationVerified, ...}` struct standing in for what a real scan session
+     would supply — no QR/token verification, geofence check, or mock-location
+     detection exists yet.
+  3. **Window derivation (`arrivalDate`/`departureDate` → `windowStart`/`windowEnd`,
+     SDD §12.6) is the caller's responsibility, not the service's.** `createWalkIn`/
+     `createOvernightRequest` take already-computed `windowStart`/`windowEnd`
+     directly. The SDD's `POST /v1/visits/preview` endpoint (F6 step 2, showing a host
+     nights/charge/quota before they submit) is route-layer work for a later
+     milestone; this one only validates whatever window it's given.
+  4. **Dispute handling (SDD F9, FR-42/FR-43, "Not my guest") is entirely out of
+     scope**: it doesn't change `visits.status` (the SDD is explicit — "status stays
+     `inside`"), so it is not one of §7.1's 19 transitions and has no place in a
+     state-machine milestone. `host_disputed_at`/`dispute_resolved_at` columns already
+     exist in the schema (DB-foundation milestone) but nothing here writes them.
+  5. **Host-assisted entry (SDD F4) does not dedupe visitors** — "such visitors are
+     matched by host + name" is the SDD's stated matching rule, but implementing that
+     match (fuzzy enough to catch the same guest visiting twice, strict enough not to
+     merge two different guests) is a judgment call beyond what this milestone's scope
+     warrants; every `createHostAssistedEntry` call creates a new `haven.visitors`
+     row. Documented as a simplification, not silently assumed.
+  6. **"Charge recalculated"/"charge finalised" (SDD §7.1's wording for the
+     `approved -> completed` and `inside -> completed` transitions) is implemented as
+     confirming the charge at its original pending amount**, not re-deriving it from
+     actual nights stayed — the SDD states the charge is created once, at warden
+     approval time (BR-08), and never specifies a different recalculation formula for
+     a stay that ends early or late. A future milestone implementing partial-stay
+     billing should revisit `apps/api/src/visits/sideEffects.ts`'s
+     `confirmChargeForVisit`.
+- **Why:** item 1 is a correctness bug that would have silently broken every walk-in
+  approval if shipped — recorded per CLAUDE.md §1.3 exactly because it was close to
+  shipping before the tests caught it. Items 2–6 are scope boundaries explicit in the
+  task's own instructions or left unspecified by the SDD at this level of detail.
+- **SDD updated?** No — item 1 was this codebase's bug, not the SDD's; items 2–6 don't
+  contradict the SDD, they just haven't been built yet.
+
 Template for a new entry:
 
 ```markdown

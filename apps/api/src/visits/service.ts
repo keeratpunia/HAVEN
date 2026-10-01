@@ -1,0 +1,1102 @@
+import type { Kysely, Transaction } from 'kysely';
+import {
+  evaluateCreate,
+  evaluateEntry,
+  evaluateExit,
+  type CreateContext,
+  type EntryContext,
+  type ExitContext,
+  type Gender as RuleGender,
+  type RuleResult,
+  type RulesConfig,
+  type VisitType as RuleVisitType,
+} from '@haven/shared';
+import type { Database } from '../db/index.js';
+import type { Gender, VisitType, Zone } from '../db/types.js';
+import { AppError } from '../lib/errors.js';
+import type { Clock } from '../lib/clock.js';
+import { generateVisitCode } from '../lib/ids.js';
+import { randomSecret, sha256 } from '../lib/crypto.js';
+import { withTx } from '../lib/tx.js';
+import type { Principal } from '../auth/principal.js';
+import { authorize } from '../auth/policy.js';
+import type { VisitActorResource } from './policy.js';
+import { assertTransition, type VisitTrigger } from './stateMachine.js';
+import {
+  countHostActiveDayGuests,
+  findActiveOvernightBookings,
+  findVisitById,
+  insertVisit,
+  isVisitorInsideElsewhere,
+  updateVisitStatus,
+  type VisitRow,
+} from './repository.js';
+import { loadHostState, isVisitorBanned } from './context.js';
+import {
+  confirmChargeForVisit,
+  createPendingCharge,
+  insertGateEvent,
+  insertNotification,
+  waiveChargeForVisit,
+} from './sideEffects.js';
+
+/**
+ * The visits service: one function per SDD §7.1 trigger, each following the exact
+ * sequence the task specifies — (1) validate current state via `stateMachine.ts`'s
+ * `assertTransition`, (2) `authorize()`, (3) business rules via the shared rules
+ * engine, (4) the atomic optimistic-concurrency state change
+ * (`repository.updateVisitStatus`/`insertVisit`), (5) audit (automatic — the
+ * `audit_row()` trigger reads the actor context `withTx` sets), (6) gate events where
+ * SDD §7.1 names one, (7) notifications where SDD §7.1 names one, (8) returning the
+ * updated row. Every mutation runs inside `withTx` so 4-7 are one transaction (SDD §7:
+ * "inside one database transaction that also writes the gate event and audit row").
+ */
+
+export interface VisitServiceDeps {
+  db: Kysely<Database>;
+  clock: Clock;
+  rulesConfig: RulesConfig;
+  rulesVersion: number;
+}
+
+function toCreateContext(
+  deps: VisitServiceDeps,
+  params: {
+    type: VisitType;
+    hostelGender: 'male' | 'female';
+    host: Awaited<ReturnType<typeof loadHostState>>;
+    visitorBanned: boolean;
+    guestGender: Gender | null;
+    windowStart: Date;
+    windowEnd: Date;
+    arrivalDate?: string;
+    departureDate?: string;
+    existingOvernightBookings: { arrivalDate: string; departureDate: string }[];
+    hostActiveDayGuestCount: number;
+  },
+): CreateContext {
+  return {
+    now: deps.clock.now(),
+    type: params.type as RuleVisitType,
+    hostelGender: params.hostelGender,
+    host: params.host,
+    visitorBanned: params.visitorBanned,
+    guestGender: params.guestGender as RuleGender | null,
+    windowStart: params.windowStart,
+    windowEnd: params.windowEnd,
+    arrivalDate: params.arrivalDate,
+    departureDate: params.departureDate,
+    existingOvernightBookings: params.existingOvernightBookings,
+    hostActiveDayGuestCount: params.hostActiveDayGuestCount,
+  };
+}
+
+/** SDD §12.2: `ALREADY_INSIDE` is its own 409 line; every other rules-engine deny is 422. */
+function throwIfDenied(result: RuleResult): void {
+  if (result.decision !== 'deny') return;
+  const code = result.codes[0];
+  if (!code) throw new AppError('INTERNAL', 500, 'Rules engine denied with no code.');
+  if (code === 'ALREADY_INSIDE') {
+    throw new AppError('ALREADY_INSIDE', 409, 'This guest is already checked in to another visit.');
+  }
+  throw new AppError(code, 422, `Not allowed: ${code}.`, { codes: result.codes });
+}
+
+function resourceFor(
+  row: Pick<VisitRow, 'hostel_id' | 'host_id' | 'visitor_id'>,
+  systemTriggered = false,
+): VisitActorResource {
+  return {
+    hostelId: row.hostel_id,
+    hostUserId: row.host_id,
+    visitorId: row.visitor_id,
+    systemTriggered,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Creation triggers: (new) -> X
+// ---------------------------------------------------------------------------
+
+export interface CreatePreInviteParams {
+  principal: Principal | null;
+  requestId: string;
+  hostUserId: string;
+  hostelId: string;
+  hostelGender: 'male' | 'female';
+  type: 'day' | 'quick_drop';
+  invitedName: string;
+  invitedPhone: string | null;
+  invitedGender: Gender | null;
+  windowStart: Date;
+  windowEnd: Date;
+}
+
+/** (new) -> approved, trigger `pre_invite_created` (SDD §7.1 row 1). */
+export async function createPreInvite(
+  deps: VisitServiceDeps,
+  params: CreatePreInviteParams,
+): Promise<{ visit: VisitRow; inviteToken: string }> {
+  const transition = assertTransition('new', 'pre_invite_created');
+  authorize(params.principal, 'visits.pre_invite_created', {
+    hostelId: params.hostelId,
+    hostUserId: params.hostUserId,
+    visitorId: null,
+  });
+
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const host = await loadHostState(trx, params.hostUserId);
+      const hostActiveDayGuestCount = await countHostActiveDayGuests(trx, params.hostUserId);
+      const result = evaluateCreate(
+        toCreateContext(deps, {
+          type: params.type,
+          hostelGender: params.hostelGender,
+          host,
+          visitorBanned: false,
+          guestGender: params.invitedGender,
+          windowStart: params.windowStart,
+          windowEnd: params.windowEnd,
+          existingOvernightBookings: [],
+          hostActiveDayGuestCount,
+        }),
+        deps.rulesConfig,
+      );
+      throwIfDenied(result);
+
+      const inviteToken = randomSecret(16).toString('base64url');
+      const visit = await insertVisit(trx, {
+        code: generateVisitCode(),
+        hostelId: params.hostelId,
+        hostId: params.hostUserId,
+        visitorId: null,
+        invitedName: params.invitedName,
+        invitedPhone: params.invitedPhone,
+        invitedGender: params.invitedGender,
+        type: params.type,
+        status: transition.to,
+        origin: 'invite',
+        zone: (result.zone ?? 'visitors_room') as Zone,
+        windowStart: params.windowStart,
+        windowEnd: params.windowEnd,
+        nights: 0,
+        inviteTokenHash: sha256(inviteToken),
+        rulesVersion: deps.rulesVersion,
+        createdByType: 'user',
+        createdById: params.hostUserId,
+      });
+
+      return { visit, inviteToken };
+    },
+  );
+}
+
+export interface CreateWalkInParams {
+  principal: Principal | null;
+  requestId: string;
+  visitorId: string;
+  hostUserId: string;
+  hostelId: string;
+  hostelGender: 'male' | 'female';
+  type: 'day' | 'quick_drop';
+  guestGender: Gender | null;
+  windowStart: Date;
+  windowEnd: Date;
+}
+
+/** (new) -> pending_host, trigger `walk_in_requested` (SDD §7.1 row 2): N-WALKIN to host. */
+export async function createWalkIn(
+  deps: VisitServiceDeps,
+  params: CreateWalkInParams,
+): Promise<VisitRow> {
+  const transition = assertTransition('new', 'walk_in_requested');
+  authorize(params.principal, 'visits.walk_in_requested', {
+    hostelId: params.hostelId,
+    hostUserId: params.hostUserId,
+    visitorId: params.visitorId,
+  });
+
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const host = await loadHostState(trx, params.hostUserId);
+      const visitorBanned = await isVisitorBanned(
+        trx,
+        params.visitorId,
+        params.hostelId,
+        deps.clock.now(),
+      );
+      const hostActiveDayGuestCount = await countHostActiveDayGuests(trx, params.hostUserId);
+      const result = evaluateCreate(
+        toCreateContext(deps, {
+          type: params.type,
+          hostelGender: params.hostelGender,
+          host,
+          visitorBanned,
+          guestGender: params.guestGender,
+          windowStart: params.windowStart,
+          windowEnd: params.windowEnd,
+          existingOvernightBookings: [],
+          hostActiveDayGuestCount,
+        }),
+        deps.rulesConfig,
+      );
+      throwIfDenied(result);
+
+      const visit = await insertVisit(trx, {
+        code: generateVisitCode(),
+        hostelId: params.hostelId,
+        hostId: params.hostUserId,
+        visitorId: params.visitorId,
+        invitedName: null,
+        invitedPhone: null,
+        invitedGender: params.guestGender,
+        type: params.type,
+        status: transition.to,
+        origin: 'walk_in',
+        zone: (result.zone ?? 'visitors_room') as Zone,
+        windowStart: params.windowStart,
+        windowEnd: params.windowEnd,
+        nights: 0,
+        inviteTokenHash: null,
+        rulesVersion: deps.rulesVersion,
+        createdByType: 'visitor',
+        createdById: params.visitorId,
+      });
+
+      await insertNotification(trx, {
+        hostelId: params.hostelId,
+        recipientType: 'user',
+        recipientId: params.hostUserId,
+        kind: 'N-WALKIN',
+        channel: 'push',
+        visitId: visit.id,
+        body: 'A guest is waiting at the gate.',
+      });
+
+      return visit;
+    },
+  );
+}
+
+export interface CreateOvernightRequestParams {
+  principal: Principal | null;
+  requestId: string;
+  hostUserId: string;
+  hostelId: string;
+  hostelGender: 'male' | 'female';
+  type: 'overnight_room' | 'guest_room';
+  invitedName: string;
+  invitedPhone: string;
+  invitedGender: Gender | null;
+  windowStart: Date;
+  windowEnd: Date;
+  arrivalDate: string;
+  departureDate: string;
+  nights: number;
+}
+
+/** (new) -> pending_warden, trigger `overnight_requested` (SDD §7.1 row 3): N-OVERNIGHT-REQ to warden. */
+export async function createOvernightRequest(
+  deps: VisitServiceDeps,
+  params: CreateOvernightRequestParams,
+): Promise<VisitRow> {
+  const transition = assertTransition('new', 'overnight_requested');
+  authorize(params.principal, 'visits.overnight_requested', {
+    hostelId: params.hostelId,
+    hostUserId: params.hostUserId,
+    visitorId: null,
+  });
+
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const host = await loadHostState(trx, params.hostUserId);
+      const existingOvernightBookings = await findActiveOvernightBookings(trx, params.hostUserId);
+      const result = evaluateCreate(
+        toCreateContext(deps, {
+          type: params.type,
+          hostelGender: params.hostelGender,
+          host,
+          visitorBanned: false,
+          guestGender: params.invitedGender,
+          windowStart: params.windowStart,
+          windowEnd: params.windowEnd,
+          arrivalDate: params.arrivalDate,
+          departureDate: params.departureDate,
+          existingOvernightBookings: existingOvernightBookings.map((b) => ({
+            arrivalDate: b.windowStart.toISOString().slice(0, 10),
+            departureDate: b.windowEnd.toISOString().slice(0, 10),
+          })),
+          hostActiveDayGuestCount: 0,
+        }),
+        deps.rulesConfig,
+      );
+      throwIfDenied(result);
+
+      const visit = await insertVisit(trx, {
+        code: generateVisitCode(),
+        hostelId: params.hostelId,
+        hostId: params.hostUserId,
+        visitorId: null,
+        invitedName: params.invitedName,
+        invitedPhone: params.invitedPhone,
+        invitedGender: params.invitedGender,
+        type: params.type,
+        status: transition.to,
+        origin: 'overnight_request',
+        zone: (result.zone ?? 'room') as Zone,
+        windowStart: params.windowStart,
+        windowEnd: params.windowEnd,
+        nights: params.nights,
+        inviteTokenHash: null,
+        rulesVersion: deps.rulesVersion,
+        createdByType: 'user',
+        createdById: params.hostUserId,
+      });
+
+      const wardenRows = await trx
+        .selectFrom('haven.role_assignments')
+        .select('user_id')
+        .where('hostel_id', '=', params.hostelId)
+        .where('role', '=', 'warden')
+        .where('revoked_at', 'is', null)
+        .execute();
+      for (const warden of wardenRows) {
+        await insertNotification(trx, {
+          hostelId: params.hostelId,
+          recipientType: 'user',
+          recipientId: warden.user_id,
+          kind: 'N-OVERNIGHT-REQ',
+          channel: 'push',
+          visitId: visit.id,
+          body: 'A host has requested an overnight/guest-room stay.',
+        });
+      }
+
+      return visit;
+    },
+  );
+}
+
+export interface HostAssistedEntryParams {
+  principal: Principal | null;
+  requestId: string;
+  hostUserId: string;
+  hostelId: string;
+  hostelGender: 'male' | 'female';
+  gateId: string;
+  type: VisitType;
+  invitedName: string;
+  invitedPhone: string | null;
+  invitedGender: Gender;
+  windowStart: Date;
+  windowEnd: Date;
+  photoMediaId?: string | null;
+}
+
+/** (new) -> inside, trigger `host_assisted_entry` (SDD §7.1 row 4): gate event entry, no GPS (host is physically present). */
+export async function createHostAssistedEntry(
+  deps: VisitServiceDeps,
+  params: HostAssistedEntryParams,
+): Promise<VisitRow> {
+  const transition = assertTransition('new', 'host_assisted_entry');
+  authorize(params.principal, 'visits.host_assisted_entry', {
+    hostelId: params.hostelId,
+    hostUserId: params.hostUserId,
+    visitorId: null,
+  });
+
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const host = await loadHostState(trx, params.hostUserId);
+      const hostActiveDayGuestCount = await countHostActiveDayGuests(trx, params.hostUserId);
+      const result = evaluateCreate(
+        toCreateContext(deps, {
+          type: params.type,
+          hostelGender: params.hostelGender,
+          host,
+          visitorBanned: false,
+          guestGender: params.invitedGender,
+          windowStart: params.windowStart,
+          windowEnd: params.windowEnd,
+          existingOvernightBookings: [],
+          hostActiveDayGuestCount,
+        }),
+        deps.rulesConfig,
+      );
+      throwIfDenied(result);
+
+      // Host-assisted guests may have no phone — matched by host + name (SDD F4), a new
+      // visitor row every time (no dedupe across host-assisted visits in this milestone).
+      const visitor = await trx
+        .insertInto('haven.visitors')
+        .values({
+          phone: params.invitedPhone,
+          full_name: params.invitedName,
+          gender: params.invitedGender,
+          created_by_host_id: params.hostUserId,
+          last_visit_at: deps.clock.now().toISOString(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+
+      const now = deps.clock.now();
+      const visit = await insertVisit(trx, {
+        code: generateVisitCode(),
+        hostelId: params.hostelId,
+        hostId: params.hostUserId,
+        visitorId: visitor.id,
+        invitedName: params.invitedName,
+        invitedPhone: params.invitedPhone,
+        invitedGender: params.invitedGender,
+        type: params.type,
+        status: transition.to,
+        origin: 'host_assisted',
+        zone: (result.zone ?? 'visitors_room') as Zone,
+        windowStart: params.windowStart,
+        windowEnd: params.windowEnd,
+        nights: 0,
+        inviteTokenHash: null,
+        rulesVersion: deps.rulesVersion,
+        createdByType: 'user',
+        createdById: params.hostUserId,
+        firstEntryAt: now,
+        lastEntryAt: now,
+        locationUnverified: false,
+      });
+
+      await insertGateEvent(trx, {
+        visitId: visit.id,
+        hostelId: params.hostelId,
+        gateId: params.gateId,
+        kind: 'entry',
+        actorType: 'user',
+        actorId: params.hostUserId,
+        locationVerified: true,
+        photoMediaId: params.photoMediaId,
+      });
+
+      return visit;
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared helper for the 15 real (from -> to) update transitions.
+// ---------------------------------------------------------------------------
+
+async function runTransition<TExtra>(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string },
+  trigger: VisitTrigger,
+  systemTriggered: boolean,
+  body: (trx: Transaction<Database>, visit: VisitRow) => Promise<TExtra>,
+): Promise<{ visit: VisitRow; extra: TExtra }> {
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const current = await findVisitById(trx, params.visitId);
+      if (!current) {
+        throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+      }
+      const transition = assertTransition(current.status, trigger);
+      authorize(params.principal, `visits.${trigger}`, resourceFor(current, systemTriggered));
+
+      const extra = await body(trx, current);
+
+      const visit = await updateVisitStatus(trx, {
+        id: params.visitId,
+        expectedStatus: transition.from as VisitRow['status'],
+        newStatus: transition.to,
+      });
+      return { visit, extra };
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// pending_host -> X
+// ---------------------------------------------------------------------------
+
+export interface WalkInGateContext {
+  gateId: string;
+  scanSessionId?: string | null;
+  locationVerified: boolean;
+  distanceM?: number | null;
+  accuracyM?: number | null;
+  photoMediaId?: string | null;
+}
+
+/**
+ * pending_host -> inside, trigger `host_approves_walk_in` (SDD §7.1 row 5). The guest
+ * is already physically at the gate for a walk-in (that's what the "walk-in scan
+ * session" the SDD mentions captured) — this is the host's approval *of* that
+ * presence, not a second gate-rules evaluation of a pre-approved visit the way
+ * `check_in` is. `evaluateEntry` is scoped to visits that already reached `approved`
+ * (its own `EntryContext.visitStatus` union doesn't even include `'pending_host'`); a
+ * walk-in never passes through `approved` at all (SDD §7.1), so calling it here would
+ * always deny with `VISIT_NOT_APPROVED` — a bug this comment exists to stop from being
+ * reintroduced, not a real rule. The two checks that still matter (ban, already-inside-
+ * elsewhere) are re-verified directly instead.
+ */
+export async function approveWalkIn(
+  deps: VisitServiceDeps,
+  params: {
+    principal: Principal | null;
+    requestId: string;
+    visitId: string;
+    gate: WalkInGateContext;
+  },
+): Promise<VisitRow> {
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const current = await findVisitById(trx, params.visitId);
+      if (!current) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+      const transition = assertTransition(current.status, 'host_approves_walk_in');
+      authorize(params.principal, 'visits.host_approves_walk_in', resourceFor(current));
+
+      const visitorBanned = await isVisitorBanned(
+        trx,
+        current.visitor_id,
+        current.hostel_id,
+        deps.clock.now(),
+      );
+      if (visitorBanned) {
+        throw new AppError('VISITOR_BANNED', 422, 'This guest is banned.', {
+          codes: ['VISITOR_BANNED'],
+        });
+      }
+      const visitorAlreadyInsideElsewhere = current.visitor_id
+        ? await isVisitorInsideElsewhere(trx, current.visitor_id, current.id)
+        : false;
+      if (visitorAlreadyInsideElsewhere) {
+        throw new AppError(
+          'ALREADY_INSIDE',
+          409,
+          'This guest is already checked in to another visit.',
+        );
+      }
+
+      const now = deps.clock.now();
+      const updated = await updateVisitStatus(trx, {
+        id: current.id,
+        expectedStatus: transition.from as VisitRow['status'],
+        newStatus: transition.to,
+        patch: {
+          firstEntryAt: current.first_entry_at ?? now,
+          lastEntryAt: now,
+          locationUnverified: !params.gate.locationVerified,
+        },
+      });
+
+      await insertGateEvent(trx, {
+        visitId: updated.id,
+        hostelId: updated.hostel_id,
+        gateId: params.gate.gateId,
+        scanSessionId: params.gate.scanSessionId,
+        kind: 'entry',
+        actorType: 'user',
+        actorId: updated.host_id,
+        locationVerified: params.gate.locationVerified,
+        distanceM: params.gate.distanceM,
+        accuracyM: params.gate.accuracyM,
+        photoMediaId: params.gate.photoMediaId,
+      });
+
+      return updated;
+    },
+  );
+}
+
+/** pending_host -> rejected, trigger `host_rejects_walk_in` (SDD §7.1 row 6): N-WALKIN-REJECTED to guest. */
+export async function rejectWalkIn(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    params,
+    'host_rejects_walk_in',
+    false,
+    async (trx, current) => {
+      if (current.visitor_id) {
+        await insertNotification(trx, {
+          hostelId: current.hostel_id,
+          recipientType: 'visitor',
+          recipientId: current.visitor_id,
+          kind: 'N-WALKIN-REJECTED',
+          channel: 'in_app',
+          visitId: current.id,
+          body: 'The host declined your visit request.',
+        });
+      }
+    },
+  );
+  return visit;
+}
+
+/** pending_host -> expired, trigger `walk_in_timeout` (SDD §7.1 row 7). System-only (a scheduled job). */
+export async function expireWalkIn(
+  deps: VisitServiceDeps,
+  params: { requestId: string; visitId: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    { principal: null, requestId: params.requestId, visitId: params.visitId },
+    'walk_in_timeout',
+    true,
+    async () => {},
+  );
+  return visit;
+}
+
+/** pending_host -> cancelled, trigger `guest_cancels_walk_in` (SDD §7.1 row 8). */
+export async function cancelWalkIn(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    params,
+    'guest_cancels_walk_in',
+    false,
+    async () => {},
+  );
+  return visit;
+}
+
+// ---------------------------------------------------------------------------
+// pending_warden -> X
+// ---------------------------------------------------------------------------
+
+/** pending_warden -> approved, trigger `warden_approves_overnight` (SDD §7.1 row 9). */
+export async function approveOvernight(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    params,
+    'warden_approves_overnight',
+    false,
+    async (trx, current) => {
+      const chargePerNight =
+        current.type === 'overnight_room'
+          ? deps.rulesConfig.overnight_room.charge_per_night_inr
+          : deps.rulesConfig.guest_room.charge_per_night_inr;
+      if (current.nights > 0) {
+        await createPendingCharge(trx, {
+          hostelId: current.hostel_id,
+          residentId: current.host_id,
+          visitId: current.id,
+          kind: current.type === 'overnight_room' ? 'overnight_room' : 'guest_room',
+          units: current.nights,
+          unitPriceInr: chargePerNight,
+          description: `${current.type === 'overnight_room' ? 'Overnight room' : 'Guest room'} stay, ${current.nights} night(s).`,
+          createdBy: params.principal?.type === 'user' ? params.principal.userId : null,
+        });
+      }
+      await insertNotification(trx, {
+        hostelId: current.hostel_id,
+        recipientType: 'user',
+        recipientId: current.host_id,
+        kind: 'N-OVERNIGHT-DECIDED',
+        channel: 'push',
+        visitId: current.id,
+        body: 'Your overnight/guest-room request was approved.',
+      });
+    },
+  );
+  return visit;
+}
+
+/** pending_warden -> rejected, trigger `warden_rejects_overnight` (SDD §7.1 row 10). */
+export async function rejectOvernight(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string; reason?: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    params,
+    'warden_rejects_overnight',
+    false,
+    async (trx, current) => {
+      await insertNotification(trx, {
+        hostelId: current.hostel_id,
+        recipientType: 'user',
+        recipientId: current.host_id,
+        kind: 'N-OVERNIGHT-DECIDED',
+        channel: 'push',
+        visitId: current.id,
+        body: params.reason
+          ? `Your request was rejected: ${params.reason}`
+          : 'Your request was rejected.',
+      });
+    },
+  );
+  return visit;
+}
+
+/** pending_warden -> cancelled, trigger `host_cancels_overnight_request` (SDD §7.1 row 11). */
+export async function cancelOvernightRequest(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    params,
+    'host_cancels_overnight_request',
+    false,
+    async () => {},
+  );
+  return visit;
+}
+
+// ---------------------------------------------------------------------------
+// approved -> X
+// ---------------------------------------------------------------------------
+
+export interface CheckInGateContext {
+  gateId: string;
+  scanSessionId?: string | null;
+  locationVerified: boolean;
+  distanceM?: number | null;
+  accuracyM?: number | null;
+  photoMediaId?: string | null;
+}
+
+/** approved -> inside, trigger `check_in` (SDD §7.1 row 12): gate event entry; N-ARRIVED to host. */
+export async function checkIn(
+  deps: VisitServiceDeps,
+  params: {
+    principal: Principal | null;
+    requestId: string;
+    visitId: string;
+    gate: CheckInGateContext;
+  },
+): Promise<VisitRow> {
+  const { visit, extra } = await runTransition(
+    deps,
+    params,
+    'check_in',
+    false,
+    async (trx, current) => {
+      const host = await loadHostState(trx, current.host_id);
+      const visitorAlreadyInsideElsewhere = current.visitor_id
+        ? await isVisitorInsideElsewhere(trx, current.visitor_id, current.id)
+        : false;
+      const visitorBanned = await isVisitorBanned(
+        trx,
+        current.visitor_id,
+        current.hostel_id,
+        deps.clock.now(),
+      );
+      const hostActiveDayGuestCount = await countHostActiveDayGuests(trx, current.host_id);
+      const entryCtx: EntryContext = {
+        now: deps.clock.now(),
+        type: current.type as RuleVisitType,
+        host,
+        visitorBanned,
+        visitStatus: current.status,
+        windowStart: current.window_start,
+        windowEnd: current.window_end,
+        visitorAlreadyInsideElsewhere,
+        gpsOk: params.gate.locationVerified,
+        hostActiveDayGuestCount,
+      };
+      const result = evaluateEntry(entryCtx, deps.rulesConfig);
+      throwIfDenied(result);
+      return result;
+    },
+  );
+
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      await insertGateEvent(trx, {
+        visitId: visit.id,
+        hostelId: visit.hostel_id,
+        gateId: params.gate.gateId,
+        scanSessionId: params.gate.scanSessionId,
+        kind: 'entry',
+        actorType: params.principal?.type === 'visitor' ? 'visitor' : 'user',
+        actorId: params.principal?.type === 'visitor' ? params.principal.visitorId : visit.host_id,
+        locationVerified: params.gate.locationVerified,
+        distanceM: params.gate.distanceM,
+        accuracyM: params.gate.accuracyM,
+        ruleCodes: extra.codes,
+        photoMediaId: params.gate.photoMediaId,
+      });
+      const now = deps.clock.now();
+      const updated = await trx
+        .updateTable('haven.visits')
+        .set({
+          first_entry_at: visit.first_entry_at ? undefined : now.toISOString(),
+          last_entry_at: now.toISOString(),
+          location_unverified: !params.gate.locationVerified,
+        })
+        .where('id', '=', visit.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await insertNotification(trx, {
+        hostelId: updated.hostel_id,
+        recipientType: 'user',
+        recipientId: updated.host_id,
+        kind: 'N-ARRIVED',
+        channel: 'push',
+        visitId: updated.id,
+        body: 'Your guest has arrived.',
+      });
+      return updated;
+    },
+  );
+}
+
+/** approved -> cancelled, trigger `cancel_approved` (SDD §7.1 row 13): charge (if any) waived. */
+export async function cancelApprovedVisit(
+  deps: VisitServiceDeps,
+  params: {
+    principal: Principal | null;
+    requestId: string;
+    visitId: string;
+    reason?: string;
+    systemTriggered?: boolean;
+  },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    params,
+    'cancel_approved',
+    params.systemTriggered ?? false,
+    async (trx, current) => {
+      await waiveChargeForVisit(
+        trx,
+        current.id,
+        deps.clock,
+        params.principal?.type === 'user' ? params.principal.userId : null,
+      );
+    },
+  );
+  if (params.reason) {
+    return withTx(deps.db, { principal: params.principal, requestId: params.requestId }, (trx) =>
+      trx
+        .updateTable('haven.visits')
+        .set({ cancel_reason: params.reason })
+        .where('id', '=', visit.id)
+        .returningAll()
+        .executeTakeFirstOrThrow(),
+    );
+  }
+  return visit;
+}
+
+/** approved -> expired, trigger `window_expired_no_entry` (SDD §7.1 row 14). System-only. Charge waived. */
+export async function expireApprovedVisit(
+  deps: VisitServiceDeps,
+  params: { requestId: string; visitId: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    { principal: null, requestId: params.requestId, visitId: params.visitId },
+    'window_expired_no_entry',
+    true,
+    async (trx, current) => {
+      await waiveChargeForVisit(trx, current.id, deps.clock, null);
+    },
+  );
+  return visit;
+}
+
+/** approved -> completed, trigger `window_ended_after_entry` (SDD §7.1 row 15). System-only. Charge recalculated. */
+export async function completeApprovedVisitWithoutReturn(
+  deps: VisitServiceDeps,
+  params: { requestId: string; visitId: string },
+): Promise<VisitRow> {
+  const { visit } = await runTransition(
+    deps,
+    { principal: null, requestId: params.requestId, visitId: params.visitId },
+    'window_ended_after_entry',
+    true,
+    async (trx, current) => {
+      await confirmChargeForVisit(trx, current.id, deps.clock, null);
+    },
+  );
+  return withTx(deps.db, { principal: null, requestId: params.requestId }, (trx) =>
+    trx
+      .updateTable('haven.visits')
+      .set({ closed_at: deps.clock.now().toISOString(), close_reason: 'window_ended' })
+      .where('id', '=', visit.id)
+      .returningAll()
+      .executeTakeFirstOrThrow(),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// inside -> X
+// ---------------------------------------------------------------------------
+
+export interface CheckOutGateContext {
+  gateId: string;
+  scanSessionId?: string | null;
+  locationVerified: boolean;
+  distanceM?: number | null;
+  accuracyM?: number | null;
+  photoMediaId?: string | null;
+}
+
+/**
+ * inside -> approved (stepping out) or inside -> completed (final check-out), trigger
+ * `check_out_step_out`/`check_out_final` (SDD §7.1 rows 16-17, SDD F5): the target
+ * state depends on `type` and whether `now < window_end - 30min` for overnight/guest-
+ * room stays — this decision belongs to the service, not the (never-denying)
+ * `evaluateExit`.
+ */
+export async function checkOut(
+  deps: VisitServiceDeps,
+  params: {
+    principal: Principal | null;
+    requestId: string;
+    visitId: string;
+    gate: CheckOutGateContext;
+  },
+): Promise<VisitRow> {
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const current = await findVisitById(trx, params.visitId);
+      if (!current) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+
+      const stepsOut =
+        (current.type === 'overnight_room' || current.type === 'guest_room') &&
+        deps.clock.now().getTime() < current.window_end.getTime() - 30 * 60_000;
+      const trigger: VisitTrigger = stepsOut ? 'check_out_step_out' : 'check_out_final';
+
+      const transition = assertTransition(current.status, trigger);
+      authorize(params.principal, `visits.${trigger}`, resourceFor(current));
+
+      const exitCtx: ExitContext = {
+        now: deps.clock.now(),
+        windowEnd: current.window_end,
+        gpsOk: params.gate.locationVerified,
+      };
+      const result = evaluateExit(exitCtx, deps.rulesConfig);
+
+      await insertGateEvent(trx, {
+        visitId: current.id,
+        hostelId: current.hostel_id,
+        gateId: params.gate.gateId,
+        scanSessionId: params.gate.scanSessionId,
+        kind: 'exit',
+        actorType: params.principal?.type === 'visitor' ? 'visitor' : 'user',
+        actorId:
+          params.principal?.type === 'visitor' ? params.principal.visitorId : current.host_id,
+        locationVerified: params.gate.locationVerified,
+        distanceM: params.gate.distanceM,
+        accuracyM: params.gate.accuracyM,
+        ruleCodes: result.codes,
+        photoMediaId: params.gate.photoMediaId,
+      });
+
+      const now = deps.clock.now();
+      const updated = await updateVisitStatus(trx, {
+        id: current.id,
+        expectedStatus: transition.from as VisitRow['status'],
+        newStatus: transition.to,
+        patch: {
+          lastExitAt: now,
+          exitLocationUnverified: !params.gate.locationVerified,
+          ...(trigger === 'check_out_final' ? { closedAt: now, closeReason: 'checked_out' } : {}),
+        },
+      });
+
+      if (trigger === 'check_out_final') {
+        await confirmChargeForVisit(trx, current.id, deps.clock, null);
+      }
+      await insertNotification(trx, {
+        hostelId: updated.hostel_id,
+        recipientType: 'user',
+        recipientId: updated.host_id,
+        kind: 'N-LEFT',
+        channel: 'push',
+        visitId: updated.id,
+        body: 'Your guest has left.',
+      });
+
+      return updated;
+    },
+  );
+}
+
+/** inside -> completed, trigger `host_marks_guest_left` (SDD §7.1 row 18): close_reason=host_marked_left, flagged. */
+export async function hostMarksGuestLeft(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string },
+): Promise<VisitRow> {
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const current = await findVisitById(trx, params.visitId);
+      if (!current) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+      const transition = assertTransition(current.status, 'host_marks_guest_left');
+      authorize(params.principal, 'visits.host_marks_guest_left', resourceFor(current));
+
+      const now = deps.clock.now();
+      const updated = await updateVisitStatus(trx, {
+        id: current.id,
+        expectedStatus: transition.from as VisitRow['status'],
+        newStatus: transition.to,
+        patch: { closedAt: now, closeReason: 'host_marked_left' },
+      });
+      await confirmChargeForVisit(trx, current.id, deps.clock, null);
+      return updated;
+    },
+  );
+}
+
+/** inside -> completed, trigger `warden_forces_checkout` (SDD §7.1 row 19): close_reason=forced, reason required. */
+export async function wardenForcesCheckout(
+  deps: VisitServiceDeps,
+  params: { principal: Principal | null; requestId: string; visitId: string; reason: string },
+): Promise<VisitRow> {
+  if (!params.reason.trim()) {
+    throw new AppError('VALIDATION_FAILED', 400, 'A reason is required to force a check-out.');
+  }
+  return withTx(
+    deps.db,
+    { principal: params.principal, requestId: params.requestId },
+    async (trx) => {
+      const current = await findVisitById(trx, params.visitId);
+      if (!current) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+      const transition = assertTransition(current.status, 'warden_forces_checkout');
+      authorize(params.principal, 'visits.warden_forces_checkout', resourceFor(current));
+
+      const now = deps.clock.now();
+      const updated = await updateVisitStatus(trx, {
+        id: current.id,
+        expectedStatus: transition.from as VisitRow['status'],
+        newStatus: transition.to,
+        patch: { closedAt: now, closeReason: 'forced', cancelReason: params.reason },
+      });
+      await confirmChargeForVisit(
+        trx,
+        current.id,
+        deps.clock,
+        params.principal?.type === 'user' ? params.principal.userId : null,
+      );
+      return updated;
+    },
+  );
+}
