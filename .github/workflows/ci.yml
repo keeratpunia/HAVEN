@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  TURBO_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install pnpm
+        run: corepack prepare pnpm@9.15.9 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Unit + integration tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # ---- Added once supabase/migrations/ has real migrations (M1) ----
+      # - name: Start local Supabase
+      #   run: npx supabase start
+      # - name: Run pgTAP tests
+      #   run: npx supabase test db
+      # ---- Added once Playwright specs exist (M2) ----
+      # - name: Playwright E2E (PR to main only)
+      #   if: github.event_name == 'pull_request'
+      #   run: pnpm --filter mobile exec playwright test
+
+      - name: Dependency audit (high severity fails the build)
+        run: pnpm audit --audit-level high

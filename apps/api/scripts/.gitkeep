@@ -1,0 +1,4 @@
+# Operational scripts directory (SDD §20.1): seed.ts, grant-role.ts,
+# rotate-gate-secret.ts. seed.ts lands in docs/IMPLEMENTATION-PLAN.md M1, step 7 —
+# not created in the bootstrap milestone (it needs the schema and DATA_ENCRYPTION_KEY
+# handling that don't exist yet).

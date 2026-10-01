@@ -1,0 +1,7 @@
+# Migration directory (SDD §11, §20.1).
+#
+# First migration lands in docs/IMPLEMENTATION-PLAN.md M1, step 1: the full schema
+# (extensions/enums, identity/hostel tables, rules/gate tables, visit tables, triggers,
+# RLS, haven_api role) as one SQL migration file, timestamped, e.g.
+# 20261001000001_init.sql (SDD §11). Nothing is created here in the bootstrap
+# milestone — see docs/TRACEABILITY.md for why.

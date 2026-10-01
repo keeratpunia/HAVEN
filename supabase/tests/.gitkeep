@@ -1,0 +1,6 @@
+# pgTAP test directory (SDD §19.1: "Database | SQL tests via `supabase test db`
+# (pgTAP) | Constraints, triggers (append-only, audit PII stripping), jobs").
+#
+# Tests land alongside the schema they exercise, starting in M1 (e.g. a test proving
+# the audit_row() trigger strips PII — TC-SEC-08). Nothing is created here in the
+# bootstrap milestone.
