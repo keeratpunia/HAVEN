@@ -21,6 +21,8 @@
     "@fastify/rate-limit": "^10.1.1",
     "@haven/shared": "workspace:*",
     "fastify": "^5.0.0",
+    "fastify-type-provider-zod": "^4.0.2",
+    "jose": "^5.9.6",
     "kysely": "^0.29.6",
     "pg": "^8.13.0",
     "pino": "^9.4.0",

@@ -5,10 +5,14 @@ import { z } from 'zod';
  *
  * Scope grows one milestone at a time: a var is added here only when the API
  * *server process itself* (`server.ts`/`app.ts`) genuinely needs it — not
- * speculatively, and not just because some other script in the repo uses it. Still
- * not validated here: JWT_SECRET, OTP_PEPPER, DATA_ENCRYPTION_KEY, GOOGLE_CLIENT_IDS,
- * SMS_PROVIDER, EXPO_ACCESS_TOKEN, TURNSTILE_SECRET, SENTRY_DSN, WORKER_ENABLED — those
- * wait for the auth/gate/notify milestones that actually make the *server* use them.
+ * speculatively, and not just because some other script in the repo uses it.
+ * `JWT_SECRET` was added in the API-foundation milestone because the authentication
+ * hook (`apps/api/src/auth/jwt.ts`) now actually verifies tokens with it. Still not
+ * validated here: OTP_PEPPER, DATA_ENCRYPTION_KEY, GOOGLE_CLIENT_IDS, SMS_PROVIDER,
+ * EXPO_ACCESS_TOKEN, TURNSTILE_SECRET, SENTRY_DSN, WORKER_ENABLED — those wait for the
+ * auth-flow/gate/notify milestones that actually make the *server* use them (OTP
+ * request/verify and Google sign-in aren't implemented yet — only JWT
+ * verification/issuance, which every later auth method shares, is).
  *
  * `DATA_ENCRYPTION_KEY` and `SEED_SUPER_ADMIN_EMAIL`/`SEED_WARDEN_EMAIL` are
  * deliberately NOT here even though `apps/api/scripts/seed.ts` needs them now — the
@@ -36,6 +40,16 @@ const EnvSchema = z.object({
     .string()
     .default('http://localhost:8081')
     .transform((value) => value.split(',').map((origin) => origin.trim())),
+  COOKIE_DOMAIN: z.string().default('localhost'),
+
+  // HS256 access/refresh JWT signing key (SDD §9.5). 32+ random bytes, base64 — same
+  // format convention as DATA_ENCRYPTION_KEY, validated the same way.
+  JWT_SECRET: z
+    .string()
+    .min(1, 'JWT_SECRET is required')
+    .refine((value) => Buffer.from(value, 'base64').length >= 32, {
+      message: 'JWT_SECRET must decode to at least 32 bytes (base64)',
+    }),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

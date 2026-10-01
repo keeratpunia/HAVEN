@@ -298,6 +298,103 @@ Source for all of Part 1: SDD §2.7.
   implementation detail the SDD never specified at this level (seed-script internals),
   so there is nothing in the SDD to update.
 
+### DEC-005 — API foundation milestone: a real rate-limiting bug, a real log-redaction bug, and dependency/design choices
+
+- **Date:** 2026-10-01
+- **Context:** Building the SDD §8.2 request pipeline (request ID → rate limit → auth
+  → validation → handler → authorize() → service → repository → serializer →
+  response) as reusable infrastructure, with tests for each stage plus a manual
+  build-and-boot smoke test. Two of the findings below are genuine bugs the testing
+  itself caught — not stylistic choices — and are the most important entries here.
+- **Decisions / findings:**
+  1. **`@fastify/rate-limit` was silently non-functional until every `app.register()`
+     call in `app.ts` was awaited.** Fastify's normal pattern lets you call
+     `app.register(plugin)` without awaiting it, relying on avvio's internal boot
+     ordering to still process everything correctly before `.ready()`/`.listen()`.
+     Empirically, that did not hold for `@fastify/rate-limit` specifically: with an
+     un-awaited `app.register(rateLimit, {...})` followed by synchronously-declared
+     routes, the server booted normally, routes worked, but the global rate limit
+     **never triggered — ever, for any number of requests** — with no error, no
+     warning, nothing. This was caught by this milestone's own rate-limit test (which
+     initially failed), root-caused by bisection (isolating plugin combinations until
+     a minimal repro showed awaiting the registration alone fixes it — see the
+     session's working notes; the repro is not part of the committed code), and fixed
+     by making `buildApp` `async` and `await`ing every `app.register()` call before
+     any route is declared. `server.ts` and every test call site were updated to
+     `await buildApp(...)`. **This would have shipped as a silently-disabled security
+     control** (SDD §12.11, and indirectly the OTP-abuse mitigation T10 which layers
+     Turnstile *on top of* rate limiting) if the test suite hadn't specifically
+     exercised exceeding the limit rather than just asserting the plugin was
+     registered.
+  2. **The PII log-redaction path list had a precision bug: a blanket `'*.code'`
+     wildcard also matched `AppError.code`** (`'AUTH_REQUIRED'`, `'FORBIDDEN'`, etc.)
+     wherever an error got logged, redacting our own safe, non-PII error-code enum
+     from every error log line. Found by manually building and booting the real server
+     (not by a unit test — the unit tests at the time only asserted PII *was*
+     redacted, not that non-PII with a colliding field name *wasn't*) and reading its
+     own `request failed with AppError` log line, which showed `"code": "[redacted]"`
+     instead of `"code": "AUTH_REQUIRED"`. Fixed by replacing the blanket `'*.code'`
+     with a precisely-scoped `'req.body.code'` (the one real place an OTP code will
+     appear, SDD §9.5: `POST /v1/auth/otp/verify { phone, code, purpose }`) plus
+     keeping `'*.otp'` for the case where a whole OTP object is logged under a named
+     wrapper key. A regression test (`src/lib/logger.test.ts`, "does NOT redact
+     AppError.code") now guards this specifically. General lesson applied here:
+     redaction paths keyed on generic field names (`code`, `token`, `secret`, ...) are
+     a recurring collision risk with legitimate non-PII fields that happen to share a
+     name — worth a second look whenever a new redacted path is added in a future
+     milestone, not just whether the intended PII is caught.
+  3. **New dependencies:** `jose` (HS256 JWT, SDD §8.4 names it explicitly) and
+     `fastify-type-provider-zod` (SDD §8.4: "Zod (+ `fastify-type-provider-zod`)"),
+     both at their current stable major as of this milestone — the SDD names the
+     libraries, not versions, consistent with DEC-003's approach to unpinned
+     dependencies.
+  4. **`JWT_SECRET` and `COOKIE_DOMAIN` added to `apps/api/src/config.ts`'s `EnvSchema`**
+     — the server process now genuinely verifies tokens and will need the cookie
+     domain once the auth module sets `haven_rt`. `OTP_PEPPER`, `DATA_ENCRYPTION_KEY`
+     (server-side; the seed script validates it independently per DEC-004),
+     `GOOGLE_CLIENT_IDS`, `SMS_PROVIDER`, and the rest remain deliberately unvalidated
+     here until the milestone that makes the *server* use them, per this file's own
+     stated principle (see the comment at the top of `config.ts`).
+  5. **`authorize()` fails closed on an unregistered action**, not open. SDD §3.4 only
+     says "every handler MUST call authorize()" — it doesn't say what an unregistered
+     action should do, because in the finished system every action a handler calls
+     will have a registered rule. During this foundation milestone, *no* actions are
+     registered yet (no feature module exists), so "what happens if you call
+     `authorize()` for something nobody defined" is a real, immediate question, not a
+     hypothetical. Denying is the only safe default — the alternative (allow unknown
+     actions) would mean a typo'd action string silently bypasses authorization
+     entirely, which is a worse failure mode than an over-strict 403 during
+     development.
+  6. **Device-token (gate) authentication is recognized but not verified.** The
+     `authenticate` hook matches the `Authorization: Device <token>` scheme (so the
+     shape exists for `requireAuth`/`authorize()` callers to target) but always
+     resolves to a `null` principal rather than querying `haven.gate_devices` —
+     verifying it needs a typed Kysely query against that table, and `kysely-codegen`
+     is deliberately not wired up yet (DEC-004 item 9). Building it now would mean
+     either writing raw SQL (bypassing the typed-query convention CLAUDE.md requires)
+     or doing the codegen work prematurely. Real device authentication is gate-module
+     work (M2, `docs/IMPLEMENTATION-PLAN.md`).
+  7. **`withTx`'s actor-context setter is dependency-injectable** (a 4th, optional
+     parameter, defaulting to the real SQL-executing implementation) specifically so
+     `src/lib/tx.test.ts` can unit-test the wrapper's control flow (ordering, result
+     propagation, error propagation) without a live Postgres connection — the same
+     pattern `BuildAppOptions.checkDb` already established in the bootstrap milestone.
+     The underlying `set_config()` mechanism itself was proven against a real Postgres
+     server by the database-foundation milestone's audit-trigger tests; this test
+     proves the wrapper calls it correctly, not that Postgres honours `set_config`
+     (already known).
+- **Why:** items 1–2 are bugs this milestone's own testing (and, for item 2, a manual
+  smoke test beyond the automated suite) caught before they could ship — recorded in
+  detail because the *process* that caught them (a dedicated rate-limit test; actually
+  booting the server and reading its logs rather than trusting unit tests alone) is
+  worth remembering for later milestones, not just the fixes themselves. Items 3–7 are
+  judgment calls the SDD leaves open at this level of detail, recorded per
+  `CLAUDE.md` §1.4.
+- **SDD updated?** No. Items 1–2 are implementation bugs with no SDD-visible
+  consequence (the SDD's rate-limit and redaction *requirements* were always correct;
+  the code didn't meet them, now it does). Items 3–7 fill in implementation detail the
+  SDD doesn't specify at this granularity.
+
 Template for a new entry:
 
 ```markdown

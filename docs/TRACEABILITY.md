@@ -53,6 +53,38 @@ layer — not because "the schema exists now." Every other requirement in this d
 still needs API code before it earns a status change, including ones that will
 ultimately depend on this schema.
 
+## 0c. API foundation milestone (2026-10-01)
+
+This milestone built the reusable request-pipeline infrastructure every feature
+module will use (SDD §8.2: request ID → rate limit → auth → validation → handler →
+authorize() → service → repository → serializer → response) — wired together in
+`apps/api/src/app.ts` and genuinely exercised end to end (86 tests; a real build +
+boot + `curl` smoke test; two real bugs found and fixed by that testing, not by
+inspection — see `docs/DECISIONS.md`). What exists now: JWT issue/verify
+(`src/auth/jwt.ts`), the authentication hook and `Principal` type
+(`src/auth/authenticate.ts`, `src/auth/principal.ts`), the central `authorize()`
+policy dispatcher with zero registered rules (`src/auth/policy.ts`), Zod-via-Fastify
+validation wiring (`src/lib/validation.ts`), a generic field-stripping serializer
+pattern (`src/lib/serializer.ts`), the transaction/actor-context helper
+(`src/lib/tx.ts`), the refresh-cookie name/options helper (`src/lib/cookies.ts`), and
+configurable rate limiting + the SDD §16.4 security headers (`src/app.ts`).
+
+**What this explicitly does NOT do, so no later reviewer mistakes plumbing for a
+finished requirement (same discipline as §0 and §0b above):**
+- No sign-in flow exists. OTP request/verify and Google Sign-In are not implemented —
+  `jwt.ts` can issue/verify a token once something else decides who the principal is,
+  but nothing decides that yet. **FR-01 and FR-03 stay unmarked.**
+- `authorize()` has no registered policies — every action is denied by default
+  (fail-closed). There is no permission matrix (SDD §3.3) here, only the mechanism a
+  later module plugs a matrix into.
+- Device-token (gate) authentication is recognized but not verified — it always
+  resolves to a null principal. No gate-scoped action can succeed through this hook.
+- Session revocation (SDD §9.5: "deactivation takes effect within 30s",
+  `SESSION_REVOKED`) is not implemented — the auth hook verifies JWT signatures only,
+  it does not check a `sessions`/`users.is_active` row. **TC-SEC-05 and TC-SEC-06 stay
+  unmarked.**
+- No real route exists under `/v1` — it is registered as an empty prefix boundary.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -151,7 +183,7 @@ ultimately depend on this schema.
 | NFR-10 | Compatibility | Guest web: Chrome 100+/Android 9+, Safari iOS 15+, Samsung Internet 18+; app Android 9+ | — | — | — |
 | NFR-11 | Accessibility | WCAG 2.1 AA for guest web; text scales to 200% | — | — | — |
 | NFR-12 | Maintainability | Rules engine 100% branch coverage; API services ≥70% line coverage; no `any` | — | — | — |
-| NFR-13 | Observability | Every request has a request ID; errors reach Sentry within 1 min | — | — | — |
+| NFR-13 | Observability | Every request has a request ID; errors reach Sentry within 1 min | `apps/api/src/lib/request-id.ts`, wired into every request/error envelope via `apps/api/src/app.ts` | `test/app.test.ts` ("unknown routes return the SDD §12.1 error envelope with a request id") | WIP — the request-ID half is genuinely done and tested on every response, including errors; Sentry is not integrated, so "errors reach Sentry within 1 min" is not satisfied |
 | NFR-14 | Cost | ≤ ₹1,500/month during pilot | — | — | — |
 
 ## 3. Business rules (BR-xx) — SDD §4.2
@@ -309,6 +341,26 @@ above or silently omitted:
 | Live SSE event trigger fires `pg_notify('haven_events', ...)` on visit insert/update | `notify_visit()`, SDD §11.6/§9.9 | Not yet tested — needs a `LISTEN` client, which is API work (M3); schema-level creation only verified by inspection |
 | Storage buckets declared (`visitor-photos`, `gate-photos`, `resident-docs`, all private) | `supabase/migrations/20261001000002_storage_buckets.sql`, SDD §9.10 | Guarded no-op verified on plain Postgres; real bucket creation only provable on an actual Supabase project (see `docs/DECISIONS.md`) |
 | 7 scheduled-job functions exist and match their SDD §11.8 prose spec (`job_expire_walkins`, `job_expire_approved`, `job_flag_overstays`, `job_night_sweep`, `job_gate_offline`, `job_retention`, `job_expire_sessions`) | `supabase/migrations/20261001000001_init.sql` | Created and confirmed present by inspection; **not** unit-tested against fixture data yet (pgTAP tests with a fixed `p_now` per SDD §19.3 are M3 work, once the jobs have real traffic to act on) — do not read "the function exists" as "the job is tested" |
+
+## 6b. API-level guarantees implemented but not mapped to a single ID
+
+Real, tested API-foundation deliverables (2026-10-01) that are infrastructure every
+feature module will rely on, not a specific FR/NFR/BR/E/TC requirement in their own
+right:
+
+| Guarantee | Where | Tested by |
+|---|---|---|
+| Request pipeline order matches SDD §8.2 exactly (request ID → rate limit → auth → validation, with `authorize()`/service/repo/serializer left as per-handler concerns for later modules) | `apps/api/src/app.ts` | `test/app.test.ts`, `src/auth/authenticate.test.ts`, `src/lib/validation.test.ts` |
+| Access JWT issue/verify: HS256, exact SDD §9.5 claim shape (`sub`/`typ`/`sid`/`roles`/`iss`/`aud`), 15 min TTL, fails closed (wrong secret/issuer/audience/expired/malformed all → `AUTH_REQUIRED`) | `apps/api/src/auth/jwt.ts` | `src/auth/jwt.test.ts` (11 cases) |
+| Central `authorize()`: unregistered action denied (fail-closed), not fail-open; a rule that throws is treated as a denial, not an unhandled exception (SDD §3.4, CLAUDE.md §3.10 — "no inline role checks") | `apps/api/src/auth/policy.ts` | `src/auth/policy.test.ts` |
+| Global rate limit (SDD §12.11 default, 120/min/IP), returning the SDD §12.2 `RATE_LIMITED` envelope with `Retry-After` | `apps/api/src/app.ts` | `test/app.test.ts` — **this test is also what caught a real bug**: an un-awaited `@fastify/rate-limit` registration silently disabled rate limiting entirely (server booted fine, 429 never fired); see `docs/DECISIONS.md` |
+| Security headers (CSP `default-src`/`frame-ancestors 'none'`, HSTS `max-age=31536000`, `X-Content-Type-Options`) | `apps/api/src/app.ts` (`@fastify/helmet` config) | `test/app.test.ts` |
+| CORS restricted to configured origins with credentials (SDD §16.4) | `apps/api/src/app.ts` (`@fastify/cors` config) | Not directly tested (would need a cross-origin `fetch`-style check `.inject()` can't exercise); configuration reviewed against SDD §16.4 by inspection |
+| `haven_rt` refresh-cookie name/attributes (httpOnly, Secure outside local dev, SameSite=Lax, `Path=/v1/auth`, `Domain=.<domain>`) defined once, ready for the auth module to use | `apps/api/src/lib/cookies.ts` | `src/lib/cookies.test.ts` |
+| Zod-via-Fastify request validation → SDD §12.2 `VALIDATION_FAILED` (400) envelope with a real `details.issues` array | `apps/api/src/lib/validation.ts` | `src/lib/validation.test.ts` |
+| Generic field-stripping serializer pattern (`omitFields`), ready for the first role-based serializer (SDD §3.4 office/phone/photo stripping) that actually has a row to shape | `apps/api/src/lib/serializer.ts` | `src/lib/serializer.test.ts` |
+| Transaction wrapper sets `haven.actor_type`/`haven.actor_id`/`haven.request_id` before any service logic runs, so the `audit_row()` trigger (SDD §11.6) attributes rows correctly once a real service calls it | `apps/api/src/lib/tx.ts` | `src/lib/tx.test.ts` (control-flow unit tests against a fake transaction — no live DB in this test run; the underlying trigger mechanism itself was proven against a real Postgres server in the database-foundation milestone) |
+| PII log redaction (phone, OTP code, tokens, secrets, photo paths, Authorization/Cookie headers) — scoped precisely enough not to swallow non-PII fields with the same name (e.g. `AppError.code`) | `apps/api/src/lib/logger.ts` | `src/lib/logger.test.ts` (9 cases, including a regression test for the `AppError.code` bug this milestone's own manual smoke test found) |
 
 ## 7a. Categories this matrix does NOT cover, by design — and where they live instead
 

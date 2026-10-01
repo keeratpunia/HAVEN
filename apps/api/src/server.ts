@@ -7,7 +7,7 @@ async function main() {
   const env = loadEnv();
   const logger = createLogger(env);
   const db = createDb(env);
-  const app = buildApp({ env, logger, db });
+  const app = await buildApp({ env, logger, db });
 
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'shutting down');
