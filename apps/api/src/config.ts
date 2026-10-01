@@ -3,16 +3,19 @@ import { z } from 'zod';
 /**
  * Environment validation, fails fast on boot (SDD §20.3, CLAUDE.md §4/§6).
  *
- * Bootstrap-milestone scope only: this validates the variables the infrastructure
- * built so far actually needs (server, DB connection, CORS). It deliberately does NOT
- * yet validate the auth/crypto/provider variables listed in SDD §20.3
- * (JWT_SECRET, OTP_PEPPER, DATA_ENCRYPTION_KEY, GOOGLE_CLIENT_IDS, SMS_PROVIDER,
- * EXPO_ACCESS_TOKEN, TURNSTILE_SECRET, SENTRY_DSN, WORKER_ENABLED, SEED_*, etc.) —
- * those are added to this schema in the milestone that first uses them (M1 for auth
- * vars, M2 for gate/media vars, M3 for notify vars), per docs/IMPLEMENTATION-PLAN.md.
- * Do not widen this schema to "validate everything now" — an unused required var with
- * no real value to validate against just makes local setup harder for no safety gain
- * yet. Do not silently start the server if a var that IS listed below is missing.
+ * Scope grows one milestone at a time: a var is added here only when the API
+ * *server process itself* (`server.ts`/`app.ts`) genuinely needs it — not
+ * speculatively, and not just because some other script in the repo uses it. Still
+ * not validated here: JWT_SECRET, OTP_PEPPER, DATA_ENCRYPTION_KEY, GOOGLE_CLIENT_IDS,
+ * SMS_PROVIDER, EXPO_ACCESS_TOKEN, TURNSTILE_SECRET, SENTRY_DSN, WORKER_ENABLED — those
+ * wait for the auth/gate/notify milestones that actually make the *server* use them.
+ *
+ * `DATA_ENCRYPTION_KEY` and `SEED_SUPER_ADMIN_EMAIL`/`SEED_WARDEN_EMAIL` are
+ * deliberately NOT here even though `apps/api/scripts/seed.ts` needs them now — the
+ * seed script is a separate process from the server and validates its own env
+ * independently (see `scripts/seed.ts`), so running the API does not require seed-only
+ * configuration, and running the seed script does not require JWT_SECRET etc. Do not
+ * merge the two schemas "for consistency" — they gate different processes.
  */
 const EnvSchema = z.object({
   APP_ENV: z.enum(['local', 'staging', 'production']).default('local'),

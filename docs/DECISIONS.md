@@ -187,6 +187,117 @@ Source for all of Part 1: SDD §2.7.
   the SDD deliberately left open (§8.4: "Pin exact versions in lockfiles at project
   start").
 
+### DEC-004 — Database foundation milestone: schema deviations, environment workarounds, and seed-script design
+
+- **Date:** 2026-10-01
+- **Context:** Implementing and validating the SDD §11 schema end to end surfaced
+  several places where the SQL as literally transcribed would not run outside a real
+  Supabase project, plus this environment's own instability, plus genuine idempotency
+  bugs found only by actually running the seed script repeatedly (as the task
+  required). Recorded together since they all came out of the same validation pass.
+- **Decisions:**
+  1. **`pg_cron` extension creation and `cron.schedule()` calls are guarded**, not
+     unconditional, in `supabase/migrations/20261001000001_init.sql`. `pg_cron` ships
+     with Supabase's Postgres image but is not part of vanilla community Postgres —
+     `create extension pg_cron` is a hard error (not a no-op) where it's unavailable.
+     The guard checks `pg_available_extensions` first; on Supabase, behaviour is
+     unchanged (the extension installs, the jobs schedule). The `haven.job_*`
+     functions themselves are created unconditionally either way.
+  2. **Storage bucket creation (`20261001000002_storage_buckets.sql`) is similarly
+     guarded** on `information_schema.tables` for `storage.buckets`, since that table
+     only exists on a real Supabase project.
+  3. **`create role haven_api ... password :'api_password'` (SDD §11.7's literal text)
+     was changed to a literal local-dev password with a rotation comment**, and wrapped
+     in an `if not exists` guard. Two independent problems: `:'api_password'` is `psql`
+     client-side variable syntax — it is a plain SQL syntax error through any other
+     executor (Supabase CLI's migration runner, a `pg` client, etc.), so the migration
+     as literally specified in the SDD cannot actually run outside manually piping it
+     through `psql -v api_password=...`. Separately, Postgres roles are cluster-level,
+     not database-level, so an unguarded `create role` would fail with "already exists"
+     on every `supabase db reset` after the first. The literal local-dev password
+     (`haven_api_local_dev_only`) is not a real secret — same category as the SDD's own
+     `SMS_PROVIDER=console` / OTP `123456` local-only conveniences — and the migration
+     comment instructs rotating it via `ALTER ROLE ... WITH PASSWORD` immediately after
+     first running against staging/production, matching the SDD's own "password from
+     the secrets manager" instruction.
+  4. **This environment's Docker Desktop could not reliably run the real Supabase
+     stack**, so `supabase/migrations/*.sql` and the seed script were validated against
+     a real (non-Docker) local Postgres 18.4 server instead, using the `embedded-postgres`
+     npm package (official PostgreSQL binaries, run directly as a child process — not a
+     mock, not `pg-mem`). Root cause found this time: the `C:` drive had only ~100 MB
+     free, which starved both Docker Desktop's backend (it never reached a working
+     state even after two full relaunches) and `npm install` (`ENOSPC`). Clearing the
+     npm cache (freed ~2 GB) and redirecting `npm`/`pnpm` caches to `D:` (26 GB free)
+     fixed the disk problem but Docker's backend still did not come up reliably after
+     multiple attempts; `embedded-postgres` was used instead so the actual validation
+     work (apply migrations from empty, run pgTAP-equivalent assertions, run the seed
+     script three times) could happen for real rather than being asserted untested.
+     **This is a validation substitute for this session only** — it does not change
+     the project's documented local-dev workflow, which remains `supabase start`
+     (Docker) per `docs/DEVELOPMENT.md` §2; `pg_cron` and Supabase Storage genuinely
+     aren't present in this substitute, which is exactly why items 1–2 above needed
+     guards. A developer with a working Docker Desktop should re-run the same
+     migrations and seed via `supabase start` and confirm the `pg_cron`/`storage`
+     branches that this environment skipped.
+  5. **`supabase/tests/*.sql` pgTAP files could not be executed by the pgTAP framework
+     itself** (pgTAP is also a Supabase-bundled extension, absent from vanilla
+     Postgres). Every assertion in those files was independently re-verified as plain
+     SQL against the same embedded Postgres server (20 checks, all passing) before the
+     `.sql` pgTAP files were considered correct — the pgTAP files are the source of
+     truth and will run for real via `supabase test db` once Docker is available; the
+     plain-SQL re-implementation was scratch validation tooling only, not committed to
+     the repo.
+  6. **Seed script idempotency bugs, found by actually running `pnpm seed` three times
+     in a row (not by inspection):**
+     - Visit rows used `generateVisitCode()` (genuinely random, matching what the real
+       API will use for actual visits from M2 onward) as their `on conflict (code) do
+       nothing` key. Random codes never collide, so every re-run tried to insert 30
+       fresh `inside`-eligible rows and hit `visits_one_inside_per_visitor` on the
+       second run. Fixed by giving seed visits a **deterministic** code
+       (`VSEED01`–`VSEED30`, still matching the real check constraint's character
+       class) instead — fixture data needs a stable natural key to upsert on; only
+       real, API-created visits should get random codes.
+     - The same seed run could assign **the same visitor to two different `inside`
+       rows** (two different loop indices landing on the same `i % 15`), independently
+       violating BR-15's partial unique index even within a single run. Fixed with a
+       dedicated counter that only advances for `inside`-status seed rows, guaranteeing
+       6 distinct visitors for the 6 seeded `inside` visits.
+     - `gate_devices` seeding used a random `token_hash` (correct for a real device —
+       pairing tokens must be unguessable) with `on conflict (token_hash) do nothing`,
+       which — like the visit codes — never collides, so three runs produced three
+       devices. Fixed by checking existence on `(gate_id, label)` instead of relying on
+       the random column to conflict.
+  7. **A fake, local/staging-only "warden" `users` row (`google_sub =
+     'seed-fake-warden'`) is seeded** purely to satisfy FK constraints on fixture data
+     (`residents.decided_by`, `gate_devices.paired_by`) that require a real `users.id`.
+     This is distinct from the real `SEED_WARDEN_EMAIL` `staff_invites` row (SDD
+     §12.1), which stays unaccepted until an actual person signs in with Google — no
+     such flow exists yet (M1), so no real warden `users` row can exist yet either.
+  8. **Seed-created `staff_invites` rows (super_admin, warden) use a 10-year
+     `expires_at`.** The SDD specifies 48h expiry for invites a *warden* sends via
+     FR-06, but is silent on the expiry for the two seed-created invites specifically,
+     which (unlike FR-06 invites) have no inviter able to resend them if they lapse.
+     10 years is a pragmatic "won't expire during the prototype's life" choice, not an
+     SDD-specified value — flagged here per `CLAUDE.md` §1.4 rather than silently
+     picked.
+  9. **`apps/api/src/db/index.ts`'s `Database` interface stays an empty placeholder**
+     — `kysely-codegen` (named in SDD §8.4/§20.4 as the way to generate it) was not run
+     in this milestone. The task scope was schema/migrations/tests/seed, not API-layer
+     wiring; generating real Kysely types is reasonable to do at the start of the
+     milestone that first writes a typed query against this schema, not before.
+- **Why:** each deviation is the minimum change needed to make the literal SDD text
+  actually executable (1–3), to get genuine (not asserted) validation given this
+  environment's constraints (4–5), or a real bug this milestone's own validation step
+  caught before it could ship (6) — plus two small, disclosed fixture-data judgment
+  calls (7–8) and one explicitly deferred piece of follow-on work (9).
+- **SDD updated?** No. Items 1–3 are implementation necessities (the SDD's SQL as
+  written doesn't run outside Supabase/`psql`), not product or architecture changes —
+  worth a precision addendum to §11.7 in a future authorized SDD revision (the literal
+  `:'api_password'` syntax specifically), but out of scope for this pass to edit. Items
+  4–5 are about this session's environment, not the product. Items 6–9 add
+  implementation detail the SDD never specified at this level (seed-script internals),
+  so there is nothing in the SDD to update.
+
 Template for a new entry:
 
 ```markdown

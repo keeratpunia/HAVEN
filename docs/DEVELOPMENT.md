@@ -24,15 +24,25 @@ Target: clone to a working local gate check-in in under an hour.
 
 1. `git clone` the repo, then `pnpm install`.
 2. `supabase start` (brings up local Postgres + Storage), then `supabase db reset`
-   (applies all migrations). Create the `haven_api` role with the local password from
-   `.env.example`.
+   (applies all migrations in `supabase/migrations/`). The `haven_api` role is created
+   **by the first migration itself** — you don't create it separately — with a
+   literal local-dev-only password (`haven_api_local_dev_only`); see
+   `docs/DECISIONS.md` DEC-004 item 3 for why, and rotate it via `ALTER ROLE
+   haven_api WITH PASSWORD '<secret>'` before this ever touches staging/production.
 3. `cp .env.example apps/api/.env` and fill in local values. Generate secrets with
    `openssl rand -base64 32` (used for `JWT_SECRET`, `OTP_PEPPER`,
-   `DATA_ENCRYPTION_KEY`).
+   `DATA_ENCRYPTION_KEY`). `DATA_ENCRYPTION_KEY` and `SEED_SUPER_ADMIN_EMAIL`/
+   `SEED_WARDEN_EMAIL` are required by the seed script specifically (step 4) — the API
+   server itself doesn't need them to boot (`docs/ARCHITECTURE.md`/`apps/api/src/config.ts`
+   only validate what `server.ts` actually uses).
 4. `pnpm --filter api seed` to load GH-8, a gate, rules v1, seed staff invites, and
-   (local/staging only) fake rooms/residents/visitors. Then
-   `pnpm --filter api db:types` to regenerate Kysely types from the schema
-   (`kysely-codegen`).
+   (local/staging only) fake rooms/residents/visitors/visits/a gate device. Safe to run
+   more than once — it's idempotent (SDD §11.9; verified by running it three times in a
+   row during the database-foundation milestone, see `docs/DECISIONS.md` DEC-004 item
+   6). `pnpm --filter api db:types` (regenerating real Kysely types from the schema via
+   `kysely-codegen`) is **not wired up yet** — `apps/api/src/db/index.ts`'s `Database`
+   interface is still an empty placeholder; this is deferred to the milestone that
+   first writes a typed query (DEC-004 item 9), not an oversight.
 5. `pnpm dev` — Turborepo runs the API on `:8080` and Expo on `:8081`.
 6. **Web / gate testing:** open `http://localhost:8081/gate`, pair with the code the
    seed script printed. Open the printed invite URL in a second browser profile with
@@ -42,53 +52,51 @@ Target: clone to a working local gate check-in in under an hour.
 8. **Phone-on-LAN testing:** camera and geolocation require HTTPS. Use
    `expo start --tunnel`, or a tunnel such as Cloudflare Tunnel for the web build.
 
-### 2a. What actually works today (bootstrap milestone — verified 2026-10-01)
+### 2a. What actually works today (verified 2026-10-01, through the database-foundation milestone)
 
-The flow above is the full SDD §20.4 sequence, which needs the M1 schema/migrations to
-exist. **As of the bootstrap milestone, steps 2 and 4 above don't apply yet** —
-`supabase/migrations/` is empty and there is no seed script. Here is the command
-sequence that was actually run against this repository and confirmed working, in this
-exact order:
+The bootstrap milestone left two gaps: `supabase/migrations/` was empty, and local
+Supabase (Docker) could not be started in that session's sandbox. The
+database-foundation milestone closed the first gap completely (the full SDD §11 schema
+now exists and is migrated/tested) but **could still not get a working local Docker
+Supabase stack in this environment** — this time traced to the sandbox's `C:` drive
+having almost no free space, which starved Docker Desktop's backend even after the
+disk was cleared and Docker was relaunched twice. See `docs/DECISIONS.md` DEC-004 for
+the full account, including why this doesn't change the documented workflow below.
+
+Because of that, migrations/seed/tests were validated against a real (non-Docker)
+Postgres 18.4 server via the `embedded-postgres` npm package — genuine PostgreSQL
+binaries, not a mock — as a one-off validation substitute, **not** a change to this
+project's local-dev tooling. The command sequence below is what a developer with a
+working Docker Desktop actually runs; it is believed correct because the same SQL and
+the same seed script were proven to work against a real Postgres server by this exact
+sequence (with `npx supabase start`/`supabase db reset` swapped for the embedded-postgres
+equivalent — recreate database, apply each file in `supabase/migrations/` in order):
 
 ```bash
-# 1. Install pnpm if you don't have it (any method is fine; this is what this session used)
-npm install -g pnpm@9
-
-# 2. Install all workspace dependencies
 pnpm install
+pnpm lint && pnpm typecheck && pnpm format:check && pnpm test && pnpm build
 
-# 3. Lint, typecheck, format-check, test, build — every workspace, via Turborepo
-pnpm lint
-pnpm typecheck
-pnpm format:check
-pnpm test
-pnpm build
+npx supabase start          # brings up local Postgres + Storage (needs Docker running)
+npx supabase db reset       # applies supabase/migrations/*.sql to a fresh database
 
-# 4. Run the API standalone (no database required yet — /health needs none;
-#    /ready will correctly report 503 until a real DATABASE_URL is reachable)
 cp .env.example apps/api/.env
-# edit apps/api/.env: at minimum set DATABASE_URL and DATABASE_DIRECT_URL to *something*
-# syntactically valid (a real Postgres is only needed once /ready must return 200)
-pnpm --filter @haven/api build
-node --env-file=apps/api/.env apps/api/dist/server.js
-# in another terminal:
-curl http://localhost:8080/health   # {"ok":true,"version":"0.0.0"}
-curl http://localhost:8080/ready    # 503 {"ok":false,"db":false,...} until a real DB answers
-
-# 5. Run the mobile app's web export (proves Metro/Expo Router/workspace packages
-#    resolve end to end; this is NOT a product screen, just the boot placeholder)
-pnpm --filter @haven/mobile exec expo export --platform web
+# fill in DATABASE_URL (the pooler URL supabase start prints), DATA_ENCRYPTION_KEY
+# (openssl rand -base64 32), SEED_SUPER_ADMIN_EMAIL, SEED_WARDEN_EMAIL
+pnpm --filter api seed      # idempotent — safe to run again
+pnpm --filter api seed      # confirm it really is: row counts must not change
 ```
 
-**Known gap, not silently assumed away:** local Supabase (`npx supabase start`) could
-not be started in the sandbox this bootstrap was built in — Docker's CLI is present but
-its daemon isn't running/reachable there (confirmed with `docker ps`). `supabase/
-config.toml` was generated by the real Supabase CLI (`supabase init`) and is expected
-to work normally on a developer machine with Docker Desktop running; it just wasn't
-possible to prove the `GET /ready` → `200` (real-DB) path in this session. See
-`docs/DECISIONS.md` DEC-003 for the full account. **Whoever picks up M1 should run
-`npx supabase start` first and confirm `/ready` returns 200** before writing the first
-migration — that closes this gap rather than carrying it forward silently.
+**Known gap, not silently assumed away:** the `pg_cron` extension and `pg_cron`-backed
+job scheduling, and the real Supabase `storage.buckets` rows, were never exercised
+against genuine Supabase infrastructure in this environment — both migrations
+guard against their absence and were only proven to *no-op safely* without them
+(`supabase/migrations/20261001000001_init.sql`, `20261001000002_storage_buckets.sql`;
+`docs/DECISIONS.md` DEC-004 items 1–2). **Whoever next has a working Docker Desktop
+should run `npx supabase start` + `npx supabase db reset`, confirm both migrations take
+their non-guarded branch (the `pg_cron` extension installs, the 7 `cron.schedule()`
+calls succeed, 3 buckets appear in `storage.buckets`), then run `pnpm --filter api
+seed` and `supabase test db` (the real pgTAP run, not the ad hoc validation this
+session used) — that closes this gap rather than carrying it forward silently.**
 
 ## 3. Repository layout
 

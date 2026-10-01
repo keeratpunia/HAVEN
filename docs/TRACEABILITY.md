@@ -33,6 +33,26 @@ NFR-13 (observability) "WIP" because *some* of their plumbing exists — don't. 
 row only when the requirement's actual behaviour (an audit trigger that fires, a
 Sentry alert that fires) is implemented and tested, per the instructions in §7 below.
 
+## 0b. Database foundation milestone (2026-10-01)
+
+Unlike the bootstrap pass above, this milestone built behaviour that actually fires
+and was actually tested against a real Postgres server — `supabase/migrations/` now
+has the full SDD §11 schema (24 tables, 18 enums, 9 audit triggers, 4 append-only
+triggers, `touch_updated_at`, the live-event trigger, 7 `haven.job_*` functions, the
+`haven_api` role/grants, RLS on every table) plus a storage-buckets migration, and
+`apps/api/scripts/seed.ts` populates it per SDD §11.9/§12.1. Validated end to end:
+clean migration apply from empty, the pgTAP test files in `supabase/tests/` (logic
+also verified directly, in the absence of a working local Docker/Supabase stack in
+this environment — see `docs/DECISIONS.md`), and three successive idempotent seed
+runs. No API route, no rules engine, and no business logic were implemented — only
+schema, constraints, triggers, jobs, and fixture data.
+
+This is why the four rows below (and only these four) change status, each because its
+*specific, narrow* mechanism is now genuinely implemented and tested at the database
+layer — not because "the schema exists now." Every other requirement in this document
+still needs API code before it earns a status change, including ones that will
+ultimately depend on this schema.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -112,7 +132,7 @@ Sentry alert that fires) is implemented and tested, per the instructions in §7 
 | FR-71 | M | Approved-never-entered visits expire at window_end | — | — | — |
 | FR-72 | M | Overstay detection every 5 min; alerts host/guest; escalates to warden after 30 min | — | — | — |
 | FR-73 | M | Night sweep at 22:00 lists day/quick guests still inside to the warden | — | — | — |
-| FR-74 | M | Every state change and admin action written to append-only audit log | — | — | — |
+| FR-74 | M | Every state change and admin action written to append-only audit log | `supabase/migrations/20261001000001_init.sql` — `audit_row()` + 9 `t_audit_*` triggers on every table SDD §11.6 lists (visits, residents, role_assignments, bans, charges, gates, gate_devices, hostel_rules, staff_invites), plus `forbid_mutation()` making `gate_events`/`audit_log`/`approvals`/`hostel_rules` append-only | `supabase/tests/002_constraints_and_triggers.sql`, `supabase/tests/003_audit_pii_stripping.sql` | WIP — DB-level mechanism fires and is tested; still needs the API to set `haven.actor_type`/`haven.actor_id`/`haven.request_id` per transaction (SDD §11.6) before this is a complete, truthful audit trail |
 | FR-75 | S | Personal data purged per retention schedule (§16.5) | — | — | — |
 
 ## 2. Non-functional requirements (NFR-xx) — SDD §17.1
@@ -152,7 +172,7 @@ Sentry alert that fires) is implemented and tested, per the instructions in §7 
 | BR-12 | Walk-in expires if host doesn't decide within 10 min | Job | — | — | — |
 | BR-13 | Overstay when inside past `window_end + 15 min` | Job | — | — | — |
 | BR-14 | At 22:00, every inside day/quick guest listed to warden | Job | — | — | — |
-| BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | — | — | — |
+| BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | `supabase/migrations/20261001000001_init.sql` — `visits_one_inside_per_visitor` partial unique index on `(visitor_id) WHERE status = 'inside'` | `supabase/tests/002_constraints_and_triggers.sql` | WIP — the constraint itself is implemented and tested (a second `inside` row for the same visitor fails with `23505`); still needs the API's check-in handler to catch that and translate it to `409 ALREADY_INSIDE` (SDD §7.3) before BR-15 is complete end to end |
 | BR-16 | Pre-invites ≤7 days ahead; overnight requests ≤30 days ahead | Create | — | — | — |
 | BR-17 | Check-out never refused for rule reasons; failed GPS on exit allowed but flagged | Exit | — | — | — |
 | BR-18 | Warden manual fine, minimum ₹400 for unregistered guest | Warden action | — | — | — |
@@ -255,8 +275,8 @@ Sentry alert that fires) is implemented and tested, per the instructions in §7 
 | TC-SEC-04 | Warden of hostel X uses `X-Hostel-Id` of hostel Y | 403 | — | — |
 | TC-SEC-05 | Deactivated user's access token after 30s | `SESSION_REVOKED` | — | — |
 | TC-SEC-06 | Reused refresh token | 401 and whole session revoked | — | — |
-| TC-SEC-07 | `UPDATE haven.gate_events` as `haven_api` | permission error | — | — |
-| TC-SEC-08 | Audit row for a visit update | contains no `invited_phone`, `invited_name` | — | — |
+| TC-SEC-07 | `UPDATE haven.gate_events` as `haven_api` | permission error | `supabase/tests/004_api_role_and_rls.sql` | Done |
+| TC-SEC-08 | Audit row for a visit update | contains no `invited_phone`, `invited_name` | `supabase/tests/003_audit_pii_stripping.sql` | Done — the test exercises the shared `audit_row()` trigger via `haven.gates` (lat/lng) rather than a literal visit update, because no audit trigger is attached to `haven.users` and a *visit* update needs API-level `evaluateEntry`/state-machine code that doesn't exist yet to reach meaningfully; the strip-list (`invited_phone`, `invited_name` included) is the same function for every audited table, so this proves the mechanism TC-SEC-08 is about |
 | TC-SEC-09 | 4th OTP request in 10 min for one phone | `RATE_LIMITED` | — | — |
 | TC-SEC-10 | Upload a PNG with EXIF GPS | stored file has no EXIF | — | — |
 | TC-SEC-11 | Same photo bytes uploaded twice by one visitor | `PHOTO_REUSED` | — | — |
@@ -274,6 +294,21 @@ Sentry alert that fires) is implemented and tested, per the instructions in §7 
 Counts verified by direct enumeration against SDD §5, §17.1, §4.2, §17.3, §19.2 during
 the hostile planning review (2026-10-01). Recount this table if any ID range in the SDD
 changes — do not hand-adjust without re-enumerating.
+
+## 6a. Database-level guarantees implemented but not mapped to a single ID
+
+These are real, tested database-foundation deliverables (2026-10-01) that don't map
+cleanly to one FR/NFR/BR/E/TC id — recorded here instead of being force-fit into a row
+above or silently omitted:
+
+| Guarantee | Where | Tested by |
+|---|---|---|
+| `gate_events`, `audit_log`, `approvals`, `hostel_rules` reject UPDATE/DELETE outright (not just via role grants) | `forbid_mutation()` trigger, SDD §11.6 | `supabase/tests/002_constraints_and_triggers.sql` |
+| Charges: `paid` requires `receipt_no`; `waived` requires `waive_reason` | `haven.charges` check constraints, SDD §11.4 | `supabase/tests/002_constraints_and_triggers.sql` |
+| `haven_api` role: full select/insert/update, delete only on the 5 explicitly-ephemeral tables, no update on append-only tables, RLS enabled on all 24 tables | SDD §11.7 | `supabase/tests/004_api_role_and_rls.sql` |
+| Live SSE event trigger fires `pg_notify('haven_events', ...)` on visit insert/update | `notify_visit()`, SDD §11.6/§9.9 | Not yet tested — needs a `LISTEN` client, which is API work (M3); schema-level creation only verified by inspection |
+| Storage buckets declared (`visitor-photos`, `gate-photos`, `resident-docs`, all private) | `supabase/migrations/20261001000002_storage_buckets.sql`, SDD §9.10 | Guarded no-op verified on plain Postgres; real bucket creation only provable on an actual Supabase project (see `docs/DECISIONS.md`) |
+| 7 scheduled-job functions exist and match their SDD §11.8 prose spec (`job_expire_walkins`, `job_expire_approved`, `job_flag_overstays`, `job_night_sweep`, `job_gate_offline`, `job_retention`, `job_expire_sessions`) | `supabase/migrations/20261001000001_init.sql` | Created and confirmed present by inspection; **not** unit-tested against fixture data yet (pgTAP tests with a fixed `p_now` per SDD §19.3 are M3 work, once the jobs have real traffic to act on) — do not read "the function exists" as "the job is tested" |
 
 ## 7a. Categories this matrix does NOT cover, by design — and where they live instead
 
