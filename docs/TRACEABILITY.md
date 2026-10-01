@@ -85,6 +85,43 @@ finished requirement (same discipline as §0 and §0b above):**
   unmarked.**
 - No real route exists under `/v1` — it is registered as an empty prefix boundary.
 
+## 0d. Rules engine milestone (2026-10-01)
+
+Implements `evaluateCreate`/`evaluateEntry`/`evaluateExit`/`nightsBetween`/`quotaUsed`
+exactly per SDD §4.4's contract, in `packages/shared/src/rules/`. Pure TypeScript — no
+I/O, no `Date.now()`, timezone maths via `luxon` (SDD §4.4). 138 tests, **100%
+branches/statements/functions/lines** (measured via `@vitest/coverage-v8`, not
+assumed — `pnpm --filter shared test:coverage`), satisfying NFR-12's "rules engine
+100% branch coverage." Every SDD §4.6 worked example and every TC-RULE-01..16 case
+from SDD §19.2 is a named test.
+
+**What this does NOT do, so later reviewers don't overclaim (same discipline as §0,
+§0b, §0c above):**
+- The engine only *decides*; nothing calls it yet. No API route runs
+  `evaluateCreate`/`evaluateEntry`/`evaluateExit`, so no BR below is "done" in the
+  sense of actually gating a real request — only in the sense that its specific rule
+  logic is implemented and tested in isolation. Every BR row below marked WIP (not
+  Done) reflects exactly that split.
+- Charge amounts (BR-08, BR-18) are **not** computed by this engine — the SDD's §4.4
+  function contract lists exactly 5 functions (`evaluateCreate`, `evaluateEntry`,
+  `evaluateExit`, `nightsBetween`, `quotaUsed`); charge calculation isn't one of them,
+  and this implementation doesn't add a 6th function beyond what the SDD specifies.
+  BR-08/BR-18 stay unmarked.
+- Jobs (BR-12, BR-13's overstay-flagging half, BR-14) are SQL functions
+  (`supabase/migrations/`, already tracked under §0b), not this engine. BR-12/BR-14
+  stay unmarked here.
+- Side effects named in some BRs (BR-10's "future visits are cancelled", BR-15's "DB
+  constraint") are not this engine's job either — BR-10 is marked WIP only for the
+  suspension-*check* half; BR-15 now has two independent implementations (the DB
+  constraint from §0b, and `ALREADY_INSIDE` here) and both are credited.
+
+A genuine SDD numeric contradiction was found and **not silently resolved** — see
+`docs/DECISIONS.md` DEC-006: the TOO_EARLY worked example's clock digits (14:25
+allow / 14:20 deny) don't algebraically match the SDD's own 30-minute rule (§4.5 step
+6, §4.3 `early_arrival_minutes`, BR-20). This implementation follows the
+three-way-corroborated 30-minute rule; the test suite documents the discrepancy
+in-line rather than quietly matching whichever number was more convenient.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -182,7 +219,7 @@ finished requirement (same discipline as §0 and §0b above):**
 | NFR-09 | Usability | Returning guest ≤30s/≤4 taps; first-time guest ≤3 min | — | — | — |
 | NFR-10 | Compatibility | Guest web: Chrome 100+/Android 9+, Safari iOS 15+, Samsung Internet 18+; app Android 9+ | — | — | — |
 | NFR-11 | Accessibility | WCAG 2.1 AA for guest web; text scales to 200% | — | — | — |
-| NFR-12 | Maintainability | Rules engine 100% branch coverage; API services ≥70% line coverage; no `any` | — | — | — |
+| NFR-12 | Maintainability | Rules engine 100% branch coverage; API services ≥70% line coverage; no `any` | `packages/shared/vitest.config.ts` (coverage thresholds), `eslint.config.mjs` (`no-explicit-any` across every workspace) | `pnpm --filter shared test:coverage` — 100% branches/statements/functions/lines, verified | WIP — the rules-engine coverage bar and the no-`any` lint rule are both genuinely met and enforced; API services' ≥70% line coverage isn't tracked/enforced anywhere yet (no coverage config in `apps/api`) |
 | NFR-13 | Observability | Every request has a request ID; errors reach Sentry within 1 min | `apps/api/src/lib/request-id.ts`, wired into every request/error envelope via `apps/api/src/app.ts` | `test/app.test.ts` ("unknown routes return the SDD §12.1 error envelope with a request id") | WIP — the request-ID half is genuinely done and tested on every response, including errors; Sentry is not integrated, so "errors reach Sentry within 1 min" is not satisfied |
 | NFR-14 | Cost | ≤ ₹1,500/month during pilot | — | — | — |
 
@@ -190,26 +227,26 @@ finished requirement (same discipline as §0 and §0b above):**
 
 | ID | Rule (summary) | Enforced at | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| BR-01 | No admission without verified, non-suspended host approval | Create + entry | — | — | — |
-| BR-02 | Day/quick-drop guests must check in before 20:00 | Entry | — | — | — |
-| BR-03 | No guest may check in at/after 22:00 | Entry | — | — | — |
-| BR-04 | Day visit windows between visiting_start and day_visit_latest_end, one date | Create | — | — | — |
-| BR-05 | Overnight in room: max 3 nights/host/calendar month (IST) | Create | — | — | — |
-| BR-06 | Overnight in room: at most one overnight guest per host at a time | Create | — | — | — |
-| BR-07 | Opposite/undisclosed gender → visitors_room zone, no overnight/guest_room | Create + display | — | — | — |
-| BR-08 | Overnight ₹50/night, guest room ₹150/night; pending charge on warden approval. **₹150 is an SDD working default awaiting warden confirmation, not yet a final decision** — see `docs/DECISIONS.md` Q8 note | Approval | — | — | — |
-| BR-09 | Banned guests cannot be invited, request entry, or check in | Create + entry | — | — | — |
-| BR-10 | Suspended hosts cannot create/approve; future visits cancelled on suspension start | Create + entry | — | — | — |
-| BR-11 | Host max `max_active_day_guests` (default 3) day/quick guests inside at once | Create + approval | — | — | — |
+| BR-01 | No admission without verified, non-suspended host approval | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_NOT_VERIFIED`/`HOST_SUSPENDED` checks, `packages/shared/src/rules/evaluate-create.ts`, `evaluate-entry.ts` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` (incl. TC-RULE-13/14) | WIP — rule logic implemented and tested; no API route calls it yet |
+| BR-02 | Day/quick-drop guests must check in before 20:00 | Entry | `evaluateEntry` — `AFTER_ENTRY_CUTOFF` | `evaluate-entry.test.ts` (worked example + exact-boundary tests) | WIP |
+| BR-03 | No guest may check in at/after 22:00 | Entry | `evaluateEntry` — `AFTER_HARD_CUTOFF` | `evaluate-entry.test.ts` (worked example + exact-boundary tests) | WIP |
+| BR-04 | Day visit windows between visiting_start and day_visit_latest_end, one date | Create | `evaluateCreate` — `WINDOW_INVALID` (crosses-dates + visiting-hours checks) | `evaluate-create.test.ts` | WIP |
+| BR-05 | Overnight in room: max 3 nights/host/calendar month (IST) | Create | `evaluateCreate` — `QUOTA_EXCEEDED`, using `nightsBetween`/`quotaUsed` | `evaluate-create.test.ts` (worked examples incl. Oct/Nov boundary), `nights.test.ts` | WIP |
+| BR-06 | Overnight in room: at most one overnight guest per host at a time | Create | `evaluateCreate` — `OVERNIGHT_OVERLAP` | `evaluate-create.test.ts` (TC-RULE-15 + boundary tests) | WIP |
+| BR-07 | Opposite/undisclosed gender → visitors_room zone, no overnight/guest_room | Create + display | `evaluateCreate` — `TYPE_NOT_ALLOWED_FOR_GENDER` + `computeZone`, `packages/shared/src/rules/zone.ts` | `zone.test.ts`, `evaluate-create.test.ts` | WIP |
+| BR-08 | Overnight ₹50/night, guest room ₹150/night; pending charge on warden approval. **₹150 is an SDD working default awaiting warden confirmation, not yet a final decision** — see `docs/DECISIONS.md` Q8 note | Approval | — | — | — (charge calculation is explicitly not one of the SDD §4.4's 5 rules-engine functions — see `docs/TRACEABILITY.md` §0d) |
+| BR-09 | Banned guests cannot be invited, request entry, or check in | Create + entry | `evaluateCreate`/`evaluateEntry` — `VISITOR_BANNED` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP |
+| BR-10 | Suspended hosts cannot create/approve; future visits cancelled on suspension start | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_SUSPENDED` check only | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — the suspension *check* is implemented; "future visits cancelled" is a separate side effect no code implements yet |
+| BR-11 | Host max `max_active_day_guests` (default 3) day/quick guests inside at once | Create + approval | `evaluateCreate` — `HOST_DAY_LIMIT` (deny, today only); `evaluateEntry` — `HOST_DAY_LIMIT` (flag) | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP |
 | BR-12 | Walk-in expires if host doesn't decide within 10 min | Job | — | — | — |
-| BR-13 | Overstay when inside past `window_end + 15 min` | Job | — | — | — |
+| BR-13 | Overstay when inside past `window_end + 15 min` | Job | — | — | — (the *job* that flags overstay is unrelated to this milestone; `evaluateExit`'s `LATE_EXIT` flag is a distinct, SDD-explicit check at the moment of exit — see TC-RULE-16 below) |
 | BR-14 | At 22:00, every inside day/quick guest listed to warden | Job | — | — | — |
-| BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | `supabase/migrations/20261001000001_init.sql` — `visits_one_inside_per_visitor` partial unique index on `(visitor_id) WHERE status = 'inside'` | `supabase/tests/002_constraints_and_triggers.sql` | WIP — the constraint itself is implemented and tested (a second `inside` row for the same visitor fails with `23505`); still needs the API's check-in handler to catch that and translate it to `409 ALREADY_INSIDE` (SDD §7.3) before BR-15 is complete end to end |
-| BR-16 | Pre-invites ≤7 days ahead; overnight requests ≤30 days ahead | Create | — | — | — |
-| BR-17 | Check-out never refused for rule reasons; failed GPS on exit allowed but flagged | Exit | — | — | — |
+| BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | `supabase/migrations/20261001000001_init.sql` (`visits_one_inside_per_visitor`) **and now also** `evaluateEntry` — `ALREADY_INSIDE`, `packages/shared/src/rules/evaluate-entry.ts` | `supabase/tests/002_constraints_and_triggers.sql`, `evaluate-entry.test.ts` | WIP — two independent layers now implement this (DB constraint + rules-engine check); still needs the API to wire both into the actual check-in handler |
+| BR-16 | Pre-invites ≤7 days ahead; overnight requests ≤30 days ahead | Create | `evaluateCreate` — `TOO_FAR_AHEAD` | `evaluate-create.test.ts` (exact day-count boundaries for both limits) | WIP |
+| BR-17 | Check-out never refused for rule reasons; failed GPS on exit allowed but flagged | Exit | `evaluateExit` — never returns `deny`; `LOCATION_UNVERIFIED` flag, `packages/shared/src/rules/evaluate-exit.ts` | `evaluate-exit.test.ts` | WIP |
 | BR-18 | Warden manual fine, minimum ₹400 for unregistered guest | Warden action | — | — | — |
-| BR-19 | Overnight window: visiting_start on arrival date to 22:00; checkout by overnight_checkout_time | Create + entry | — | — | — |
-| BR-20 | Guest may arrive up to 30 min before window_start | Entry | — | — | — |
+| BR-19 | Overnight window: visiting_start on arrival date to 22:00; checkout by overnight_checkout_time | Create + entry | `evaluateEntry`'s `AFTER_HARD_CUTOFF`/`TOO_EARLY`/`WINDOW_ENDED` correctly gate an overnight visit *given* a correctly-derived `windowStart`/`windowEnd` | `evaluate-entry.test.ts` (overnight worked examples) | WIP — the engine honours the window; deriving `windowStart`/`windowEnd` from `arrivalDate`/`departureDate` per this BR's formula is API-layer work (SDD §12.6) not yet built |
+| BR-20 | Guest may arrive up to 30 min before window_start | Entry | `evaluateEntry` — `TOO_EARLY`, `packages/shared/src/rules/evaluate-entry.ts` | `evaluate-entry.test.ts` | WIP — see `docs/DECISIONS.md` DEC-006 for a documented SDD contradiction between this BR's "30 min" and the §4.6 worked example's literal clock digits, resolved in favour of the 30-minute rule |
 
 ## 4. Edge cases (E-xx) — SDD §17.3
 
@@ -233,7 +270,7 @@ finished requirement (same discipline as §0 and §0b above):**
 | E-16 | GPS inside geofence but guest actually in a nearby room | Mitigated by calibration + live photo; documented limitation | — | — | — |
 | E-17 | Guest denies camera permission | G-16 enable instructions; no check-in without photo | — | — | — |
 | E-18 | Resident moves out with future visits | Marked `left`; future visits cancelled | — | — | — |
-| E-19 | Overnight stay spans two months | Nights split by month for quota | — | — | — |
+| E-19 | Overnight stay spans two months | Nights split by month for quota | `packages/shared/src/rules/nights.ts` (`monthsTouched`) + `evaluate-create.ts`'s per-month `QUOTA_EXCEEDED` loop | `nights.test.ts`, `evaluate-create.test.ts` (31 Oct → 2 Nov / 30 Oct → 1 Nov worked examples) | Done — the month-splitting logic itself is fully implemented and tested; no API/DB layer needed for this specific edge case, it's pure date arithmetic |
 | E-20 | Two residents claim the same room | Allowed (roommates) | — | — | — |
 | E-21 | Host disputes by mistake | Warden resolves after talking to host; visit stays as is | — | — | — |
 | E-22 | Guest never checks out, host doesn't respond | Overstay → warden escalation → night sweep → force check-out | — | — | — |
@@ -246,12 +283,12 @@ finished requirement (same discipline as §0 and §0b above):**
 
 | ID | Case | Expected | Test file | Status |
 |---|---|---|---|---|
-| TC-RULE-01..11 | All worked examples in SDD §4.6 | As listed | — | — |
-| TC-RULE-12 | Undisclosed gender, day invite to GH-8 | allow, zone `visitors_room` | — | — |
-| TC-RULE-13 | Host status `pending` creates invite | deny `HOST_NOT_VERIFIED` | — | — |
-| TC-RULE-14 | Suspended host until yesterday | allow (suspension expired) | — | — |
-| TC-RULE-15 | Overnight overlap with existing approved overnight | deny `OVERNIGHT_OVERLAP` | — | — |
-| TC-RULE-16 | Exit after window + grace | allow with `LATE_EXIT` flag | — | — |
+| TC-RULE-01..11 | All worked examples in SDD §4.6 | As listed | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | Done — 10 of 11 implemented exactly per the SDD's literal figures; the 11th (`TOO_EARLY` at "14:25") is implemented against the *correct* 30-minute rule rather than the SDD's self-contradictory literal digit — see `docs/DECISIONS.md` DEC-006 |
+| TC-RULE-12 | Undisclosed gender, day invite to GH-8 | allow, zone `visitors_room` | `evaluate-create.test.ts` | Done |
+| TC-RULE-13 | Host status `pending` creates invite | deny `HOST_NOT_VERIFIED` | `evaluate-create.test.ts` | Done |
+| TC-RULE-14 | Suspended host until yesterday | allow (suspension expired) | `evaluate-create.test.ts` | Done |
+| TC-RULE-15 | Overnight overlap with existing approved overnight | deny `OVERNIGHT_OVERLAP` | `evaluate-create.test.ts` | Done |
+| TC-RULE-16 | Exit after window + grace | allow with `LATE_EXIT` flag | `evaluate-exit.test.ts` | Done |
 
 ### Gate token (TC-TOK)
 
@@ -318,10 +355,16 @@ finished requirement (same discipline as §0 and §0b above):**
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
 | FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 0 | 0 | 50 | 0 |
-| NFR | 14 | 0 | 0 | 14 | 0 |
-| BR | 20 | 0 | 0 | 20 | 0 |
-| E | 24 | 0 | 0 | 24 | 0 |
-| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 0 | 0 | 51 | 0 |
+| NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
+| BR | 20 | 0 | 15 (BR-01..07, 09..11, 15..17, 19..20) | 5 (BR-08, 12, 13, 14, 18) | 0 |
+| E | 24 | 1 (E-19) | 0 | 23 | 0 |
+| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 18 (TC-RULE ×16, TC-SEC-07, TC-SEC-08) | 0 | 33 | 0 |
+
+Corrected during the rules-engine milestone: this table had silently gone stale after
+the API-foundation milestone set NFR-13 to WIP without updating the summary row —
+fixed here, and flagged so future milestones remember to update this table in the same
+PR that changes a status above it (§7 below already says this; the instruction alone
+didn't prevent the drift once, so this note is a second line of defence).
 
 Counts verified by direct enumeration against SDD §5, §17.1, §4.2, §17.3, §19.2 during
 the hostile planning review (2026-10-01). Recount this table if any ID range in the SDD

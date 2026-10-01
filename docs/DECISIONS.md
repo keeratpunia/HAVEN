@@ -395,6 +395,74 @@ Source for all of Part 1: SDD §2.7.
   the code didn't meet them, now it does). Items 3–7 fill in implementation detail the
   SDD doesn't specify at this granularity.
 
+### DEC-006 — Rules engine milestone: a genuine SDD numeric contradiction (TOO_EARLY worked example vs. BR-20/config), plus interpretation decisions
+
+- **Date:** 2026-10-01
+- **Context:** Implementing `evaluateCreate`/`evaluateEntry`/`evaluateExit` exactly per
+  SDD §4.4–4.6, with the SDD's own worked examples as test cases (§4.6: "each becomes
+  a unit test").
+- **Findings / decisions:**
+  1. **Genuine SDD contradiction: the TOO_EARLY worked example's clock digits don't
+     satisfy the SDD's own rule for that check.** SDD §4.5 step 6: *"TOO_EARLY — now <
+     window_start − 30 min → deny."* SDD §4.3: `early_arrival_minutes: 30`. BR-20: "A
+     guest may arrive up to 30 min before window_start." All three agree: 30 minutes.
+     SDD §4.6's worked example: *"Arrives 14:25 for 15:00 window → allow"* / *"Arrives
+     14:20 for 15:00 window → deny TOO_EARLY."* Arithmetic: 15:00 − 30 min = 14:30.
+     Both 14:25 and 14:20 are before 14:30, so the literal rule denies **both** — but
+     the example says 14:25 should be allowed. A threshold that makes both example
+     rows correct would need to be ~35 minutes, which appears nowhere else in the SDD.
+     **Decision:** implemented the engine to the 30-minute rule (three independent,
+     mutually consistent citations) rather than reverse-engineering a 35-minute
+     threshold from one two-point example, since CLAUDE.md §1.2 treats a stated
+     constant (`early_arrival_minutes: 30`) as the kind of value to "use verbatim,"
+     and three sources outweigh one. `src/rules/evaluate-entry.test.ts` keeps the
+     14:20→deny case (consistent under either threshold) and replaces the 14:25 case
+     with the true 30-minute boundary (14:30→allow), with the contradiction documented
+     in-line in a code comment pointing back to this entry. **Not silently resolved**:
+     flagged here exactly because CLAUDE.md §1.3 requires it, and because a future SDD
+     revision should pick one number and fix the other three to match, not the other
+     way around.
+  2. **`guestGender: null` (not yet known, SDD §12.6: optional at invite creation) is
+     treated the same as `'undisclosed'`** for both `TYPE_NOT_ALLOWED_FOR_GENDER` (N/A
+     for day/quick_drop regardless) and zone computation (`visitors_room`, the more
+     conservative default). The SDD states the real resolution explicitly — "zone is
+     recomputed when the invite is claimed," i.e. the API calls `evaluateCreate` again
+     once gender is known — so this default only governs the brief window between
+     invite creation and claim, not a permanent misclassification. Documented in
+     `src/rules/zone.ts`'s own doc comment, not just here.
+  3. **`BR-06`'s "no overlapping windows" / `max_concurrent` interpreted as: deny if
+     admitting the new request would push the count of mutually-overlapping active
+     bookings past `max_concurrent`**, not "deny on any overlap unconditionally." With
+     `max_concurrent: 1` (GH-8's only configured value) these are equivalent, but the
+     config field's existence implies the SDD intends `max_concurrent` to be a real,
+     independently-meaningful number for some future config, not a vestigial restating
+     of BR-06's prose — the implementation honours that rather than hardcoding "any
+     overlap denies."
+  4. **The opposite-gender zone comes from `cfg.opposite_gender.zone`, not a hardcoded
+     `'visitors_room'` literal** in `computeZone` — "Rules are data, not code"
+     (CLAUDE.md §3.3) applies even though GH-8's only configured value today is
+     `'visitors_room'`.
+  5. **`nightsBetween`/`quotaUsed` are used internally by `evaluateCreate`'s
+     QUOTA_EXCEEDED/OVERNIGHT_OVERLAP checks**, rather than requiring the API caller to
+     pre-flatten existing bookings into a nights array. `CreateContext` instead carries
+     `existingOvernightBookings: {arrivalDate, departureDate}[]` (the natural shape the
+     API already has from querying `haven.visits`), keeping `nightsBetween`/`quotaUsed`
+     genuinely reusable standalone functions (matching their literal SDD §4.4 export
+     signatures) while avoiding making every caller re-derive nights by hand.
+  6. **Branch coverage is measured, not assumed**: `@vitest/coverage-v8` added to
+     `packages/shared`, scoped to `src/rules/**` with 100%
+     branches/statements/functions/lines thresholds enforced by `vitest.config.ts`
+     (SDD NFR-12: "Rules engine 100% branch coverage"). Verified at 100% across all
+     four metrics — not just asserted.
+- **Why:** item 1 is a real, documented SDD defect this implementation routes around
+  rather than papering over silently; items 2–5 are judgment calls the SDD doesn't
+  spell out at this level of implementation detail, recorded per CLAUDE.md §1.4; item 6
+  is the task's own explicit instruction to verify coverage, not claim it.
+- **SDD updated?** No — item 1 should be reconciled in the SDD text in a future
+  authorized revision (pick 30 or ~35 minutes and make §4.3/§4.5/§4.6 agree); out of
+  scope to edit the SDD in this pass. Items 2–5 fill in implementation detail the SDD
+  doesn't specify, so there is nothing contradictory to update.
+
 Template for a new entry:
 
 ```markdown
