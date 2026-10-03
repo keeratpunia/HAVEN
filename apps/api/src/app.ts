@@ -1,6 +1,7 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
+import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyBaseLogger, type FastifyError, type FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
@@ -9,6 +10,8 @@ import { RevocationCache } from './auth/principal-loader.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerVisitPolicies } from './visits/policy.js';
 import { registerVisitRoutes } from './visits/routes.js';
+import { registerGatePolicies } from './gate/policy.js';
+import { registerGateRoutes } from './gate/routes.js';
 import type { GoogleIdTokenVerifier } from './auth/google.js';
 import { RealGoogleIdTokenVerifier } from './auth/google.js';
 import type { Env } from './config.js';
@@ -18,8 +21,10 @@ import { AppError, toErrorEnvelope } from './lib/errors.js';
 import type { Clock } from './lib/clock.js';
 import { SystemClock } from './lib/clock.js';
 import type { Logger } from './lib/logger.js';
+import { parseDataEncryptionKey } from './lib/crypto.js';
 import { generateRequestId } from './lib/request-id.js';
 import { configureZodValidation, extractZodValidationIssues } from './lib/validation.js';
+import type { MediaStorage } from './gate/media.js';
 
 export interface BuildAppOptions {
   env: Env;
@@ -41,6 +46,9 @@ export interface BuildAppOptions {
    * Real callers never pass this — it's built from `env.GOOGLE_CLIENT_IDS`.
    */
   googleVerifier?: GoogleIdTokenVerifier;
+  /** Where gate/profile photos are written (SDD §9.10). Real callers use
+   * `server.ts`'s `LocalDiskMediaStorage`; tests can inject an in-memory fake. */
+  mediaStorage: MediaStorage;
 }
 
 const BOOT_TIME = new Date();
@@ -90,6 +98,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const googleVerifier =
     options.googleVerifier ?? new RealGoogleIdTokenVerifier(env.GOOGLE_CLIENT_IDS);
   const revocationCache = new RevocationCache(db, clock);
+  const dataEncryptionKey = parseDataEncryptionKey(env.DATA_ENCRYPTION_KEY);
 
   const app = Fastify({
     // Cast: our pino instance (packages' own pino types) is runtime-compatible with
@@ -122,6 +131,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // --- Cookies (SDD §9.5: haven_rt refresh cookie — plugin only; the auth module sets/clears it) ---
   await app.register(cookie);
 
+  // --- Multipart (SDD §9.4: gate/profile photo uploads are multipart form fields) ---
+  await app.register(multipart, { limits: { fileSize: 3 * 1024 * 1024 } });
+
   // --- Rate limiting (SDD §12.11 default; per-route overrides via route `config.rateLimit`) ---
   await app.register(rateLimit, {
     global: true,
@@ -132,7 +144,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // --- Authentication (SDD §8.2 step 2 of the pipeline) ---
   app.addHook(
     'onRequest',
-    createAuthenticateHook({ jwtSecretBase64: env.JWT_SECRET, revocationCache }),
+    createAuthenticateHook({ jwtSecretBase64: env.JWT_SECRET, revocationCache, db }),
   );
 
   app.setErrorHandler((err: FastifyError | AppError, request, reply) => {
@@ -230,11 +242,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // prefix. The auth module is the first real feature module; visits/gate/admin follow
   // in later milestones.
   registerVisitPolicies();
+  registerGatePolicies();
 
   await app.register(
     async (v1) => {
       await registerAuthRoutes(v1, { env, db, clock, googleVerifier });
       await registerVisitRoutes(v1, { db, clock });
+      await registerGateRoutes(v1, {
+        db,
+        clock,
+        dataEncryptionKey,
+        mediaStorage: options.mediaStorage,
+      });
     },
     { prefix: '/v1' },
   );

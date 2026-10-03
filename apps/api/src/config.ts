@@ -14,12 +14,15 @@ import { z } from 'zod';
  * WORKER_ENABLED — those wait for the gate/notify milestones that actually make the
  * *server* use them.
  *
- * `DATA_ENCRYPTION_KEY` and `SEED_SUPER_ADMIN_EMAIL`/`SEED_WARDEN_EMAIL` are
- * deliberately NOT here even though `apps/api/scripts/seed.ts` needs them now — the
- * seed script is a separate process from the server and validates its own env
- * independently (see `scripts/seed.ts`), so running the API does not require seed-only
- * configuration, and running the seed script does not require JWT_SECRET etc. Do not
- * merge the two schemas "for consistency" — they gate different processes.
+ * `SEED_SUPER_ADMIN_EMAIL`/`SEED_WARDEN_EMAIL` are deliberately NOT here even though
+ * `apps/api/scripts/seed.ts` needs them now — the seed script is a separate process
+ * from the server and validates its own env independently (see `scripts/seed.ts`), so
+ * running the API does not require seed-only configuration, and running the seed
+ * script does not require JWT_SECRET etc. Do not merge the two schemas "for
+ * consistency" — they gate different processes.
+ *
+ * `DATA_ENCRYPTION_KEY` was added in the gate milestone — the server now genuinely
+ * encrypts/decrypts gate secrets with it (`gate/secret.ts`).
  */
 const EnvSchema = z.object({
   APP_ENV: z.enum(['local', 'staging', 'production']).default('local'),
@@ -71,6 +74,21 @@ const EnvSchema = z.object({
   // sends real SMS. Never `msg91` without real credentials, never `console` in
   // production (enforced in otp-service.ts, not just by this enum).
   SMS_PROVIDER: z.enum(['console', 'msg91']).default('console'),
+
+  // AES-256-GCM key for gate secrets (SDD §9.1, CLAUDE.md §4). Base64, must decode to
+  // exactly 32 bytes (`parseDataEncryptionKey` in `lib/crypto.ts` enforces the exact
+  // length; this just fails boot fast if it's obviously the wrong shape).
+  DATA_ENCRYPTION_KEY: z
+    .string()
+    .min(1, 'DATA_ENCRYPTION_KEY is required')
+    .refine((value) => Buffer.from(value, 'base64').length === 32, {
+      message: 'DATA_ENCRYPTION_KEY must decode to exactly 32 bytes (base64)',
+    }),
+
+  // Local-disk substitute for Supabase Storage (gate/media.ts's `LocalDiskMediaStorage`
+  // — see that module's comment: this environment has no reliable Supabase/Docker
+  // storage connection, same constraint as DEC-004's embedded-postgres substitute).
+  MEDIA_STORAGE_DIR: z.string().default('.media-storage'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

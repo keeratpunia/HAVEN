@@ -6,10 +6,13 @@ import { getTestDb, resetAllHavenTables } from './db-test-helper.js';
 import { FakeClock } from '../src/lib/clock.js';
 import { FakeGoogleIdTokenVerifier } from '../src/auth/google.js';
 import { sha256 } from '../src/lib/crypto.js';
+import type { MediaStorage } from '../src/gate/media.js';
 import { TEST_DATABASE_URL } from './pg-test-constants.js';
 
 const JWT_SECRET = Buffer.alloc(32, 1).toString('base64');
 const OTP_PEPPER = Buffer.alloc(32, 2).toString('base64');
+const DATA_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
+const fakeMediaStorage: MediaStorage = { put: async () => undefined };
 
 function testEnv() {
   __resetEnvCacheForTests();
@@ -19,6 +22,7 @@ function testEnv() {
     JWT_SECRET,
     OTP_PEPPER,
     GOOGLE_CLIENT_IDS: 'test-client-id',
+    DATA_ENCRYPTION_KEY,
     LOG_LEVEL: 'silent',
   });
 }
@@ -52,6 +56,7 @@ describe('auth routes (SDD §9.5, §12.4) end to end', () => {
       db,
       clock,
       googleVerifier,
+      mediaStorage: fakeMediaStorage,
       checkDb: async () => true,
     });
     await app.ready();
@@ -169,6 +174,7 @@ describe('auth routes (SDD §9.5, §12.4) end to end', () => {
       db,
       clock,
       googleVerifier,
+      mediaStorage: fakeMediaStorage,
       checkDb: async () => true,
     });
     await app.ready();

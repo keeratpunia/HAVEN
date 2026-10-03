@@ -34,6 +34,10 @@ export type VisitStatusDb =
   | 'expired'
   | 'cancelled';
 export type GateEventKind = 'entry' | 'exit' | 'entry_denied';
+export type GpsFailure =
+  'outside_geofence' | 'low_accuracy' | 'stale_fix' | 'no_location' | 'gate_not_configured';
+export type ConsumedAction = 'check_in' | 'check_out' | 'walk_in' | 'host_assisted';
+export type MediaKind = 'visitor_profile' | 'gate_photo' | 'resident_id_card' | 'resident_selfie';
 export type ApproverRole = 'host' | 'warden';
 export type Decision = 'approved' | 'rejected';
 export type ChargeKind = 'overnight_room' | 'guest_room' | 'fine';
@@ -239,6 +243,70 @@ interface GatesTable {
   is_active: Generated<boolean>;
 }
 
+interface GateDevicesTable {
+  id: Generated<string>;
+  gate_id: string;
+  label: Generated<string>;
+  token_hash: Buffer;
+  paired_by: string;
+  paired_at: Generated<Date>;
+  last_seen_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  last_ip: string | null;
+  user_agent: string | null;
+  clock_offset_ms: number | null;
+  offline_alerted_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  revoked_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  revoked_by: string | null;
+}
+
+interface GatePairingCodesTable {
+  code_hash: Buffer;
+  gate_id: string;
+  created_by: string;
+  expires_at: ColumnType<Date, string, string>;
+  used_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  device_id: string | null;
+}
+
+interface ScanSessionsTable {
+  id: Generated<string>;
+  gate_id: string;
+  client_nonce_hash: Buffer;
+  token_step: string | number;
+  token_age_steps: number;
+  lat: number | null;
+  lng: number | null;
+  accuracy_m: number | null;
+  captured_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  distance_m: number | null;
+  gps_ok: boolean;
+  gps_failure: GpsFailure | null;
+  location_attempts: Generated<number>;
+  visitor_id: string | null;
+  host_user_id: string | null;
+  photo_media_id: string | null;
+  ip: string | null;
+  user_agent: string | null;
+  consumed_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  consumed_action: ConsumedAction | null;
+  expires_at: ColumnType<Date, string, string>;
+  created_at: Generated<Date>;
+}
+
+interface MediaTable {
+  id: Generated<string>;
+  kind: MediaKind;
+  bucket: string;
+  path: string;
+  sha256: Buffer;
+  bytes: number;
+  owner_user_id: string | null;
+  owner_visitor_id: string | null;
+  delete_after: ColumnType<Date | null, string | null | undefined, string | null>;
+  deleted_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  created_at: Generated<Date>;
+}
+
 interface GateEventsTable {
   id: Generated<string>;
   visit_id: string;
@@ -318,6 +386,10 @@ export interface Database {
   'haven.visits': VisitsTable;
   'haven.approvals': ApprovalsTable;
   'haven.gates': GatesTable;
+  'haven.gate_devices': GateDevicesTable;
+  'haven.gate_pairing_codes': GatePairingCodesTable;
+  'haven.scan_sessions': ScanSessionsTable;
+  'haven.media': MediaTable;
   'haven.gate_events': GateEventsTable;
   'haven.charges': ChargesTable;
   'haven.notifications': NotificationsTable;

@@ -4,10 +4,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { __resetEnvCacheForTests, loadEnv } from '../src/config.js';
 import { createDb } from '../src/db/index.js';
+import type { MediaStorage } from '../src/gate/media.js';
 import { createLogger } from '../src/lib/logger.js';
 
 const VALID_JWT_SECRET = Buffer.alloc(32, 7).toString('base64');
 const VALID_OTP_PEPPER = Buffer.alloc(32, 3).toString('base64');
+const VALID_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
+
+/** No business route in this file touches media; a no-op fake is enough. */
+const fakeMediaStorage: MediaStorage = { put: async () => undefined };
 
 function testEnv(overrides: Record<string, string> = {}) {
   __resetEnvCacheForTests();
@@ -17,6 +22,7 @@ function testEnv(overrides: Record<string, string> = {}) {
     JWT_SECRET: VALID_JWT_SECRET,
     OTP_PEPPER: VALID_OTP_PEPPER,
     GOOGLE_CLIENT_IDS: 'test-client-id',
+    DATA_ENCRYPTION_KEY: VALID_DATA_ENCRYPTION_KEY,
     LOG_LEVEL: 'silent',
     ...overrides,
   });
@@ -42,6 +48,7 @@ describe('GET /health and GET /ready', () => {
       env,
       logger,
       db,
+      mediaStorage: fakeMediaStorage,
       checkDb: async () => true, // no live Postgres in this test run — see src/db/index.test.ts for the real pingDb() unit test
     });
     await app.ready();
@@ -110,7 +117,13 @@ describe('GET /ready when the DB check fails', () => {
     const logger = createLogger(env);
     const db = createDb(env);
 
-    app = await buildApp({ env, logger, db, checkDb: async () => false });
+    app = await buildApp({
+      env,
+      logger,
+      db,
+      mediaStorage: fakeMediaStorage,
+      checkDb: async () => false,
+    });
     await app.ready();
   });
 
@@ -137,6 +150,7 @@ describe('rate limiting (SDD §12.11)', () => {
       env,
       logger,
       db,
+      mediaStorage: fakeMediaStorage,
       checkDb: async () => true,
       rateLimit: { max: 3, timeWindowMs: 60_000 }, // low limit so the test is fast and deterministic
     });

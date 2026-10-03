@@ -1,8 +1,11 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { Kysely } from 'kysely';
 import { verifyAccessToken } from './jwt.js';
 import type { Principal } from './principal.js';
 import { AppError } from '../lib/errors.js';
+import type { Database } from '../db/index.js';
 import type { RevocationCache } from './principal-loader.js';
+import { verifyDeviceToken } from '../gate/devices.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -27,6 +30,12 @@ export interface AuthenticateOptions {
    * every real server wires one up.
    */
   revocationCache?: RevocationCache;
+  /**
+   * Verifies `Authorization: Device <token>` against `haven.gate_devices` (gate
+   * milestone). Optional for the same reason as `revocationCache` — infra tests with
+   * no DB still build; every real server wires one up.
+   */
+  db?: Kysely<Database>;
 }
 
 /**
@@ -43,11 +52,10 @@ export interface AuthenticateOptions {
  *     client clearly attempted to authenticate and failed, which is a different case
  *     from not trying at all.
  *   - `Authorization: Device <token>` → gate-device authentication (SDD §9.1, §12.8).
- *     Recognized here so the shape exists, but **not implemented** — verifying it
- *     needs a typed query against `haven.gate_devices`, which doesn't exist until the
- *     gate module (M2, see docs/IMPLEMENTATION-PLAN.md). Resolves to `null` for now;
- *     do not read that as "device auth works," it means no gate-scoped action can
- *     succeed yet, which is the safe failure direction.
+ *     Verified against `haven.gate_devices.token_hash` (`gate/devices.ts`'s
+ *     `verifyDeviceToken`). A revoked or unknown token resolves to `null`, exactly
+ *     like no credential at all — it does not throw, so a gate-only action still
+ *     fails via `authorize()`'s normal deny path, not a different error shape.
  *   - Any other non-empty `Authorization` value → treated as a failed authentication
  *     attempt (`AUTH_REQUIRED`), not silently ignored.
  */
@@ -81,8 +89,15 @@ export function createAuthenticateHook(options: AuthenticateOptions) {
     }
 
     if (header.startsWith('Device ')) {
-      // See module comment: device-token verification is M2 work.
-      request.principal = null;
+      const token = header.slice('Device '.length).trim();
+      if (!options.db) {
+        request.principal = null;
+        return;
+      }
+      const device = await verifyDeviceToken(options.db, token);
+      request.principal = device
+        ? { type: 'device', gateId: device.gateId, deviceId: device.deviceId }
+        : null;
       return;
     }
 

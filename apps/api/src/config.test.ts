@@ -8,12 +8,14 @@ describe('loadEnv', () => {
 
   const VALID_JWT_SECRET = Buffer.alloc(32, 7).toString('base64');
   const VALID_OTP_PEPPER = Buffer.alloc(32, 3).toString('base64');
+  const VALID_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
   const REQUIRED = {
     DATABASE_URL: 'postgres://user:pass@localhost:6543/postgres',
     DATABASE_DIRECT_URL: 'postgres://user:pass@localhost:5432/postgres',
     JWT_SECRET: VALID_JWT_SECRET,
     OTP_PEPPER: VALID_OTP_PEPPER,
     GOOGLE_CLIENT_IDS: 'web-client-id',
+    DATA_ENCRYPTION_KEY: VALID_DATA_ENCRYPTION_KEY,
   };
 
   it('loads valid config with required vars present', () => {
