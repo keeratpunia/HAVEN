@@ -6,7 +6,9 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * Geolocation here matches `E2E_GATE_LAT`/`E2E_GATE_LNG` in
  * apps/api/scripts/e2e-constants.ts, so the real haversine-distance geofence check in
- * `apps/api/src/visits/geo.ts` genuinely passes during the test.
+ * `apps/api/src/gate/geofence.ts` genuinely passes during the test. `accuracy: 10`
+ * ensures the client's own `captureScanLocation` (SDD §9.3: "stop when accuracy <=
+ * 20m") resolves immediately rather than waiting out its 10s timeout.
  *
  * Timeouts are generous: this sandbox's Chromium takes roughly a minute to fetch the
  * unminified Expo web dev bundle over loopback (confirmed via `curl`, which gets the
@@ -26,7 +28,7 @@ export default defineConfig({
     actionTimeout: 20_000,
     navigationTimeout: 90_000,
     permissions: ['geolocation', 'camera'],
-    geolocation: { latitude: 12.9716, longitude: 77.5946 },
+    geolocation: { latitude: 12.9716, longitude: 77.5946, accuracy: 10 },
     trace: 'retain-on-failure',
   },
   projects: [

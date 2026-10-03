@@ -159,6 +159,24 @@ async function main() {
     ],
   );
 
+  // A second, pre-claimed guest (phone ...08, distinct from the golden-path test's
+  // ...09) with an already-complete profile and its own approved visit — so the
+  // location-retry/"Ask host to confirm" test can reach a real check-in/awaiting-
+  // confirmation outcome without racing the golden-path test's state for phone ...09.
+  const retryVisitor = await client.query<{ id: string }>(
+    `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed)
+     values ('+919999900008', 'Retry Tester', 'female', true)
+     on conflict (phone) do update set full_name = excluded.full_name returning id`,
+  );
+  await client.query(`delete from haven.visits where code = 'VE2E002'`);
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, visitor_id, type, status, origin, zone,
+        window_start, window_end, rules_version, created_by_type, created_by_id)
+     values ('VE2E002', $1, $2, $3, 'day', 'approved', 'invite', 'visitors_room', $4, $5, 1, 'user', $2)`,
+    [hostelId, hostId, retryVisitor.rows[0].id, windowStart.toISOString(), windowEnd.toISOString()],
+  );
+
   await client.end();
 
   console.log('E2E database ready.');

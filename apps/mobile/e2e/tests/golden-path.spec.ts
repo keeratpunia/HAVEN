@@ -1,20 +1,23 @@
 import { expect, test } from '@playwright/test';
+import { generateTestGateToken } from '../gateTestToken.js';
 
 /**
- * Golden-path guest flow (SDD F1/F2/F3 collapsed into one run, per docs/DECISIONS.md's
- * scoping note for this milestone): invite landing -> OTP sign-in -> profile completion
- * (live camera, no gallery) -> check-in (real geolocation + live camera) -> zone notice
+ * Golden-path guest flow (SDD F1 end to end): invite landing -> OTP sign-in -> profile
+ * completion (live camera, no gallery) -> scan the gate -> check-in (real geolocation +
+ * live camera via the SDD §9.3 scan-session flow) -> zone notice -> scan the gate again
  * -> check-out.
  *
  * Runs against the dedicated E2E API + embedded-postgres pair (apps/api/scripts/e2e-db.ts,
- * e2e-server.ts) seeded with one fixed invite. `TEST_PHONE` is one of the non-production
- * OTP-bypass numbers (SDD §9.5): any 6-digit code request for it always accepts "123456".
+ * e2e-server.ts) seeded with one fixed invite and one real gate (known secret, so this
+ * suite can generate a valid rotating token the same way a real gate device would).
+ * `TEST_PHONE` is one of the non-production OTP-bypass numbers (SDD §9.5): any 6-digit
+ * code request for it always accepts "123456".
  */
 const TEST_PHONE = '9999900009';
 const TEST_OTP = '123456';
 const INVITE_TOKEN = 'e2e-fixed-invite-token-for-playwright';
 
-test('guest can claim an invite, sign in, complete their profile, check in, and check out', async ({
+test('guest can claim an invite, sign in, complete their profile, scan the gate, check in, and check out', async ({
   page,
 }) => {
   await page.goto(`/i/${INVITE_TOKEN}`);
@@ -45,9 +48,15 @@ test('guest can claim an invite, sign in, complete their profile, check in, and 
   await page.getByRole('button', { name: 'Use photo' }).click();
 
   await page.waitForURL(/\/visits(\?.*)?$/);
-  await page.getByText('Priya', { exact: true }).click();
+
+  // --- Check in, via the gate scan flow (SDD FR-21) ---
+  const checkInToken = generateTestGateToken({});
+  await page.goto(`/g/${checkInToken}`);
 
   await expect(page.getByText('We need your location')).toBeVisible();
+  await page.getByRole('button', { name: 'Allow location' }).click();
+
+  await expect(page.getByRole('button', { name: 'Check in' })).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: 'Check in' }).click();
 
   await expect(page.getByRole('button', { name: 'Take photo' })).toBeEnabled({ timeout: 30_000 });
@@ -55,11 +64,17 @@ test('guest can claim an invite, sign in, complete their profile, check in, and 
   await page.getByRole('button', { name: 'Use photo' }).click();
 
   await expect(page.getByText("You're checked in")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Done' }).click();
+
+  await page.waitForURL(/\/visits(\?.*)?$/);
+  await page.getByText('Priya', { exact: true }).click();
   await expect(page.getByText("Visitors' Room only")).toBeVisible();
 
-  await page.goto('/visits');
-  await page.getByText('Priya', { exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Check out' })).toBeVisible();
+  // --- Check out, via a fresh gate scan ---
+  const checkOutToken = generateTestGateToken({ stepOffset: 1 });
+  await page.goto(`/g/${checkOutToken}`);
+
+  await expect(page.getByRole('button', { name: 'Check out' })).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: 'Check out' }).click();
 
   await expect(page.getByRole('button', { name: 'Take photo' })).toBeEnabled({ timeout: 30_000 });

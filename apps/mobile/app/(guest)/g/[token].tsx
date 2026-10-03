@@ -436,6 +436,7 @@ export default function GateScan() {
                 {
                   fillCopy(copyFor('HOST_CONFIRM_PATH'), {
                     hostFirstName: scanActions?.visits[0]?.hostFirstName ?? 'your host',
+                    subject: "you're",
                   }).title
                 }
               </Text>
