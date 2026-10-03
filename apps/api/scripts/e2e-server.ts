@@ -7,12 +7,14 @@
  * (`AFTER_HARD_CUTOFF` etc.) behave the same no matter what time of day the test
  * actually runs in CI. Dev/E2E-only; never used in `server.ts`.
  */
+import path from 'node:path';
 import { buildApp } from '../src/app.js';
 import { __resetEnvCacheForTests, loadEnv } from '../src/config.js';
 import { createDb } from '../src/db/index.js';
+import { LocalDiskMediaStorage } from '../src/gate/media.js';
 import { createLogger } from '../src/lib/logger.js';
 import { FakeClock } from '../src/lib/clock.js';
-import { E2E_DATABASE_URL, E2E_FIXED_NOW } from './e2e-constants.js';
+import { E2E_DATABASE_URL, E2E_DATA_ENCRYPTION_KEY, E2E_FIXED_NOW } from './e2e-constants.js';
 
 async function main() {
   __resetEnvCacheForTests();
@@ -27,11 +29,13 @@ async function main() {
     GOOGLE_CLIENT_IDS: 'e2e-client-id',
     SMS_PROVIDER: 'console',
     CORS_ORIGINS: 'http://localhost:8081,http://127.0.0.1:8081',
+    DATA_ENCRYPTION_KEY: E2E_DATA_ENCRYPTION_KEY,
   });
   const logger = createLogger(env);
   const db = createDb(env);
   const clock = new FakeClock(E2E_FIXED_NOW);
-  const app = await buildApp({ env, logger, db, clock });
+  const mediaStorage = new LocalDiskMediaStorage(path.join(process.cwd(), '.e2e-media'));
+  const app = await buildApp({ env, logger, db, clock, mediaStorage });
 
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
   console.log(

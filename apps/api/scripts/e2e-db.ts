@@ -15,13 +15,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
-import { sha256 } from '../src/lib/crypto.js';
+import { encryptAesGcm, parseDataEncryptionKey, sha256 } from '../src/lib/crypto.js';
 import {
   E2E_DATABASE_URL,
+  E2E_DATA_ENCRYPTION_KEY,
   E2E_FIXED_NOW,
+  E2E_GATE_CODE,
   E2E_GATE_LAT,
   E2E_GATE_LNG,
   E2E_GATE_RADIUS_M,
+  E2E_GATE_SECRET,
   E2E_INVITE_TOKEN,
   E2E_PG_DB,
   E2E_PG_PASSWORD,
@@ -103,12 +106,15 @@ async function main() {
     ],
   );
 
+  const dataEncryptionKey = parseDataEncryptionKey(E2E_DATA_ENCRYPTION_KEY);
+  const secretEnc = encryptAesGcm(E2E_GATE_SECRET, dataEncryptionKey);
   const gate = await client.query<{ id: string }>(
     `insert into haven.gates (hostel_id, code, name, lat, lng, radius_m, secret_enc)
-     values ($1, 'GH8A01', 'Main gate', $2, $3, $4, $5)
-     on conflict (code) do update set lat = excluded.lat, lng = excluded.lng, radius_m = excluded.radius_m
+     values ($1, $2, 'Main gate', $3, $4, $5, $6)
+     on conflict (code) do update set lat = excluded.lat, lng = excluded.lng, radius_m = excluded.radius_m,
+       secret_enc = excluded.secret_enc
      returning id`,
-    [hostelId, E2E_GATE_LAT, E2E_GATE_LNG, E2E_GATE_RADIUS_M, Buffer.from('e2e-not-a-real-secret')],
+    [hostelId, E2E_GATE_CODE, E2E_GATE_LAT, E2E_GATE_LNG, E2E_GATE_RADIUS_M, secretEnc],
   );
   void gate;
 
@@ -158,6 +164,7 @@ async function main() {
   console.log('E2E database ready.');
   console.log(`DATABASE_URL=${E2E_DATABASE_URL}`);
   console.log(`Invite link token: ${E2E_INVITE_TOKEN}`);
+  console.log(`Gate code: ${E2E_GATE_CODE}`);
   console.log('Press Ctrl+C to stop.');
 
   process.on('SIGINT', () => void pg.stop().then(() => process.exit(0)));

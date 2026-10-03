@@ -1,26 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { copyFor } from '@haven/shared';
 import { color, space, type as typeTokens } from '@haven/ui';
 import * as api from '../../../api/client.js';
-import { Banner, OfflineBanner } from '../../../components/Banner.js';
-import { Button } from '../../../components/Button.js';
+import { OfflineBanner } from '../../../components/Banner.js';
 import { ErrorState } from '../../../components/ErrorState.js';
-import { LiveCamera } from '../../../components/LiveCamera.js';
 import { StatusChip } from '../../../components/StatusChip.js';
-import { captureGeolocation } from '../../../lib/useGeolocation.js';
 import { useOnline } from '../../../lib/useOnline.js';
 import { formatDateIst, formatTimeIst } from '../../../lib/formatTime.js';
 
-type GatePhase = 'explain_location' | 'locating' | 'photo' | 'submitting' | 'done';
-
 /**
- * Combines G-06/07 (visit status), G-10 (location explainer), G-12 (camera), G-14/15/16
- * (check-in/out result), G-18 (zone notice) and G-13 (not-allowed) into one route keyed
- * by `visits.status` — SDD §13.4. The rotating-QR gate-scan session (G-11) is out of
- * scope for this milestone; entry/exit are driven directly from this screen instead
- * (see docs/DECISIONS.md).
+ * G-06/G-07/G-12/G-14/G-17/G-18 (visit status, SDD §13.4) — read-only. Check-in and
+ * check-out only happen by scanning the gate's QR (`/g/[token]`, SDD FR-21: "Scanning
+ * the QR... validates token + GPS before showing anything else"); this screen used to
+ * offer its own direct Check in/Check out buttons against a temporary, non-SDD
+ * endpoint — see docs/DECISIONS.md DEC-010 for why that was removed.
  */
 export default function VisitDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -28,11 +23,6 @@ export default function VisitDetail() {
 
   const [visit, setVisit] = useState<api.VisitDto | null>(null);
   const [loadError, setLoadError] = useState(false);
-  const [phase, setPhase] = useState<GatePhase>('explain_location');
-  const [locationAttempts, setLocationAttempts] = useState(0);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const fixRef = useRef<{ lat: number; lng: number; accuracyM: number } | null>(null);
-  const actionKindRef = useRef<'check-in' | 'check-out'>('check-in');
 
   const load = useCallback(() => {
     if (!id) return;
@@ -43,44 +33,6 @@ export default function VisitDetail() {
   }, [id]);
 
   useEffect(load, [load]);
-
-  async function startGateFlow(kind: 'check-in' | 'check-out') {
-    actionKindRef.current = kind;
-    setActionError(null);
-    setPhase('locating');
-    const result = await captureGeolocation();
-    if (!result.ok) {
-      setLocationAttempts((n) => n + 1);
-      if (locationAttempts + 1 >= 3) {
-        setActionError('location_failed_3x');
-      } else {
-        setActionError(result.reason);
-      }
-      setPhase('explain_location');
-      return;
-    }
-    fixRef.current = result.fix;
-    setPhase('photo');
-  }
-
-  async function onPhotoCaptured() {
-    if (!id || !fixRef.current) return;
-    setPhase('submitting');
-    setActionError(null);
-    try {
-      const fn = actionKindRef.current === 'check-in' ? api.checkIn : api.checkOut;
-      const updated = await fn(id, {
-        lat: fixRef.current.lat,
-        lng: fixRef.current.lng,
-        accuracyM: fixRef.current.accuracyM,
-      });
-      setVisit(updated);
-      setPhase('done');
-    } catch (err) {
-      setActionError(err instanceof api.ApiError ? err.code : 'INTERNAL_5XX_GATE');
-      setPhase('explain_location');
-    }
-  }
 
   if (loadError) {
     return <ErrorState code="INTERNAL_5XX_GATE" onAction={load} />;
@@ -94,16 +46,7 @@ export default function VisitDetail() {
     );
   }
 
-  if (
-    actionError &&
-    ['TOO_EARLY', 'WINDOW_ENDED', 'VISITOR_BANNED', 'HOST_NOT_VERIFIED', 'ALREADY_INSIDE'].includes(
-      actionError,
-    )
-  ) {
-    return <ErrorState code={actionError} onAction={() => setActionError(null)} />;
-  }
-
-  const canCheckIn = visit.status === 'approved' || visit.status === 'pre_invite_created';
+  const canCheckIn = visit.status === 'approved';
   const canCheckOut = visit.status === 'inside';
 
   return (
@@ -120,87 +63,20 @@ export default function VisitDetail() {
       </Text>
 
       {visit.status === 'inside' ? (
-        <Banner
-          tone="warning"
-          text={`${copyFor('ZONE_NOTICE').title} — ${copyFor('ZONE_NOTICE').body}`}
-        />
-      ) : null}
-
-      {phase === 'explain_location' && (canCheckIn || canCheckOut) ? (
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>We need your location</Text>
-          <Text style={styles.body}>
-            This confirms you're at the gate. HAVEN only checks this at the moment of entry and
-            exit.
-          </Text>
-          {actionError === 'location_failed_3x' ? (
-            <Text style={styles.error} accessibilityRole="alert">
-              We still can't find you. Ask office staff for help.
-            </Text>
-          ) : actionError === 'denied' ? (
-            <Text style={styles.error} accessibilityRole="alert">
-              Turn on location access for this site, then try again.
-            </Text>
-          ) : actionError === 'low_accuracy' ? (
-            <Text style={styles.error} accessibilityRole="alert">
-              {copyFor('low_accuracy').body}
-            </Text>
-          ) : actionError ? (
-            <Text style={styles.error} accessibilityRole="alert">
-              {copyFor(actionError).body}
-            </Text>
-          ) : null}
-          <View style={styles.action}>
-            <Button
-              label={canCheckOut ? 'Check out' : 'Check in'}
-              onPress={() => startGateFlow(canCheckOut ? 'check-out' : 'check-in')}
-              disabled={actionError === 'location_failed_3x'}
-            />
-          </View>
+          <Text style={styles.cardTitle}>{copyFor('ZONE_NOTICE').title}</Text>
+          <Text style={styles.body}>{copyFor('ZONE_NOTICE').body}</Text>
         </View>
       ) : null}
 
-      {phase === 'locating' ? (
-        <View style={styles.center}>
-          <ActivityIndicator accessibilityLabel="Finding your location" />
-          <Text style={styles.body}>Finding your location…</Text>
-        </View>
-      ) : null}
-
-      {phase === 'photo' ? (
-        <>
-          <LiveCamera
-            guideText="Look at the camera"
-            onCapture={onPhotoCaptured}
-            onPermissionDenied={() => setActionError('camera_denied')}
-          />
-          {actionError === 'camera_denied' ? (
-            <Text style={styles.error} accessibilityRole="alert">
-              Allow camera access in your browser's site settings, then reload this page.
-            </Text>
-          ) : null}
-        </>
-      ) : null}
-
-      {phase === 'submitting' ? (
-        <View style={styles.center}>
-          <ActivityIndicator accessibilityLabel="Submitting" />
-        </View>
-      ) : null}
-
-      {phase === 'done' ? (
+      {canCheckIn || canCheckOut ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>
-            {actionKindRef.current === 'check-in'
-              ? copyFor('CHECK_IN_SUCCESS').title
-              : "You've checked out. Thanks!"}
+            {canCheckOut ? 'Ready to check out?' : 'Ready to check in?'}
           </Text>
-        </View>
-      ) : null}
-
-      {!canCheckIn && !canCheckOut && phase === 'explain_location' ? (
-        <View style={styles.card}>
-          <Text style={styles.body}>Status: {visit.status}</Text>
+          <Text style={styles.body}>
+            Scan the QR on the screen at the hostel gate with your phone camera.
+          </Text>
         </View>
       ) : null}
     </View>
@@ -230,6 +106,4 @@ const styles = StyleSheet.create({
     color: color.text,
   },
   body: { fontSize: typeTokens.size.body, color: color.textMuted },
-  error: { fontSize: typeTokens.size.sm, color: color.danger },
-  action: { marginTop: space.sm },
 });

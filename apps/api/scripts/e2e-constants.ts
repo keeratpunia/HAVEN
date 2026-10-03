@@ -12,3 +12,10 @@ export const E2E_INVITE_TOKEN = 'e2e-fixed-invite-token-for-playwright';
 export const E2E_GATE_LAT = 12.9716;
 export const E2E_GATE_LNG = 77.5946;
 export const E2E_GATE_RADIUS_M = 200;
+
+/** Fixed AES-256-GCM key for the e2e gate secret (DEC-004-style local/test-only fixture value). */
+export const E2E_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
+export const E2E_GATE_CODE = 'GH8A01';
+/** The gate's plaintext secret (SDD §9.1) — known to the Playwright suite so it can
+ * generate a valid rotating token the same way a real gate device would. */
+export const E2E_GATE_SECRET = Buffer.alloc(32, 3);

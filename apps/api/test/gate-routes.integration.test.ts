@@ -194,6 +194,82 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
     expect(sessionRow.consumed_at).not.toBeNull();
   });
 
+  it('location failure on check-in: gpsOk false and no host confirmation yields awaiting_host_confirmation without completing entry', async () => {
+    const hostelId = await makeHostel(db);
+    const hostId = await makeVerifiedHost(db, hostelId);
+    const { code, secret } = await makeGateWithSecret(hostelId);
+    const visitorId = await makeVisitor(db);
+    const visit = await db
+      .insertInto('haven.visits')
+      .values({
+        code: 'VGATE03',
+        hostel_id: hostelId,
+        host_id: hostId,
+        visitor_id: visitorId,
+        type: 'day',
+        status: 'approved',
+        origin: 'invite',
+        zone: 'visitors_room',
+        window_start: NOW.toISOString(),
+        window_end: new Date(NOW.getTime() + 3 * 3_600_000).toISOString(),
+        rules_version: 1,
+        created_by_type: 'user',
+        created_by_id: hostId,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+
+    const token = generateGateToken({ secret, gateCode: code, now: clock.now() });
+    const createRes = await supertest(app.server)
+      .post('/v1/scan-sessions')
+      .send({
+        token,
+        clientNonce: 'host-confirm-nonce',
+        location: { lat: GATE_LAT + 1, lng: GATE_LNG, accuracy: 10, fixAgeMs: 1000 },
+      });
+    expect(createRes.body.gpsOk).toBe(false);
+    const sessionId = createRes.body.scanSessionId;
+    const accessToken = await issueToken(clock, { type: 'visitor', id: visitorId });
+    const photoBuf = await tinyJpeg();
+    const photoRes = await supertest(app.server)
+      .post(`/v1/scan-sessions/${sessionId}/photo`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('X-Scan-Nonce', 'host-confirm-nonce')
+      .attach('photo', photoBuf, 'guest.jpg');
+    const photoId = photoRes.body.photoId;
+
+    const checkInRes = await supertest(app.server)
+      .post(`/v1/scan-sessions/${sessionId}/check-in`)
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('X-Scan-Nonce', 'host-confirm-nonce')
+      .send({ visitId: visit.id, photoId });
+    expect(checkInRes.status).toBe(200);
+    expect(checkInRes.body.result).toBe('awaiting_host_confirmation');
+    expect(checkInRes.body.visit.status).toBe('approved');
+
+    const visitRow = await db
+      .selectFrom('haven.visits')
+      .select('status')
+      .where('id', '=', visit.id)
+      .executeTakeFirstOrThrow();
+    expect(visitRow.status).toBe('approved');
+
+    const notif = await db
+      .selectFrom('haven.notifications')
+      .selectAll()
+      .where('visit_id', '=', visit.id)
+      .where('kind', '=', 'N-CONFIRM-LOCATION')
+      .executeTakeFirst();
+    expect(notif).toBeTruthy();
+
+    const sessionRow = await db
+      .selectFrom('haven.scan_sessions')
+      .select('consumed_at')
+      .where('id', '=', sessionId)
+      .executeTakeFirstOrThrow();
+    expect(sessionRow.consumed_at).toBeNull();
+  });
+
   it('malformed token: unparsable string is GATE_TOKEN_INVALID', async () => {
     const res = await supertest(app.server)
       .post('/v1/scan-sessions')

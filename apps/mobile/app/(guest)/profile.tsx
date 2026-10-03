@@ -14,7 +14,7 @@ type Gender = 'female' | 'male' | 'undisclosed';
  * (live camera, no gallery) — SDD §13.4.
  */
 export default function Profile() {
-  const { token } = useLocalSearchParams<{ token?: string }>();
+  const { token, returnTo } = useLocalSearchParams<{ token?: string; returnTo?: string }>();
   const router = useRouter();
   const { refresh } = useAuth();
 
@@ -41,11 +41,13 @@ export default function Profile() {
   }
 
   async function finishWithPhoto() {
-    // The photo is captured live (no gallery, SDD §9.4) for the host-facing arrival
-    // check; this milestone doesn't yet have a media-upload endpoint to store it
-    // (see docs/DECISIONS.md) — profile completion proceeds without persisting it.
+    // The profile photo is captured live (no gallery, SDD §9.4) but not persisted —
+    // there is still no `POST /v1/me/profile-photo` endpoint (see docs/DECISIONS.md
+    // DEC-009/DEC-010); only gate photos (`/scan-sessions/:id/photo`) are stored so far.
     await refresh();
-    if (token) {
+    if (returnTo) {
+      router.replace(returnTo);
+    } else if (token) {
       router.replace({ pathname: '/visits', params: { justClaimed: token } });
     } else {
       router.replace('/visits');

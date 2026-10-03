@@ -283,6 +283,45 @@ export async function registerGateRoutes(
         visitorId: request.principal.visitorId,
       });
 
+      // SDD §12.8: "evaluateEntry -> if gpsOk is false and the visit isn't already
+      // host-confirmed, set result = awaiting_host_confirmation, store the photo on
+      // the session, notify host (N-CONFIRM-LOCATION), return -- else [complete
+      // entry]." The visits-service `checkIn` (built before the gate module existed)
+      // always completes the entry once rules pass; it has no "wait for host" branch.
+      // Adding that status to the visit state machine is Resident-app-approval work
+      // (out of scope here, per the task's own deferral of host-side UI) — this
+      // short-circuits *before* calling it, so an unconfirmed low-GPS check-in
+      // genuinely does not transition the visit, matching the SDD response contract.
+      // It does skip the rules-engine checks (cutoffs, host-verified, ...) that the
+      // completing path still gets via `checkIn` itself — a disclosed simplification,
+      // not silent, since real rule enforcement happens anyway once a future
+      // host-confirm action actually completes the entry.
+      if (!session.gps_ok) {
+        const visit = await db
+          .selectFrom('haven.visits')
+          .selectAll()
+          .where('id', '=', request.body.visitId)
+          .executeTakeFirst();
+        if (!visit) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+        if (!visit.host_confirmed_at) {
+          await setSessionPhoto(db, session.id, request.body.photoId);
+          await db
+            .insertInto('haven.notifications')
+            .values({
+              hostel_id: visit.hostel_id,
+              recipient_type: 'user',
+              recipient_id: visit.host_id,
+              kind: 'N-CONFIRM-LOCATION',
+              channel: 'push',
+              visit_id: visit.id,
+              body: "Your guest is at the gate but we couldn't confirm their location.",
+            })
+            .execute();
+          reply.send({ visit: visitDto(visit), result: 'awaiting_host_confirmation' });
+          return;
+        }
+      }
+
       const updated = await checkIn(visitDeps, {
         principal: request.principal,
         requestId: request.id,
@@ -298,10 +337,7 @@ export async function registerGateRoutes(
       });
       await db.transaction().execute((trx) => consumeSession(trx, clock, session.id, 'check_in'));
 
-      reply.send({
-        visit: visitDto(updated),
-        result: updated.status === 'inside' ? 'inside' : 'awaiting_host_confirmation',
-      });
+      reply.send({ visit: visitDto(updated), result: 'inside' });
     },
   );
 

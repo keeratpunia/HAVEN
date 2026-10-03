@@ -11,7 +11,7 @@ import { useAuth } from '../../lib/auth-context.js';
 
 /** G-02 Phone + G-03 OTP (SDD §13.4), combined into one route with two steps. */
 export default function Login() {
-  const { token } = useLocalSearchParams<{ token?: string }>();
+  const { token, returnTo } = useLocalSearchParams<{ token?: string; returnTo?: string }>();
   const router = useRouter();
   const { refresh } = useAuth();
 
@@ -70,7 +70,12 @@ export default function Login() {
       }
 
       if (!result.principal.profileComplete) {
-        router.replace({ pathname: '/profile', params: token ? { token } : {} });
+        router.replace({
+          pathname: '/profile',
+          params: token ? { token } : returnTo ? { returnTo } : {},
+        });
+      } else if (returnTo) {
+        router.replace(returnTo);
       } else {
         router.replace('/visits');
       }

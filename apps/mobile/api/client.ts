@@ -33,17 +33,21 @@ export class ApiError extends Error {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH';
   body?: unknown;
+  /** Raw form-data body (photo uploads) — sent as-is, no JSON Content-Type. */
+  formData?: FormData;
   auth?: boolean;
+  headers?: Record<string, string>;
   /** Set internally to prevent infinite refresh loops. */
   _retried?: boolean;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   // Fastify's JSON body parser rejects an empty body when Content-Type is set to
   // application/json (FST_ERR_CTP_EMPTY_JSON_BODY) — only declare it when there's
-  // actually a body to parse.
-  if (options.body !== undefined) {
+  // actually a JSON body to parse (never for FormData — the browser sets its own
+  // multipart Content-Type with the boundary).
+  if (options.body !== undefined && !options.formData) {
     headers['Content-Type'] = 'application/json';
   }
   if (options.auth !== false && accessToken) {
@@ -54,7 +58,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     method: options.method ?? 'GET',
     headers,
     credentials: 'include',
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body:
+      options.formData ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
   });
 
   if (res.status === 401 && !options._retried && options.auth !== false) {
@@ -216,20 +221,6 @@ export function getMyVisits() {
   return request<VisitDto[]>('/v1/me/visits');
 }
 
-export interface GateLocation {
-  lat: number;
-  lng: number;
-  accuracyM?: number;
-}
-
-export function checkIn(visitId: string, location: GateLocation) {
-  return request<VisitDto>(`/v1/visits/${visitId}/check-in`, { method: 'POST', body: location });
-}
-
-export function checkOut(visitId: string, location: GateLocation) {
-  return request<VisitDto>(`/v1/visits/${visitId}/check-out`, { method: 'POST', body: location });
-}
-
 export function getHostels() {
   return request<{ id: string; code: string; name: string }[]>('/v1/hostels', { auth: false });
 }
@@ -240,11 +231,137 @@ export function searchRooms(hostelId: string, number: string) {
   );
 }
 
-export function createWalkIn(params: {
-  hostUserId: string;
-  type: 'day' | 'quick_drop';
-  guestGender: 'male' | 'female' | 'undisclosed' | null;
-  durationMinutes: number;
+// ---- Gate / scan sessions (SDD §9.3, §12.8) ----
+// Replaces the guest-web milestone's temporary /v1/visits/:id/check-in,
+// /v1/visits/:id/check-out and /v1/visits/walk-in endpoints — see docs/DECISIONS.md
+// DEC-010. Every call after creation sends `X-Scan-Nonce` (SDD §9.3 "Binding").
+
+export interface ScanLocation {
+  lat: number;
+  lng: number;
+  accuracy: number;
+  fixAgeMs: number;
+  mocked?: boolean;
+}
+
+export interface ScanSessionResult {
+  scanSessionId: string;
+  gpsOk: boolean;
+  gpsFailure: string | null;
+  distanceM: number | null;
+  hostel: { id: string; name: string };
+  gate: { id: string; name: string };
+  expiresAt: string;
+}
+
+export function createScanSession(params: {
+  token: string;
+  clientNonce: string;
+  location: ScanLocation | null;
 }) {
-  return request<VisitDto>('/v1/visits/walk-in', { method: 'POST', body: params });
+  return request<ScanSessionResult>('/v1/scan-sessions', {
+    method: 'POST',
+    auth: false,
+    body: params,
+  });
+}
+
+export function retryScanSessionLocation(sessionId: string, location: ScanLocation | null) {
+  return request<ScanSessionResult>(`/v1/scan-sessions/${sessionId}/location`, {
+    method: 'POST',
+    auth: false,
+    body: { location },
+  });
+}
+
+export interface ScanSessionActions {
+  gpsOk: boolean;
+  actions: ('check_in' | 'check_out' | 'request_entry')[];
+  visits: VisitDto[];
+}
+
+export function getScanSession(sessionId: string, nonce: string) {
+  return request<ScanSessionActions>(`/v1/scan-sessions/${sessionId}`, {
+    headers: { 'X-Scan-Nonce': nonce },
+  });
+}
+
+export function uploadScanSessionPhoto(sessionId: string, nonce: string, photo: Blob) {
+  const formData = new FormData();
+  formData.append('photo', photo, 'photo.jpg');
+  return request<{ photoId: string }>(`/v1/scan-sessions/${sessionId}/photo`, {
+    method: 'POST',
+    formData,
+    headers: { 'X-Scan-Nonce': nonce },
+  });
+}
+
+export function scanSessionCheckIn(
+  sessionId: string,
+  nonce: string,
+  params: { visitId: string; photoId: string },
+) {
+  return request<{ visit: VisitDto; result: 'inside' | 'awaiting_host_confirmation' }>(
+    `/v1/scan-sessions/${sessionId}/check-in`,
+    { method: 'POST', body: params, headers: { 'X-Scan-Nonce': nonce } },
+  );
+}
+
+export function scanSessionCheckOut(
+  sessionId: string,
+  nonce: string,
+  params: { visitId: string; photoId: string },
+) {
+  return request<{ visit: VisitDto }>(`/v1/scan-sessions/${sessionId}/check-out`, {
+    method: 'POST',
+    body: params,
+    headers: { 'X-Scan-Nonce': nonce },
+  });
+}
+
+export function scanSessionWalkIn(
+  sessionId: string,
+  nonce: string,
+  params: { hostId: string; type: 'day' | 'quick_drop'; durationMinutes: number; photoId: string },
+) {
+  return request<{ visit: VisitDto }>(`/v1/scan-sessions/${sessionId}/walk-in`, {
+    method: 'POST',
+    body: params,
+    headers: { 'X-Scan-Nonce': nonce },
+  });
+}
+
+// ---- Gate devices (SDD F8, §12.8/§12.9) ----
+
+export interface PairDeviceResult {
+  deviceToken: string;
+  gate: { code: string; name: string };
+  hostelName: string;
+  secret: string;
+  secretVersion: number;
+  serverTime: string;
+}
+
+export function pairGateDevice(code: string, label?: string) {
+  return request<PairDeviceResult>('/v1/gate-devices/pair', {
+    method: 'POST',
+    auth: false,
+    body: { code, label },
+  });
+}
+
+export interface HeartbeatResult {
+  serverTime: string;
+  secretVersion: number;
+  secret?: string;
+  revoked: boolean;
+}
+
+export function gateDeviceHeartbeat(deviceToken: string, clientTime: string) {
+  return request<HeartbeatResult>('/v1/gate-devices/heartbeat', {
+    method: 'POST',
+    auth: false,
+    headers: { Authorization: `Device ${deviceToken}` },
+    body: { clientTime },
+  });
 }
