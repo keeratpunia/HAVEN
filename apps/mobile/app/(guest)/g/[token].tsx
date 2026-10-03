@@ -66,6 +66,14 @@ function randomClientNonce(): string {
     .replace(/=+$/, '');
 }
 
+/** `scan_sessions.gps_failure` values (SDD §9.3) are lowercase/snake_case; the §13.6
+ * copy table keys the geofence one as `OUT_OF_GEOFENCE` — everything else
+ * (`low_accuracy`, `stale_fix`, `no_location`, `gate_not_configured`) matches as-is,
+ * or falls through to `copyFor`'s own generic fallback. */
+function copyKeyForGpsFailure(failure: string): string {
+  return failure === 'outside_geofence' ? 'OUT_OF_GEOFENCE' : failure;
+}
+
 function hasSeenLocationExplainer(): boolean {
   if (Platform.OS !== 'web' || typeof localStorage === 'undefined') return true;
   try {
@@ -289,8 +297,12 @@ export default function GateScan() {
 
       {phase === 'location_problem' ? (
         <View style={styles.card}>
-          <Text style={styles.title}>{copyFor(errorCode ?? 'low_accuracy').title}</Text>
-          <Text style={styles.body}>{copyFor(errorCode ?? 'low_accuracy').body}</Text>
+          <Text style={styles.title}>
+            {copyFor(copyKeyForGpsFailure(errorCode ?? 'low_accuracy')).title}
+          </Text>
+          <Text style={styles.body}>
+            {copyFor(copyKeyForGpsFailure(errorCode ?? 'low_accuracy')).body}
+          </Text>
           <Text style={styles.hint}>
             Attempt {locationAttempts} of {MAX_LOCATION_ATTEMPTS}
           </Text>

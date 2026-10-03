@@ -8,6 +8,8 @@ import { FakeGoogleIdTokenVerifier } from '../src/auth/google.js';
 import { sha256 } from '../src/lib/crypto.js';
 import type { MediaStorage } from '../src/gate/media.js';
 import { TEST_DATABASE_URL } from './pg-test-constants.js';
+import { __resetPolicyRegistryForTests } from '../src/auth/policy.js';
+import { __resetAuthPoliciesForTests } from '../src/auth/policy-rules.js';
 
 const JWT_SECRET = Buffer.alloc(32, 1).toString('base64');
 const OTP_PEPPER = Buffer.alloc(32, 2).toString('base64');
@@ -48,6 +50,13 @@ describe('auth routes (SDD §9.5, §12.4) end to end', () => {
 
   beforeEach(async () => {
     await resetAllHavenTables();
+    // Defensive, order-independent reset: other integration-test files in this same
+    // worker process (vitest's isolate:false) may have cleared the shared policy
+    // registry without re-registering auth's own rules — `buildApp` below re-adds
+    // them via `registerAuthRoutes` -> `registerAuthPolicies()`, but only if that
+    // module's own idempotency flag has been reset first.
+    __resetPolicyRegistryForTests();
+    __resetAuthPoliciesForTests();
     clock = new FakeClock(new Date('2026-10-01T10:00:00Z'));
     googleVerifier = new FakeGoogleIdTokenVerifier(new Map());
     app = await buildApp({
