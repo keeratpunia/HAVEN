@@ -2,7 +2,7 @@
   "name": "@haven/mobile",
   "version": "0.0.0",
   "private": true,
-  "description": "HAVEN Expo app (Android + web) — bootstrap foundation only (no product screens yet, see docs/IMPLEMENTATION-PLAN.md M2+)",
+  "description": "HAVEN Expo app (Android + web) — guest web screens (SDD §13), see docs/TRACEABILITY.md",
   "main": "expo-router/entry",
   "scripts": {
     "dev": "expo start",
@@ -12,6 +12,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "jest",
+    "e2e": "playwright test --config=e2e/playwright.config.ts",
     "clean": "rm -rf dist .expo .turbo"
   },
   "dependencies": {
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@haven/config": "workspace:*",
+    "@playwright/test": "^1.63.0",
     "@types/jest": "^29.5.13",
     "@types/react": "~19.2.2",
     "eslint": "^9.12.0",

@@ -11,3 +11,4 @@
 export const HAVEN_SHARED_SCAFFOLD_VERSION = '0.0.0';
 
 export * from './rules/index.js';
+export * from './copy/en.js';

@@ -48,6 +48,7 @@ const InviteClaimParams = z.object({ token: z.string().min(1) });
 const PatchMeBody = z.object({
   fullName: z.string().min(2).max(80).optional(),
   gender: z.enum(['male', 'female', 'undisclosed']).optional(),
+  isAdultConfirmed: z.literal(true).optional(),
 });
 
 function clientFromHeader(request: FastifyRequest): 'web' | 'native' {
@@ -251,7 +252,7 @@ export async function registerAuthRoutes(
     authorize(principal, 'me.read', { ownerType: 'visitor', ownerId: principal.visitorId });
     const row = await db
       .selectFrom('haven.visitors')
-      .select(['id', 'full_name', 'phone', 'gender'])
+      .select(['id', 'full_name', 'phone', 'gender', 'is_adult_confirmed'])
       .where('id', '=', principal.visitorId)
       .executeTakeFirstOrThrow();
     reply.send({
@@ -260,6 +261,7 @@ export async function registerAuthRoutes(
       fullName: row.full_name,
       phone: row.phone,
       gender: row.gender,
+      isAdultConfirmed: row.is_adult_confirmed,
     });
   });
 
@@ -296,6 +298,7 @@ export async function registerAuthRoutes(
         const patch: Record<string, unknown> = {};
         if (request.body.fullName) patch.full_name = request.body.fullName;
         if (request.body.gender) patch.gender = request.body.gender;
+        if (request.body.isAdultConfirmed) patch.is_adult_confirmed = true;
         if (Object.keys(patch).length > 0) {
           await trx
             .updateTable('haven.visitors')

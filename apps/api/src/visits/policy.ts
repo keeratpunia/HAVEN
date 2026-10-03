@@ -40,6 +40,12 @@ export function registerVisitPolicies(): void {
   if (registered) return;
   registered = true;
 
+  // Reading a visit: the host, the guest it's for, or a warden of its hostel.
+  definePolicy<VisitActorResource>(
+    'visits.read',
+    (p, r) => isHost(p, r) || isTheVisitor(p, r) || isWarden(p, r),
+  );
+
   definePolicy<VisitActorResource>('visits.pre_invite_created', isHost);
   definePolicy<VisitActorResource>('visits.walk_in_requested', (p, r) => isTheVisitor(p, r));
   definePolicy<VisitActorResource>('visits.overnight_requested', isHost);

@@ -1,18 +1,21 @@
-import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
+import { color, space, type as typeTokens } from '@haven/ui';
+import { Button } from '../components/Button.js';
 
 /**
- * Placeholder boot screen — NOT a product screen. Proves the Expo Router entry point,
- * the monorepo's @haven/shared and @haven/ui workspace packages, and Metro bundling
- * all work end to end. The actual route groups and screens ((auth), (guest),
- * (resident), (warden), (office), gate/ — SDD §13.3/§13.4) are built starting in M1/M2.
+ * App home. Most guests arrive via an invite link (`/i/[token]`) and never see this
+ * screen; it exists for a returning guest who bookmarked the app directly.
  */
-export default function BootPlaceholder() {
+export default function Home() {
+  const router = useRouter();
   return (
     <View style={styles.container}>
       <Text style={styles.title}>HAVEN</Text>
-      <Text style={styles.subtitle}>Bootstrap foundation — no product screens yet.</Text>
-      <StatusBar style="auto" />
+      <Text style={styles.subtitle}>Hostel guest check-in</Text>
+      <View style={styles.action}>
+        <Button label="Sign in" onPress={() => router.push('/login')} />
+      </View>
     </View>
   );
 }
@@ -22,16 +25,14 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    gap: 8,
+    backgroundColor: color.bg,
+    gap: space.sm,
   },
   title: {
-    fontSize: 32,
-    fontWeight: '600',
-    color: '#0F172A',
+    fontSize: typeTokens.size.xl,
+    fontWeight: typeTokens.weight.semibold,
+    color: color.text,
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#475569',
-  },
+  subtitle: { fontSize: typeTokens.size.body, color: color.textMuted },
+  action: { marginTop: space.lg, width: 240 },
 });

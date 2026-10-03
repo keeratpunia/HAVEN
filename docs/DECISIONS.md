@@ -614,6 +614,93 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** No — item 1 was this codebase's bug, not the SDD's; items 2–6 don't
   contradict the SDD, they just haven't been built yet.
 
+### DEC-009 — Guest web golden-path milestone: scope boundary, a rotating-refresh-token race, and a camera-permission dead end
+
+- **Date:** 2026-10-03
+- **Context:** The task asked for "the complete HAVEN Guest Web experience according
+  to the SDD" — the full SDD §13 screen inventory (G-01 through G-18), including the
+  rotating-QR gate-scan session, live photo upload/persistence/host comparison, a
+  resident-side walk-in approval UI, SSE-live status updates, and a full accessibility
+  audit. Building all of that for real (not stubbed) is realistically dozens of hours
+  of work spanning modules this project's own milestone discipline (`docs/
+  IMPLEMENTATION-PLAN.md`) assigns to *other*, later milestones (the gate/scan-session
+  module, the media pipeline, the resident/warden apps) — none of which exist yet.
+- **Decision:** Scope this milestone to a genuinely complete, end-to-end **golden
+  path**, consistent with every earlier milestone's incremental-scope pattern (§0c–§0f
+  above): invite landing → OTP sign-in → profile completion (live camera, no gallery)
+  → check-in (real browser geolocation + live camera, a simplified haversine-distance
+  geofence against a gate's configured `lat`/`lng`/`radius_m` instead of the SDD's
+  rotating-QR/scan-session crypto) → zone notice → check-out, plus a partial walk-in
+  flow (submission only — host-side approval needs the out-of-scope resident app).
+  Verified against a **real** local API + real (embedded) Postgres database via
+  Playwright (fake geolocation + fake camera device, 360×640 viewport, SDD §19.1), not
+  mocks. Every simplification is listed in `docs/TRACEABILITY.md` §0g's "what this
+  does NOT do" section, not silently absorbed into a claim of completeness.
+- **Alternatives considered:** Build stub/placeholder versions of every SDD §13
+  screen so the inventory looks complete on paper. Rejected — a stubbed gate-token
+  scanner or an unwired `PhotoCompare` component would misrepresent what's actually
+  usable, exactly the kind of "silently simplified requirement" CLAUDE.md §1.3
+  forbids; a smaller set of screens that genuinely work end to end against a real
+  backend is more honest and more useful than a larger set that doesn't.
+- **Why:** Matches the project's own established pattern (every prior milestone in
+  this build — §0c through §0f — scoped itself to a specific, bounded slice and
+  explicitly listed what it deferred, rather than attempting the SDD's full surface in
+  one pass) and the task's own completion gate ("do not consider this milestone
+  complete until the golden-path guest flow works end-to-end against the local
+  API/database") — which specifically asks for a working golden path, not a
+  stubbed-out full inventory.
+- **Two real bugs found by the end-to-end Playwright run itself, not by inspection,
+  fixed before this milestone was considered done:**
+  1. **Refresh-token-rotation race.** `apps/api/src/auth/sessions.ts`'s
+     `rotateRefreshToken` is single-use — presenting an already-rotated token revokes
+     the whole session (`SESSION_REVOKED`, by design, DEC-007 item 5/TC-SEC-06). The
+     guest web client's `request()` helper (`apps/mobile/api/client.ts`) independently
+     calls a module-level `tryRefresh()` on every 401, with no coordination between
+     callers. On a hard page reload (`page.goto('/visits')` in the Playwright test),
+     `AuthProvider`'s own `GET /me` and the visits screen's own `GET /me/visits` both
+     401 at nearly the same instant and each fired its own `POST /auth/refresh` call;
+     the second one presented a cookie the first had already rotated away, so it
+     failed. The Playwright run reproduced this for real ("Couldn't load your visits"
+     after a reload) — a unit test mocking `fetch` would not have caught the race.
+     **Fix:** `tryRefresh()` now shares one in-flight promise across all concurrent
+     401s (`refreshInFlight` in `client.ts`) so a page with multiple components
+     refreshing at once redeems the rotating cookie exactly once.
+  2. **Camera-permission-denied dead end on the gate screen.** `profile.tsx` renders a
+     dedicated "Camera is blocked... Allow camera access..." message when
+     `LiveCamera`'s `onPermissionDenied` fires. `visits/[id].tsx`'s gate check-in/
+     check-out step wired the same callback to `setActionError('denied')` — the same
+     state value used for a *geolocation* denial — but phase stays `'photo'` on a
+     camera denial, and the `'photo'` phase never rendered any text for that state at
+     all (the `'denied'`-branch message lived only in the `'explain_location'` phase's
+     render block and talked about location, not the camera). The net effect: a guest
+     who denies camera permission at the gate sees a permanently disabled "Take photo"
+     button with zero explanation — a direct violation of SDD §13.1 principle 5
+     ("never a dead end") and E-17/G-16's explicit "enable instructions" requirement.
+     Found while writing this milestone's own `docs/TRACEABILITY.md` E-17 entry and
+     re-reading the actual render logic, not by a test (no automated permission-denial
+     test exists for this path — a documented gap, not a silent one). **Fix:** the
+     camera callback now sets a distinct `'camera_denied'` state, and the `'photo'`
+     phase renders its own "Allow camera access in your browser's site settings..."
+     message, matching `profile.tsx`'s existing (correct) pattern.
+- **Documented simplifications (not bugs — deliberate, disclosed scope cuts):**
+  - No gate-token rotation/scan-session crypto (D1/D2) — `resolveGateAndVerify`
+    (`apps/api/src/visits/geo.ts`/`routes.ts`) checks only real-time haversine distance
+    against a gate's static `lat`/`lng`/`radius_m`, which is the one piece of
+    "location verification" this milestone's golden path actually needs.
+  - Captured photos (profile and gate) are never uploaded or persisted — no media
+    endpoint, no `media` table row, no EXIF-stripping/resize/dedup pipeline (SDD §16.4)
+    exists yet. `LiveCamera` still genuinely enforces "live camera only, no file
+    picker" (SDD §9.4/D4) for the capture step itself; what happens to the frame after
+    capture is out of scope.
+  - "My visits" and the visit-status screen refetch on navigation/focus
+    (`useFocusEffect`), not via the SDD §9.9 live SSE channel — no real-time push.
+  - Walk-in ends at `pending_host` with no live wait screen and no scan session; a
+    host can't yet act on it at all (no resident app exists).
+- **SDD updated?** No — nothing here contradicts the SDD's stated behaviour; every
+  item above is either explicitly out of this milestone's scope (recorded in
+  `docs/TRACEABILITY.md` §0g, matching the project's established "what this does NOT
+  do" discipline) or a bug in this codebase's own guest web client, not the SDD's.
+
 Template for a new entry:
 
 ```markdown

@@ -1,11 +1,14 @@
 import { Stack } from 'expo-router';
+import { AuthProvider } from '../lib/auth-context.js';
 
 /**
- * Root layout — routing foundation only (SDD §13.3: route groups will later decide
- * which shell a signed-in principal sees — (auth)/(guest)/(resident)/(warden)/(office)
- * and gate/). None of those route groups exist yet; this is just proof that
- * expo-router boots and resolves a route tree.
+ * Root layout (SDD §13.3: route groups decide which shell a signed-in principal sees).
+ * Only the `(guest)` shell is built in this milestone — see docs/TRACEABILITY.md.
  */
 export default function RootLayout() {
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <AuthProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </AuthProvider>
+  );
 }

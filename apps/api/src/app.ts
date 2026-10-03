@@ -8,6 +8,7 @@ import { createAuthenticateHook } from './auth/authenticate.js';
 import { RevocationCache } from './auth/principal-loader.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerVisitPolicies } from './visits/policy.js';
+import { registerVisitRoutes } from './visits/routes.js';
 import type { GoogleIdTokenVerifier } from './auth/google.js';
 import { RealGoogleIdTokenVerifier } from './auth/google.js';
 import type { Env } from './config.js';
@@ -160,6 +161,25 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return;
     }
 
+    // Fastify's own body/content-type parsing errors (e.g. FST_ERR_CTP_EMPTY_JSON_BODY
+    // — a client sending `Content-Type: application/json` with no body) are genuine
+    // client-input problems, not server bugs — map them to VALIDATION_FAILED (400)
+    // rather than falling through to the generic 500 below, which would misreport a
+    // bad request as "something went wrong on our side."
+    if (
+      typeof err.code === 'string' &&
+      err.code.startsWith('FST_ERR_CTP_') &&
+      typeof err.statusCode === 'number'
+    ) {
+      const validationError = new AppError(
+        'VALIDATION_FAILED',
+        400,
+        'Request body could not be read.',
+      );
+      reply.status(400).send(toErrorEnvelope(validationError, request.id));
+      return;
+    }
+
     if (err.statusCode === 429) {
       // @fastify/rate-limit throws its own error shape; map it to SDD §12.2's
       // RATE_LIMITED envelope instead of leaking the plugin's own message/format.
@@ -209,14 +229,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // API versioning boundary (SDD §12): every business route registers inside this
   // prefix. The auth module is the first real feature module; visits/gate/admin follow
   // in later milestones.
-  // The visits module has no HTTP routes yet (service + repository only, see
-  // docs/TRACEABILITY.md) — its authorize() policies still register at boot so the
-  // mechanism is ready the moment a route calls it, same as every other module.
   registerVisitPolicies();
 
   await app.register(
     async (v1) => {
       await registerAuthRoutes(v1, { env, db, clock, googleVerifier });
+      await registerVisitRoutes(v1, { db, clock });
     },
     { prefix: '/v1' },
   );

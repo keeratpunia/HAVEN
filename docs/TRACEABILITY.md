@@ -285,14 +285,93 @@ is (same discipline as §0, §0b, §0c, §0d, §0e above):**
   different formula, and no requirement here tests a stay that was shorter/longer
   than booked.
 
+## 0g. Guest web golden-path milestone (2026-10-03)
+
+Implements the guest web experience per SDD §13: invite landing, OTP sign-in, profile
+completion (live camera, no gallery), check-in/check-out (real browser geolocation +
+live camera against a simplified haversine geofence), a zone notice, a partial
+walk-in flow, and the shared error/empty/offline/accessibility states — all against
+the exact copy table in SDD §13.6 (`packages/shared/src/copy/en.ts`, transcribed
+verbatim) and the exact design tokens in SDD §13.2 (`packages/ui/src/tokens.ts`). This
+is a deliberately scoped **golden path**, not the full SDD §13 screen inventory — see
+`docs/DECISIONS.md` DEC-009 for the scoping rationale and every simplification. Proven
+end to end with Playwright (fake geolocation + fake camera device, 360×640 mobile
+viewport, per SDD §19.1) against a real local API + real (embedded) Postgres database,
+not mocks — not just unit-tested in isolation.
+
+What exists now:
+- `apps/api/src/visits/geo.ts` (`haversineDistanceMeters`) + `routes.ts`'s
+  `resolveGateAndVerify` — the one piece of "gate module" functionality this milestone
+  needed: a real distance check against a hostel's configured gate `lat`/`lng`/
+  `radius_m`, called by the new `POST /v1/visits/:id/check-in` and `.../check-out`
+  routes. **Not** the SDD's full rotating-QR/scan-session crypto (D1/D2) — see DEC-009.
+- `GET /v1/invites/:token` (public invite landing) — closes the exact gap §0e flagged
+  as not implemented. Combined with the already-existing `POST
+  /invites/:token/claim` (§0e), the full SDD F1 "open link → sign in → claim" flow now
+  has a real UI and a real route at both ends, proven end to end by the Playwright
+  golden-path test (not just the claim logic in isolation, as §0e left it).
+- `GET /v1/visits/:id`, `GET /v1/me/visits`, `GET /v1/hostels`, `GET /v1/rooms/search`,
+  `POST /v1/visits/walk-in` (`apps/api/src/visits/routes.ts`) — the remaining read/
+  write surface the guest web app needs; `POST /v1/visits/walk-in` wraps the
+  already-built `createWalkIn` service function (§0f) with its first real HTTP caller.
+- `PATCH /me` extended with `isAdultConfirmed` (`apps/api/src/auth/routes.ts`) — the
+  18+ confirmation guests make during profile completion.
+- The full guest web screen set (`apps/mobile/app/(guest)/**`): invite landing, phone +
+  OTP sign-in, profile completion (name/gender/18+ + live photo capture), "My visits",
+  the combined visit-status/gate-flow screen (location explainer → live camera → check-
+  in/out → zone notice → errors), and a partial walk-in flow (room search → visit type
+  → submit).
+- Shared guest-web infrastructure: `packages/ui/src/tokens.ts` (SDD §13.2 design
+  tokens), `packages/shared/src/copy/en.ts` (SDD §13.6 copy table, verbatim, with
+  `{placeholder}` filling and a "never a dead end" fallback per §13.1 principle 5), and
+  nine shared components (`Button`, `StatusChip`, `PhoneInput`, `OtpInput`, `Countdown`,
+  `LiveCamera`, `Banner`/`OfflineBanner`, `EmptyState`, `ErrorState`) matching SDD
+  §13.5's component list for the screens this milestone builds.
+- `apps/mobile/e2e/playwright.config.ts` + `e2e/tests/golden-path.spec.ts`: a real,
+  passing end-to-end run of invite landing → OTP → profile + live photo → check-in
+  (real geolocation + live photo) → zone notice → check-out, against
+  `apps/api/scripts/e2e-db.ts`/`e2e-server.ts` (a dedicated embedded-Postgres + frozen-
+  clock API pair, separate from the unit/integration test infrastructure).
+- **Two real bugs found by this end-to-end run, not by inspection or unit tests, fixed
+  before this milestone was considered done** — see DEC-009 for the full write-up:
+  a refresh-token-rotation race (two components independently retrying a 401 at once
+  on a full page reload each tried to redeem the same single-use refresh cookie) and a
+  dead-end camera-permission-denied state on the gate check-in/check-out screen (the
+  profile screen handled this correctly; the gate screen silently left a disabled
+  button with no explanation).
+
+**What this explicitly does NOT do, so no later reviewer mistakes it for more than it
+is (same discipline as every milestone above):**
+- **No rotating-QR gate token, no scan session.** FR-20/FR-21/the TC-TOK-xx and
+  TC-GEO-xx test cases remain entirely unbuilt — check-in/check-out here are driven
+  directly from the visit-status screen, not a QR scan. D1/D2's actual mechanism is
+  still future gate-module work.
+- **Captured photos are not uploaded or persisted anywhere.** `LiveCamera` genuinely
+  captures a live frame via `getUserMedia` (never a file picker — SDD §9.4/D4 honoured)
+  but neither the profile photo nor the gate check-in/check-out photo reaches the API;
+  there is no media-upload endpoint, no `media` table row, no host-facing photo compare
+  (SDD §13.5's `PhotoCompare`). FR-24 stays WIP, not Done, for exactly this reason.
+- **No live/real-time status updates.** "My visits" and the visit-status screen refetch
+  on navigation/focus, not via the SDD §9.9 SSE channel — a host or guest sees a status
+  change only after their own next navigation, not within 5s of it happening elsewhere.
+- **Walk-in has no live wait screen and no scan session** (FR-25/FR-26 stay WIP) —
+  submitting lands the visit in `pending_host`; nothing here polls or pushes to show
+  the guest the moment a host (on the out-of-scope resident app) approves it.
+- **No in-app QR scanner, no mock-location detection, no EXIF/dedup/signed-URL photo
+  pipeline, no resident/warden/office apps** — all explicitly out of scope, matching
+  the milestone's own stated boundary (see DEC-009).
+- **Accessibility and responsive behaviour (SDD §13.7) were built and are exercised by
+  the Playwright run at the 360×640 viewport**, but no dedicated axe/WCAG audit or a
+  200%-text-zoom pass was run — NFR-11 stays unmarked.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-01 | M | Guest signs in with 6-digit SMS OTP | `src/auth/otp-service.ts`, `src/auth/routes.ts` | `test/otp-service.integration.test.ts`, `test/auth-routes.integration.test.ts` | Done |
-| FR-02 | M | First-time guest profile: name, gender, 18+, consent, profile selfie | — | — | — |
+| FR-01 | M | Guest signs in with 6-digit SMS OTP | `src/auth/otp-service.ts`, `src/auth/routes.ts`; guest web UI at `apps/mobile/app/(guest)/login.tsx` | `test/otp-service.integration.test.ts`, `test/auth-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` | Done |
+| FR-02 | M | First-time guest profile: name, gender, 18+, consent, profile selfie | `apps/mobile/app/(guest)/profile.tsx`, `PATCH /me` (`isAdultConfirmed`, `src/auth/routes.ts`) | `apps/mobile/e2e/tests/golden-path.spec.ts` | WIP — name/gender/18+ confirmation genuinely implemented and tested end to end; the profile photo is captured live (no gallery) but never uploaded/persisted — no media endpoint exists yet |
 | FR-03 | M | Residents and staff sign in with Google | `src/auth/google-service.ts`, `src/auth/google.ts` | `test/google-service.integration.test.ts`, `test/auth-routes.integration.test.ts` | Done |
 | FR-04 | M | Resident phone OTP, room number, ID card photo, selfie, awaits verification | `src/auth/otp-service.ts` (`phone_verify` purpose only) | `test/otp-service.integration.test.ts` | WIP — phone verification only; room/photo/submit not built |
 | FR-05 | M | Warden sees pending residents, approves/rejects in one tap; ID card deleted on decision | — | — | — |
@@ -307,7 +386,7 @@ is (same discipline as §0, §0b, §0c, §0d, §0e above):**
 |---|---|---|---|---|---|
 | FR-10 | M | Verified host creates pre-invite (name, phone, type, date, window) | `apps/api/src/visits/service.ts`'s `createPreInvite` | `apps/api/test/visits-service.integration.test.ts` | WIP — the service call (validate, create `approved` visit, issue invite token) is implemented and tested against a real DB; no HTTP route, so a host cannot actually do this yet |
 | FR-11 | M | Host shares invite link via native share sheet | — | — | — |
-| FR-12 | M | Opening invite link requires OTP to invited number; other numbers refused | `apps/api/src/auth/invites.ts`'s `claimInvite` (built in the authentication milestone) | `apps/api/test/invites.integration.test.ts` | WIP — phone-matching claim logic exists and is tested; still no route, and "opening invite link" (the public pre-claim read) isn't built either, see §0e |
+| FR-12 | M | Opening invite link requires OTP to invited number; other numbers refused | `apps/api/src/auth/invites.ts`'s `claimInvite` + `POST /invites/:token/claim` (`src/auth/routes.ts`, §0e) + the new public `GET /v1/invites/:token` landing route (`apps/api/src/visits/routes.ts`) + guest web UI (`apps/mobile/app/(guest)/i/[token].tsx`, `login.tsx`) | `apps/api/test/invites.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` (happy path only) | Done — the full "open link → sign in → claim" flow (SDD F1) now has a real UI and real routes at both ends, proven end to end; the `INVITE_PHONE_MISMATCH` rejection path is implemented (`login.tsx` surfaces it as a user-facing error, not swallowed) but has no dedicated automated test — TC-FLOW-07 stays unmarked |
 | FR-13 | M | Host edits window / cancels visit until guest checks in | `cancelApprovedVisit`, `cancelOvernightRequest`, `cancelWalkIn` (`visits/service.ts`) | `visits-service.integration.test.ts` | WIP — cancel exists for every pre-entry state; *editing* the window is not implemented at all; no route |
 | FR-14 | M | Host requests overnight/guest-room with quota + charge preview | `createOvernightRequest` (`visits/service.ts`) | `visits-service.integration.test.ts` (incl. `QUOTA_EXCEEDED`) | WIP — the request itself, with real quota enforcement, is implemented; the `POST /v1/visits/preview` charge/quota *preview* endpoint (SDD F6 step 2) is not built |
 | FR-15 | M | Warden approves/rejects overnight/guest-room requests; approval creates pending charge | `approveOvernight`, `rejectOvernight` (`visits/service.ts`) | `visits-service.integration.test.ts` (incl. pending-charge assertion) | WIP — service logic implemented and tested against a real DB, including the pending charge; no HTTP route for the warden to actually act through |
@@ -320,10 +399,10 @@ is (same discipline as §0, §0b, §0c, §0d, §0e above):**
 | FR-20 | M | Gate device shows rotating QR + countdown + hostel name + instruction | — | — | — |
 | FR-21 | M | Scanning QR opens guest web app; requests location, validates token + GPS first | — | — | — |
 | FR-22 | S | Guest app offers an in-app scanner on home screen | — | — | — |
-| FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `checkIn`, `checkOut` (`visits/service.ts`) implement the underlying state transitions | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts` | WIP — the transitions the app would call exist and are tested, including concurrency; no gate/scan-session route or UI |
-| FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | — | — | — |
-| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) implements the submit step only | `visits-service.integration.test.ts` | WIP — room search / resident picker / live photo capture are all UI/gate-module work not built here; only the resulting `pending_host` visit creation (given a chosen host) exists |
-| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `approveWalkIn` (`visits/service.ts`) is the server-side half (status flips to `inside`) | `visits-service.integration.test.ts` | WIP — no live/polling/SSE status screen exists; only the state change it would observe |
+| FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `checkIn`, `checkOut` (`visits/service.ts`) + `POST /v1/visits/:id/check-in`/`check-out` (`visits/routes.ts`, with real haversine geofence verification) + `apps/mobile/app/(guest)/visits/[id].tsx` | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` | WIP — a real UI, real routes, and a real (simplified) geofence check now exist and are proven end to end; still no gate/scan-session (QR/rotating token) layer, so "Request entry" via a scanned gate isn't offered, only the direct status-screen actions |
+| FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | `apps/mobile/components/LiveCamera.tsx` (web `getUserMedia`, no file input anywhere) | `apps/mobile/e2e/tests/golden-path.spec.ts` (fake camera device) | WIP — live-only capture is genuinely enforced and exercised at both the profile and gate steps; the captured photo is never uploaded or persisted (no media endpoint), so there is nothing for a host to compare against yet |
+| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) + `POST /v1/visits/walk-in` (`visits/routes.ts`) + `apps/mobile/app/(guest)/walk-in.tsx` (room search, resident picker, visit-type picker) | `visits-service.integration.test.ts` | WIP — the full guest-facing submission UI now exists (room search through submit); live photo at walk-in time, the scan session, and the live host-facing push are still not built |
+| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `approveWalkIn` (`visits/service.ts`) is the server-side half; `apps/mobile/app/(guest)/visits/[id].tsx` is a real status screen | `visits-service.integration.test.ts` | WIP — a real status screen now exists and shows the status change, but only on next navigation/focus, not live/polling/SSE — "without re-scan" is satisfied, "flips to green" in real time is not |
 | FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | — | — | — |
 | FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `createHostAssistedEntry` (`visits/service.ts`) covers "creates a visitor + checks in"; checkout reuses `checkOut` | `visits-service.integration.test.ts` | WIP — the two state transitions are implemented and tested (including straight-to-`inside` creation); QR scanning, GPS, and live photo capture are gate-module/UI work not built here |
 | FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | — | — | — |
@@ -431,7 +510,7 @@ is (same discipline as §0, §0b, §0c, §0d, §0e above):**
 | E-14 | Gate location not set | `GATE_NOT_CONFIGURED`; red dashboard banner | — | — | — |
 | E-15 | Guest has no mobile data at the gate | Host-assisted entry (F4) fallback | — | — | — |
 | E-16 | GPS inside geofence but guest actually in a nearby room | Mitigated by calibration + live photo; documented limitation | — | — | — |
-| E-17 | Guest denies camera permission | G-16 enable instructions; no check-in without photo | — | — | — |
+| E-17 | Guest denies camera permission | G-16 enable instructions; no check-in without photo | `apps/mobile/components/LiveCamera.tsx`'s `onPermissionDenied`, handled by `profile.tsx` and `visits/[id].tsx` | — (manually verified; no automated permission-denial test) | WIP — both the profile and gate screens show "Allow camera access..." instructions instead of a dead end; no check-in/profile-completion is possible without a captured photo. The gate screen's handling was a real bug found while writing this milestone's own traceability entry (it originally reused the geolocation-denied message and left the Take-photo button disabled with no explanation) — fixed, see `docs/DECISIONS.md` DEC-009 |
 | E-18 | Resident moves out with future visits | Marked `left`; future visits cancelled | — | — | — |
 | E-19 | Overnight stay spans two months | Nights split by month for quota | `packages/shared/src/rules/nights.ts` (`monthsTouched`) + `evaluate-create.ts`'s per-month `QUOTA_EXCEEDED` loop | `nights.test.ts`, `evaluate-create.test.ts` (31 Oct → 2 Nov / 30 Oct → 1 Nov worked examples) | Done — the month-splitting logic itself is fully implemented and tested; no API/DB layer needed for this specific edge case, it's pure date arithmetic |
 | E-20 | Two residents claim the same room | Allowed (roommates) | — | — | — |
@@ -517,10 +596,10 @@ is (same discipline as §0, §0b, §0c, §0d, §0e above):**
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
-| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 2 (FR-01, FR-03) | 17 (FR-04, FR-06, FR-07, FR-10, FR-12, FR-13, FR-14, FR-15, FR-23, FR-25, FR-26, FR-28, FR-45, FR-53, FR-70, FR-71, FR-74) | 31 | 0 |
+| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 3 (FR-01, FR-03, FR-12) | 18 (FR-02, FR-04, FR-06, FR-07, FR-10, FR-13, FR-14, FR-15, FR-23, FR-24, FR-25, FR-26, FR-28, FR-45, FR-53, FR-70, FR-71, FR-74) | 29 | 0 |
 | NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
 | BR | 20 | 1 (BR-15) | 16 (BR-01..12, 16, 17, 19, 20) | 3 (BR-13, 14, 18) | 0 |
-| E | 24 | 1 (E-19) | 0 | 23 | 0 |
+| E | 24 | 1 (E-19) | 1 (E-17) | 22 | 0 |
 | TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 21 (TC-RULE ×16, TC-SEC-05, TC-SEC-06, TC-SEC-07, TC-SEC-08, TC-SEC-09) | 0 | 30 | 0 |
 
 Corrected during the rules-engine milestone: this table had silently gone stale after
@@ -532,6 +611,11 @@ didn't prevent the drift once, so this note is a second line of defence).
 Counts verified by direct enumeration against SDD §5, §17.1, §4.2, §17.3, §19.2 during
 the hostile planning review (2026-10-01). Recount this table if any ID range in the SDD
 changes — do not hand-adjust without re-enumerating.
+
+Updated 2026-10-03 for the guest web golden-path milestone (§0g): FR-12 moved WIP →
+Done; FR-02 and FR-24 moved not-started → WIP; E-17 moved not-started → WIP. No ID
+range changed, so this was a direct re-tally of the rows above, not a re-enumeration
+against the SDD.
 
 ## 6a. Database-level guarantees implemented but not mapped to a single ID
 
