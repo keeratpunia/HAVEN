@@ -9,6 +9,7 @@ import { verifyGateToken } from './token.js';
 import {
   consumeScanSession,
   findScanSessionById,
+  findScanSessionByVisitAndAction,
   insertScanSession,
   loadActiveGateByCode,
   recordLocationRetry,
@@ -270,8 +271,21 @@ export async function consumeSession(
   clock: Clock,
   sessionId: string,
   action: ConsumedAction,
+  visitId: string,
 ): Promise<void> {
-  await consumeScanSession(trx, sessionId, action, clock.now());
+  await consumeScanSession(trx, sessionId, action, clock.now(), visitId);
+}
+
+/**
+ * The scan session a walk-in was created from, so the host's later approval can reuse
+ * its GPS facts rather than requiring a second scan (SDD F2 step 9). `undefined` if
+ * none is found — a caller must still work (e.g. a visit created by some other path).
+ */
+export async function findWalkInSessionForVisit(
+  db: Kysely<Database>,
+  visitId: string,
+): Promise<ScanSessionRow | null> {
+  return findScanSessionByVisitAndAction(db, visitId, 'walk_in');
 }
 
 export { setSessionPhoto, MAX_LOCATION_ATTEMPTS };

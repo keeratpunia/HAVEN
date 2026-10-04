@@ -289,6 +289,7 @@ interface ScanSessionsTable {
   user_agent: string | null;
   consumed_at: ColumnType<Date | null, string | null | undefined, string | null>;
   consumed_action: ConsumedAction | null;
+  visit_id: string | null;
   expires_at: ColumnType<Date, string, string>;
   created_at: Generated<Date>;
 }

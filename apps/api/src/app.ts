@@ -10,6 +10,7 @@ import { RevocationCache } from './auth/principal-loader.js';
 import { registerAuthRoutes } from './auth/routes.js';
 import { registerVisitPolicies } from './visits/policy.js';
 import { registerVisitRoutes } from './visits/routes.js';
+import { registerHostVisitRoutes } from './visits/host-routes.js';
 import { registerGatePolicies } from './gate/policy.js';
 import { registerGateRoutes } from './gate/routes.js';
 import type { GoogleIdTokenVerifier } from './auth/google.js';
@@ -92,6 +93,19 @@ const DEFAULT_RATE_LIMIT = { max: 120, timeWindowMs: 60_000 }; // SDD §12.11: "
  */
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const { env, logger, db } = options;
+
+  // DEC-011: the dev-login bypass must never be reachable outside a real local dev
+  // process. `DEV_LOGIN_ENABLED=true` alone is not enough — this refuses to boot
+  // unless NODE_ENV is also explicitly 'development', so a staging/production deploy
+  // that accidentally inherits the flag (a copied .env, a misconfigured pipeline)
+  // fails loudly at startup instead of quietly exposing an auth bypass.
+  if (env.DEV_LOGIN_ENABLED && process.env.NODE_ENV !== 'development') {
+    throw new Error(
+      'DEV_LOGIN_ENABLED=true requires NODE_ENV=development. Refusing to start — ' +
+        'this bypass must never run against staging or production.',
+    );
+  }
+
   const checkDb = options.checkDb ?? pingDb;
   const rateLimitConfig = options.rateLimit ?? DEFAULT_RATE_LIMIT;
   const clock = options.clock ?? new SystemClock();
@@ -254,6 +268,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         mediaStorage: options.mediaStorage,
       });
       await registerVisitRoutes(v1, { db, clock });
+      await registerHostVisitRoutes(v1, { db, clock });
       await registerGateRoutes(v1, {
         db,
         clock,

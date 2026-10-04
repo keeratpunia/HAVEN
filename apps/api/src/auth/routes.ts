@@ -12,6 +12,7 @@ import { normalizePhone } from './phone.js';
 import { requestOtp, verifyOtp } from './otp-service.js';
 import { findOrCreateVisitorByPhone } from './visitor-service.js';
 import { signInWithGoogle, getResidentStatus } from './google-service.js';
+import { devLogin } from './dev-login.js';
 import { issueTokensForUser, issueTokensForVisitor, type IssuedTokens } from './tokens.js';
 import { rotateRefreshToken, revokeSession } from './sessions.js';
 import { loadUserRoles } from './principal-loader.js';
@@ -44,6 +45,7 @@ const GoogleSignInBody = z.object({
   idToken: z.string().min(1),
   staffInviteToken: z.string().min(1).optional(),
 });
+const DevLoginBody = z.object({ email: z.string().email() });
 const RefreshBody = z.object({ refreshToken: z.string().min(1).optional() });
 const InviteClaimParams = z.object({ token: z.string().min(1) });
 
@@ -180,6 +182,39 @@ export async function registerAuthRoutes(
       },
     });
   });
+
+  // Dev-only resident/staff sign-in bypass (DEC-011) — registered only when enabled;
+  // `buildApp` has already refused to boot with this flag on outside NODE_ENV=development.
+  if (env.DEV_LOGIN_ENABLED) {
+    api.post('/auth/dev-login', { schema: { body: DevLoginBody } }, async (request, reply) => {
+      const result = await withTx(db, { principal: null, requestId: request.id }, async (trx) => {
+        const signIn = await devLogin(trx, clock, request.body.email);
+        const residentStatus = await getResidentStatus(trx, signIn.userId);
+        const issued = await issueTokensForUser(
+          trx,
+          {
+            userId: signIn.userId,
+            roles: signIn.roles,
+            client: clientFromHeader(request),
+            userAgent: request.headers['user-agent'] ?? null,
+            ip: requestIp(request),
+          },
+          env.JWT_SECRET,
+          clock,
+        );
+        return { issued, signIn, residentStatus };
+      });
+
+      sendTokens(request, reply, env, result.issued, {
+        principal: {
+          type: 'user',
+          id: result.signIn.userId,
+          roles: result.signIn.roles,
+          residentStatus: result.residentStatus,
+        },
+      });
+    });
+  }
 
   api.post('/auth/refresh', { schema: { body: RefreshBody } }, async (request, reply) => {
     const presented =

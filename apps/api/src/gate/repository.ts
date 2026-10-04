@@ -48,6 +48,7 @@ export interface ScanSessionRow {
   photo_media_id: string | null;
   consumed_at: Date | null;
   consumed_action: ConsumedAction | null;
+  visit_id: string | null;
   expires_at: Date;
   created_at: Date;
 }
@@ -104,6 +105,22 @@ export async function findScanSessionById(
     .selectFrom('haven.scan_sessions')
     .selectAll()
     .where('id', '=', id)
+    .executeTakeFirst();
+  return (row as ScanSessionRow | undefined) ?? null;
+}
+
+/** The session that consumed a given action for a given visit (e.g. the walk-in
+ * creation session a later approval needs its GPS facts from). */
+export async function findScanSessionByVisitAndAction(
+  db: Kysely<Database>,
+  visitId: string,
+  action: ConsumedAction,
+): Promise<ScanSessionRow | null> {
+  const row = await db
+    .selectFrom('haven.scan_sessions')
+    .selectAll()
+    .where('visit_id', '=', visitId)
+    .where('consumed_action', '=', action)
     .executeTakeFirst();
   return (row as ScanSessionRow | undefined) ?? null;
 }
@@ -170,17 +187,22 @@ export async function setSessionPhoto(
     .execute();
 }
 
-/** Marks a session consumed (SDD §9.3: "A session allows one gate action; consumed_at
- * is set in the same transaction as that action"). */
+/**
+ * Marks a session consumed (SDD §9.3: "A session allows one gate action; consumed_at
+ * is set in the same transaction as that action"), and links it to the visit it
+ * produced/served — a walk-in approval later needs to recover this session's GPS
+ * facts (SDD F2 step 9: "using the scan session's GPS result ... so no second scan").
+ */
 export async function consumeScanSession(
   trx: Transaction<Database>,
   id: string,
   action: ConsumedAction,
   now: Date,
+  visitId: string,
 ): Promise<void> {
   await trx
     .updateTable('haven.scan_sessions')
-    .set({ consumed_at: now.toISOString(), consumed_action: action })
+    .set({ consumed_at: now.toISOString(), consumed_action: action, visit_id: visitId })
     .where('id', '=', id)
     .execute();
 }

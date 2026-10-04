@@ -89,6 +89,19 @@ const EnvSchema = z.object({
   // — see that module's comment: this environment has no reliable Supabase/Docker
   // storage connection, same constraint as DEC-004's embedded-postgres substitute).
   MEDIA_STORAGE_DIR: z.string().default('.media-storage'),
+
+  // Dev-only resident/staff sign-in bypass (demo milestone, docs/DECISIONS.md DEC-011):
+  // issues real tokens for an existing `users` row by email, no Google ID token
+  // required. Registered as a route only when true. `buildApp` additionally refuses
+  // to boot with this on unless `process.env.NODE_ENV === 'development'` — a second,
+  // independent gate (this flag alone is not enough to turn the bypass on) so it can
+  // never be left on by accident in a staging/production deploy.
+  // `z.coerce.boolean()` would treat the *string* "false" as truthy (any non-empty
+  // string coerces to `true` in JS) — exactly the footgun this flag cannot afford.
+  DEV_LOGIN_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

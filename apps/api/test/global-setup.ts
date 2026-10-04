@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
@@ -11,10 +11,15 @@ import {
 } from './pg-test-constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATION_FILE = path.resolve(
-  __dirname,
-  '../../../supabase/migrations/20261001000001_init.sql',
-);
+const MIGRATIONS_DIR = path.resolve(__dirname, '../../../supabase/migrations');
+
+/** Every `.sql` migration, in filename order (timestamp-prefixed, so this is also chronological). */
+function allMigrationFiles(): string[] {
+  return readdirSync(MIGRATIONS_DIR)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .map((name) => path.join(MIGRATIONS_DIR, name));
+}
 
 /**
  * Vitest `globalSetup`: starts one embedded-Postgres cluster, applies the real schema
@@ -44,8 +49,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   try {
     await client.query('create extension if not exists citext');
     await client.query('create extension if not exists pgcrypto');
-    const migrationSql = readFileSync(MIGRATION_FILE, 'utf-8');
-    await client.query(migrationSql);
+    for (const file of allMigrationFiles()) {
+      await client.query(readFileSync(file, 'utf-8'));
+    }
   } finally {
     await client.end();
   }

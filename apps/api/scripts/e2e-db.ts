@@ -11,7 +11,7 @@
  * see docs/DECISIONS.md DEC-004/DEC-007/DEC-009). Stays running in the foreground
  * until killed; prints the DATABASE_URL to use.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
@@ -33,10 +33,15 @@ import {
 } from './e2e-constants.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATION_FILE = path.resolve(
-  __dirname,
-  '../../../supabase/migrations/20261001000001_init.sql',
-);
+const MIGRATIONS_DIR = path.resolve(__dirname, '../../../supabase/migrations');
+
+/** Every `.sql` migration, in filename order (timestamp-prefixed, so this is also chronological). */
+function allMigrationFiles(): string[] {
+  return readdirSync(MIGRATIONS_DIR)
+    .filter((name) => name.endsWith('.sql'))
+    .sort()
+    .map((name) => path.join(MIGRATIONS_DIR, name));
+}
 
 async function main() {
   const dataDir = path.join(process.cwd(), '.e2e-pgdata');
@@ -61,7 +66,9 @@ async function main() {
   console.log('Applying schema migration...');
   await client.query('create extension if not exists citext');
   await client.query('create extension if not exists pgcrypto');
-  await client.query(readFileSync(MIGRATION_FILE, 'utf-8'));
+  for (const file of allMigrationFiles()) {
+    await client.query(readFileSync(file, 'utf-8'));
+  }
 
   console.log('Inserting E2E fixtures...');
   const hostel = await client.query<{ id: string }>(

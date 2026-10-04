@@ -335,7 +335,9 @@ export async function registerGateRoutes(
           photoMediaId: request.body.photoId,
         },
       });
-      await db.transaction().execute((trx) => consumeSession(trx, clock, session.id, 'check_in'));
+      await db
+        .transaction()
+        .execute((trx) => consumeSession(trx, clock, session.id, 'check_in', updated.id));
 
       reply.send({ visit: visitDto(updated), result: 'inside' });
     },
@@ -367,7 +369,9 @@ export async function registerGateRoutes(
           photoMediaId: request.body.photoId,
         },
       });
-      await db.transaction().execute((trx) => consumeSession(trx, clock, session.id, 'check_out'));
+      await db
+        .transaction()
+        .execute((trx) => consumeSession(trx, clock, session.id, 'check_out', updated.id));
 
       reply.send({ visit: visitDto(updated) });
     },
@@ -407,10 +411,12 @@ export async function registerGateRoutes(
         windowStart: now,
         windowEnd,
       });
-      // The scan session stays queryable (not deleted) after being marked consumed —
-      // the host's later approval (resident app, a future milestone) still needs its
-      // GPS facts (SDD §9.3 step 9: "using the scan session's GPS result").
-      await db.transaction().execute((trx) => consumeSession(trx, clock, session.id, 'walk_in'));
+      // The scan session stays queryable (not deleted) after being marked consumed,
+      // linked to this visit (`visit_id`) — the host's later approval needs its GPS
+      // facts (SDD F2 step 9: "using the scan session's GPS result ... no second scan").
+      await db
+        .transaction()
+        .execute((trx) => consumeSession(trx, clock, session.id, 'walk_in', visit.id));
 
       reply.status(201).send({ visit: visitDto(visit) });
     },
@@ -456,7 +462,7 @@ export async function registerGateRoutes(
       });
       await db
         .transaction()
-        .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted'));
+        .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted', visit.id));
 
       reply.status(201).send({ visit: visitDto(visit) });
     },
@@ -490,7 +496,7 @@ export async function registerGateRoutes(
       });
       await db
         .transaction()
-        .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted'));
+        .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted', updated.id));
 
       reply.send({ visit: visitDto(updated) });
     },
