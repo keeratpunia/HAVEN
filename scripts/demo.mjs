@@ -26,6 +26,16 @@ for (const varName of ['APP_ENV', 'NODE_ENV']) {
 const webBaseUrl = process.env.WEB_BASE_URL ?? 'http://localhost:8081';
 const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:8080';
 
+/** Prefixes every line of a chunk with `[name]` — a single `data` event can contain
+ * several newline-separated lines, and prefixing only the chunk's start left later
+ * lines unprefixed in the combined output. */
+function prefixedWrite(stream, name, buf) {
+  const text = buf.toString();
+  const lines = text.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  for (const line of lines) stream.write(`[${name}] ${line}\n`);
+}
+
 const children = [];
 function run(name, command, args, opts = {}) {
   const child = spawn(command, args, {
@@ -35,8 +45,8 @@ function run(name, command, args, opts = {}) {
     env: { ...process.env, ...opts.env },
   });
   children.push(child);
-  child.stdout.on('data', (buf) => process.stdout.write(`[${name}] ${buf}`));
-  child.stderr.on('data', (buf) => process.stderr.write(`[${name}] ${buf}`));
+  child.stdout.on('data', (buf) => prefixedWrite(process.stdout, name, buf));
+  child.stderr.on('data', (buf) => prefixedWrite(process.stderr, name, buf));
   return child;
 }
 
@@ -54,8 +64,21 @@ function waitFor(child, pattern) {
   });
 }
 
+/** `spawn(..., { shell: true })` on Windows wraps each child in an extra cmd.exe
+ * layer — `child.kill()` only kills that wrapper, leaving the actual tsx/expo
+ * process (and the embedded Postgres under it) running and still holding its port.
+ * `taskkill /T` kills the whole process tree instead; on POSIX, `child.kill()` is
+ * already enough since there's no such wrapper. */
+function killTree(child) {
+  if (process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    child.kill();
+  }
+}
+
 function shutdown() {
-  for (const child of children) child.kill();
+  for (const child of children) killTree(child);
   process.exit(0);
 }
 process.on('SIGINT', shutdown);

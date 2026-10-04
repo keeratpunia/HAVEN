@@ -193,6 +193,19 @@ Run (in a separate terminal, demo stack still running):
 pnpm --filter @haven/api run demo:pair-code
 ```
 
+### Ctrl+C didn't fully stop the stack
+
+On Windows, embedded Postgres runs as its own `postgres.exe` process and can
+occasionally outlive the `pnpm demo` process tree if the orchestrator is killed
+forcefully (not a normal Ctrl+C in the terminal you launched it from — that case
+is handled). If `pnpm demo` won't start again because a port is already in use,
+find and end the leftover process:
+
+```
+netstat -ano | findstr ":8080 :8081 :54625"
+taskkill /PID <pid> /F
+```
+
 ### Resetting the database between rehearsals
 
 The demo database is a disposable, in-memory-speed Postgres instance with no
