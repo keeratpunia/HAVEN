@@ -49,46 +49,66 @@ a presentation venue is usually much less accurate than outdoors); override with
 
 ### 0.3 Expose it over HTTPS (phones require HTTPS for camera + GPS)
 
-Pick one tunnel tool. **Start the tunnels first** — you need their URLs before
-starting the demo stack, because the API needs to know the web app's HTTPS URL (it's
-embedded in every QR code and invite link) and the web app needs to know the API's
-HTTPS URL (compiled into the page at build time).
+**Use ONE tunnel, not two.** An earlier version of this doc had you tunnel ports 8080
+and 8081 separately — a live rehearsal (2026-10-04) found that breaks sign-in: the
+guest's session cookie is `SameSite=Lax`, and two different random tunnel hostnames
+count as different *sites* to the browser, so it correctly refuses to send the cookie
+from one to the other. Every time the guest's phone opened a fresh page (e.g. after
+scanning the gate QR with the camera app), it forgot they were signed in and asked for
+phone+OTP again. (A real deployment doesn't hit this because `WEB_BASE_URL` and
+`API_BASE_URL` are subdomains of one shared domain there — same-site. A quick tunnel
+has no such shared domain.)
+
+The fix, and the only supported path now: tunnel a single local port that serves
+**both** the web app and the API. `pnpm demo` already does the merging for you via
+`scripts/demo-proxy.mjs` (`/v1/*` → the API on :8080, everything else → the web app on
+:8081) — it starts automatically whenever `WEB_BASE_URL` and `API_BASE_URL` are set to
+the *same* non-localhost value. You only need to tunnel port **9000**, not 8080/8081.
+
+**Start the tunnel first** — you need its URL before starting the demo stack, because
+the API bakes the web app's HTTPS URL into every QR code and invite link, and the web
+app bakes the API's HTTPS URL in at build time. Since both are now the same URL, you
+only do this once:
 
 **cloudflared** (recommended, no account needed for a quick tunnel):
 
 ```
-cloudflared tunnel --url http://localhost:8080   # note the https://*.trycloudflare.com URL → API_TUNNEL_URL
-cloudflared tunnel --url http://localhost:8081   # note this one → WEB_TUNNEL_URL
+cloudflared tunnel --url http://localhost:9000
 ```
 
 **ngrok** (equivalent):
 
 ```
-ngrok http 8080   # → API_TUNNEL_URL
-ngrok http 8081   # → WEB_TUNNEL_URL
+ngrok http 9000
 ```
 
-Then start the demo stack pointed at both tunnel URLs:
+Note the `https://*.trycloudflare.com` (or ngrok) URL it prints — call it `TUNNEL_URL`.
+Then start the demo stack pointed at it, setting `WEB_BASE_URL` and `API_BASE_URL` to
+the **identical** value:
 
 ```
-WEB_BASE_URL=<WEB_TUNNEL_URL> API_BASE_URL=<API_TUNNEL_URL> \
-CORS_ORIGINS=<WEB_TUNNEL_URL> \
+WEB_BASE_URL=<TUNNEL_URL> API_BASE_URL=<TUNNEL_URL> \
+CORS_ORIGINS=<TUNNEL_URL> \
 DEMO_GATE_LAT=<lat> DEMO_GATE_LNG=<lng> \
 pnpm demo
 ```
 
-`WEB_BASE_URL` is what `demo-server.ts` puts inside every invite link and QR payload —
-if it's still `localhost`, a phone that isn't on your laptop's network can't open
-anything it scans. `CORS_ORIGINS` must match `WEB_TUNNEL_URL` exactly (scheme +
-host, no trailing slash) or the browser will block every API call with a CORS error.
-The web app itself picks up `API_BASE_URL` via `EXPO_PUBLIC_API_URL`, which `pnpm
-demo`'s orchestrator (`scripts/demo.mjs`) passes through to the Expo process
-automatically — you don't need to set that one separately.
+Watch for this line in the output, confirming the proxy started:
+
+```
+WEB_BASE_URL and API_BASE_URL match — starting the local merge proxy on :9000.
+```
+
+If you don't see it, double-check `WEB_BASE_URL` and `API_BASE_URL` are set to the
+*exact same string* (including `https://`, no trailing slash) — the proxy only starts
+when they match.
+
+`CORS_ORIGINS` must match `TUNNEL_URL` exactly or the browser will block API calls.
 
 Quick tunnels (`cloudflared tunnel --url ...` / plain `ngrok http`) issue a **new
-random URL every time they start** — if you restart a tunnel mid-rehearsal, you must
-restart `pnpm demo` with the new URL too. For a longer rehearsal session, keep both
-tunnels running continuously rather than restarting them.
+random URL every time they start** — if you restart the tunnel mid-rehearsal, restart
+`pnpm demo` with the new URL too. For a longer rehearsal session, keep the tunnel
+running continuously rather than restarting it.
 
 ### 0.4 Phone setup
 
@@ -152,10 +172,22 @@ Have two guest phones (or a phone + a desktop browser profile) ready: **Guest A*
 
 ### F. Walk-in: Guest B requests entry, resident approves, guest's screen turns green on its own
 
+**Expect a brand-new Guest B's first scan to expire.** The QR token is only valid 30
+seconds (SDD D2 — specifically sized "to cover a permission prompt," not a full
+sign-up). A first-time walk-in's full detour — location permission → phone/OTP →
+profile form → camera permission for the selfie — routinely takes longer than that,
+so the app correctly shows "That code has changed" partway through and the guest has
+to scan again. Narrate this confidently if it happens live: "first-time guests
+sometimes need a second scan — that's the same 30-second rule that stops someone
+reusing a screenshotted code, not a bug." The *second* scan is always fast, since
+they're now signed in with a complete profile.
+
 17. Guest B (no invite) scans the gate QR directly (`/gate` → camera).
 18. Location check → signs in with OTP (or the test-number shortcut) → profile + live
     selfie (first time) → **Find your host** → room `101` → **Priya Sharma** → visit
-    type → live selfie → **Waiting for host**.
+    type → live selfie → **Waiting for host**. If the code expired partway through
+    (see note above), tap **Back to start** and scan the gate QR once more — it picks
+    up instantly since Guest B is already signed in.
 19. On the resident's laptop, go to **Requests**. Guest B's card shows their name,
     visit type, and the location-verified/not-verified line.
 20. Tap **Approve**.

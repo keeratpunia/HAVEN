@@ -26,6 +26,18 @@ for (const varName of ['APP_ENV', 'NODE_ENV']) {
 const webBaseUrl = process.env.WEB_BASE_URL ?? 'http://localhost:8081';
 const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:8080';
 
+// Two different tunnel hostnames (one per port) break the refresh-token cookie: it's
+// SameSite=Lax, and a background fetch() from the web app's origin to a *different*
+// API origin is cross-site, so the browser correctly refuses to send it — the guest
+// gets signed out every time they open a fresh page (e.g. after scanning the gate QR
+// with their camera app). In a real deployment this doesn't happen because
+// WEB_BASE_URL/API_BASE_URL are subdomains of one shared COOKIE_DOMAIN (same-site);
+// a quick tunnel has no such shared parent domain. Discovered during a live rehearsal
+// (docs/DEMO.md) — when WEB_BASE_URL and API_BASE_URL are the same non-localhost
+// origin, start scripts/demo-proxy.mjs (routes /v1/* to :8080, everything else to
+// :8081) so a single tunnel on :9000 can serve both under one origin.
+const usingSharedTunnelOrigin = webBaseUrl === apiBaseUrl && !webBaseUrl.includes('localhost');
+
 /** Prefixes every line of a chunk with `[name]` — a single `data` event can contain
  * several newline-separated lines, and prefixing only the chunk's start left later
  * lines unprefixed in the combined output. */
@@ -96,8 +108,24 @@ async function main() {
   await waitFor(server, /listening on/);
 
   run('web', 'pnpm', ['--filter', '@haven/mobile', 'run', 'web'], {
-    env: { EXPO_PUBLIC_API_URL: apiBaseUrl, EXPO_PUBLIC_WEB_URL: webBaseUrl },
+    env: {
+      EXPO_PUBLIC_API_URL: apiBaseUrl,
+      EXPO_PUBLIC_WEB_URL: webBaseUrl,
+      // Mirrors demo-server.ts's own DEV_LOGIN_ENABLED=true — without this the
+      // resident sign-in screen hides the dev-login form entirely (see
+      // apps/mobile/app/resident/login.tsx), since there's no real Google OAuth
+      // configured for this environment and that's the only way in.
+      EXPO_PUBLIC_DEV_LOGIN_ENABLED: 'true',
+    },
   });
+
+  if (usingSharedTunnelOrigin) {
+    run('proxy', 'node', ['scripts/demo-proxy.mjs']);
+    console.log(
+      '\nWEB_BASE_URL and API_BASE_URL match — starting the local merge proxy on :9000.\n' +
+        'Point your single cloudflared/ngrok tunnel at :9000, not :8080 or :8081.\n',
+    );
+  }
 
   setTimeout(() => {
     console.log('\n' + '='.repeat(72));
