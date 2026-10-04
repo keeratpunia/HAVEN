@@ -701,6 +701,89 @@ Source for all of Part 1: SDD §2.7.
   `docs/TRACEABILITY.md` §0g, matching the project's established "what this does NOT
   do" discipline) or a bug in this codebase's own guest web client, not the SDD's.
 
+### DEC-010 — Gate subsystem milestone: removing the guest-web milestone's temporary endpoints, two real bugs, and the DEC-009 gap review
+
+- **Date:** 2026-10-04
+- **Context:** The gate subsystem (SDD §9.1-9.4, §11.3, §12.8) had been skipped by
+  mistake — the guest-web milestone (commit `38dc702`) was built against it before it
+  existed, so it used three temporary, non-SDD endpoints (`POST /v1/visits/:id/
+  check-in`, `POST /v1/visits/:id/check-out`, `POST /v1/visits/walk-in`) with a
+  simplified direct-geolocation check instead of the real rotating-QR/scan-session
+  flow. This task built the real gate subsystem, then rewired the guest web app onto
+  it, and removed the temporary endpoints.
+- **Decision:** `apps/api/src/visits/routes.ts` no longer registers `/visits/:id/
+  check-in`, `/visits/:id/check-out`, or `/visits/walk-in` — check-in, check-out and
+  walk-in are now exclusively `apps/api/src/gate/routes.ts`'s `/scan-sessions/:id/
+  check-in`/`check-out`/`walk-in`, matching SDD §12.8 exactly (including the ★
+  endpoints' exact request/response shapes). The mobile API client's `checkIn`,
+  `checkOut`, and `createWalkIn` functions and the `GateLocation` type were deleted,
+  not deprecated — nothing else referenced them. `visits/[id].tsx` lost its direct
+  Check-in/Check-out buttons (it's now a pure read-only status view) and the
+  standalone `walk-in.tsx` screen was deleted outright, both superseded by `/g/
+  [token].tsx`'s real scan-session-driven flow.
+- **Why:** The temporary endpoints were explicitly provisional (CLAUDE.md §1.3: a
+  divergence from the SDD must be flagged, recorded, and later reconciled "in the
+  same pull request" once the real thing exists) — they skipped the rotating-QR
+  token, the scan-session nonce/binding/single-use mechanism, and the geofence
+  retry/host-confirm fallback entirely. Once the real gate subsystem existed, keeping
+  the shortcut around would mean two different, inconsistent ways to check a guest
+  in, one of them silently bypassing every security property (SDD §16.1 T2-T4) the
+  real token/geofence design exists to provide. Removing them outright (not keeping a
+  fallback) is what "fix one of them in the same pull request; never let them drift"
+  (SDD §0) requires here.
+- **Two real bugs found while building/testing this milestone, fixed before it was
+  considered done (full detail in `docs/TRACEABILITY.md` §0h):**
+  1. Check-in unconditionally completed entry regardless of GPS verification — the
+     pre-existing `checkIn()` service (built before the gate module existed) had no
+     "wait for host" branch; SDD §12.8 requires staying `approved` with
+     `awaiting_host_confirmation` when `gpsOk` is false and the host hasn't already
+     confirmed. Fixed by short-circuiting in the gate route before calling `checkIn()`
+     in that case, rather than changing `checkIn()`'s own behaviour (which other,
+     future callers may still rely on completing unconditionally once a host-confirm
+     action exists).
+  2. A revoked gate device's heartbeat returned 401 (via the generic `Authorization:
+     Device` auth path), never reaching the `{revoked: true}` response the SDD
+     requires so the device can show D-03. Fixed by having device-token verification
+     resolve revoked devices too (rather than treating them as unknown), since
+     `recordHeartbeat` — the only thing that currently accepts a device principal —
+     is what actually enforces the revocation.
+- **Documented simplifications:**
+  - **`LocalDiskMediaStorage`** (`apps/api/src/gate/media.ts`) is a disclosed local-
+    disk substitute for Supabase Storage, for the same reason DEC-004 substituted
+    embedded-postgres for a real Supabase/Docker connection — this sandbox has no
+    reliable Supabase Storage connection either. The `MediaStorage` interface is the
+    seam a real Supabase Storage client plugs into later; no path/bucket layout
+    changes would be needed (`gatePhotoPath`/`visitorProfilePhotoPath` already match
+    SDD §9.11 exactly).
+  - **Minimal, not full, warden-side gate admin.** `POST /admin/gates/:id/pairing-
+    codes` and `POST /admin/gate-devices/:id/revoke` exist only because pairing and
+    rotation needed *some* caller to exercise them end to end — the full W-09 Gates
+    screen (location-setting map, device list with online/offline status) is not
+    built; this is Warden-app work.
+  - **No SSE/live updates (SDD §9.9).** Reviewed per the task's explicit instruction
+    to go through DEC-009's gap list: this gap doesn't strictly depend on the
+    Resident or Warden apps, but it is its own substantial subsystem (a persistent
+    `LISTEN`ing connection, in-memory fan-out, `@microsoft/fetch-event-source`/
+    `react-native-sse` clients) orthogonal to the gate work this task scoped — judged
+    better suited to its own milestone (bundled naturally with the warden dashboard
+    that's its main consumer) than folded in here. Named explicitly rather than
+    silently dropped.
+  - **FR-26's guest-side wait screen has no 3s polling or Cancel button.** Both are
+    buildable without the Resident app (the route a `Cancel request` button would
+    call, `cancelWalkIn`, already exists as a service function from the visits
+    milestone, just with no HTTP route yet) — but polling `GET /v1/me/visits/{id}`
+    would have nothing to observe changing, since nothing in this milestone (or any
+    built so far) can move a `pending_host` visit to `inside`/`rejected` outside a
+    test fixture. Building the polling mechanism with nothing to meaningfully poll
+    for was judged speculative; left as a named gap for whichever milestone adds the
+    Resident app's walk-in approval action, at which point both the polling and the
+    cancel route are small, well-scoped additions.
+- **SDD updated?** No — removing the temporary endpoints brings the code into
+  conformance with the SDD, it doesn't change what the SDD specifies. The two bug
+  fixes correct this codebase's own behaviour against SDD text that was already
+  correct. The documented simplifications are implementation-detail/scope choices in
+  the same spirit as every earlier DEC-00x entry, not SDD contradictions.
+
 Template for a new entry:
 
 ```markdown

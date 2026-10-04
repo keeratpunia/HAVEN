@@ -364,6 +364,122 @@ is (same discipline as every milestone above):**
   the Playwright run at the 360×640 viewport**, but no dedicated axe/WCAG audit or a
   200%-text-zoom pass was run — NFR-11 stays unmarked.
 
+## 0h. Gate subsystem milestone (2026-10-04)
+
+Implements the complete gate subsystem per SDD §9.1-9.4, §11.3, §12.8: rotating QR
+gate tokens, encrypted/versioned/rotatable gate secrets, scan sessions, geofence
+verification, gate device pairing/heartbeat/revocation, a real photo-upload pipeline,
+and the gate check-in/check-out/walk-in/host-assisted-entry/host-assisted-exit routes
+— then rewires the entire guest web app onto it, replacing the guest-web milestone's
+temporary, non-SDD `/v1/visits/:id/check-in`/`check-out`/`walk-in` endpoints (see
+`docs/DECISIONS.md` DEC-010). 58 new tests (20 unit covering TC-TOK-01..05/
+TC-GEO-01..05 and every malformed/unknown/inactive/expired/future/wrong-MAC/rotated-
+secret case; 20 integration covering the full scan-session HTTP lifecycle including a
+dedicated `awaiting_host_confirmation` regression test; the rest device-pairing/
+profile-photo), plus a live Playwright suite covering the gate display's generated
+token end to end (golden path, expired token, outside geofence, GPS-retry-limit-to-
+ask-host path, and walk-in) against a real local API + database.
+
+What exists now:
+- `apps/api/src/gate/token.ts`: the SDD §9.1 token algorithm exactly — `gateCode +
+  "." + step + "." + base32crockford(HMAC_SHA256(secret, "HVG1|"+gateCode+"|"+step)
+  [0..10])`, verified with `crypto.timingSafeEqual`, accepting steps `-1..2` (30s old
+  or one step ahead), trying the previous secret for 120s after a rotation.
+- `apps/api/src/gate/secret.ts`: AES-256-GCM gate-secret generation/encryption/
+  rotation (`gates.secret_enc`/`prev_secret_enc`/`secret_version`/`secret_rotated_at`,
+  all already in the §0b-era schema — this milestone is the first real reader/writer).
+- `apps/api/src/gate/geofence.ts`: `gps_ok` per SDD §9.3 step 3, reusing
+  `visits/geo.ts`'s haversine helper (that module's own comment said the full gate
+  system was out of scope for the milestone that added it — this is that system).
+- `apps/api/src/gate/scanSessions.ts` + `repository.ts`: `POST /v1/scan-sessions`
+  (token verify + geofence + insert), `POST /scan-sessions/:id/location` (retry, max
+  3 attempts), nonce-bound single-use consumption (`validateAndBindSession`/
+  `consumeSession`) — the first authenticated call binds the session to that
+  principal; a different principal, wrong nonce, or an already-consumed/expired
+  session all fail the same way SDD §9.3 specifies.
+- `apps/api/src/gate/media.ts`: the real SDD §9.4 photo pipeline (magic-byte check,
+  max 3MB, `sharp` EXIF-rotate/strip/resize-to-720/re-encode JPEG q80, SHA-256
+  per-visitor dedup -> `PHOTO_REUSED`, `media` row insert) — used by both
+  `POST /scan-sessions/:id/photo` (gate photos) and the new `POST /v1/me/profile-photo`
+  (closing a DEC-009 gap). Storage is a disclosed local-disk substitute
+  (`LocalDiskMediaStorage`) for the same reason DEC-004 used one for Postgres — no
+  reliable Supabase Storage connection in this sandbox.
+- `apps/api/src/gate/devices.ts`: `POST /gate-devices/pair`, `POST /gate-devices/
+  heartbeat` (with secret-refresh-on-rotation and a revoked-device response the
+  device actually receives, not a 401 — see the DEC-010 finding below), `POST
+  /admin/gates/:id/pairing-codes` and `POST /admin/gate-devices/:id/revoke` (minimal
+  warden-authenticated routes, just enough to exercise pairing/rotation for real —
+  the full warden Gates screen, W-09, is not built).
+- `apps/api/src/gate/routes.ts`: `GET /scan-sessions/:id` (resolves `check_in`/
+  `check_out`/`request_entry`), and the five `★` actions from SDD §12.8 — check-in,
+  check-out, walk-in, host-assisted-entry, host-assisted-exit — each verifying the
+  scan session, then delegating the actual visit-state transition to the existing
+  `visits/service.ts` functions.
+- Real `Authorization: Device <token>` verification wired into `authenticate.ts`
+  (previously a stub resolving to `null` always — see §0c/§0e).
+- Guest web (`apps/mobile/app/(guest)/g/[token].tsx`): the real SDD F1 step 6+ flow —
+  location explainer (first time only) -> scan session -> location retry (3 attempts,
+  then "Ask host to confirm", FR-27) -> check-in/check-out/walk-in sub-flow -> live
+  photo -> result. `visits/[id].tsx` is now a pure read-only status view; the
+  temporary direct check-in/check-out buttons and the standalone `walk-in.tsx` screen
+  are removed.
+- Gate display page (`apps/mobile/app/gate/index.tsx`, `pair.tsx`): SDD §9.2 — local
+  rotating QR generation via Web Crypto HMAC-SHA256 (works offline), redraws every
+  250ms step-change tick, a 10s countdown bar, wake lock, fullscreen, 60s heartbeat
+  with 5s/15s/60s backoff, a small offline badge, and D-01 (pair)/D-03 (revoked)
+  screens. Verified to never render any personal data (hostel/gate name and a QR
+  only) and to redraw the QR on every 10s step change.
+
+**Two real bugs found while building/testing this milestone, fixed before it was
+considered done:**
+1. **Check-in unconditionally completed entry regardless of GPS verification.** The
+   existing `checkIn()` service (built before the gate module existed) had no "wait
+   for host" branch at all — SDD §12.8 requires `awaiting_host_confirmation` (visit
+   stays `approved`, a `N-CONFIRM-LOCATION` notification queued) when `gpsOk` is false
+   and the host hasn't already confirmed presence. The gate check-in route now
+   short-circuits before calling `checkIn()` in exactly that case. Found while
+   implementing FR-27's "ask host to confirm" path, not by inspection.
+2. **A revoked gate device's heartbeat returned 401, never reaching the `{revoked:
+   true}` response the device needs to show D-03.** `verifyDeviceToken` originally
+   filtered out revoked devices (treating them like unknown tokens); fixed to resolve
+   them (so `recordHeartbeat` can tell them to wipe their storage) — no other gate
+   action accepts a device principal today, so this is a safe, narrow change.
+
+**What this explicitly does NOT do, so no later reviewer mistakes it for more than it
+is (same discipline as every milestone above):**
+- **No in-app QR scanner** (FR-22, S-priority) — guests scan with their phone's own
+  camera app, which opens `/g/<token>` directly; no in-app scanning UI exists.
+- **FR-26's "waits on a live status screen... without re-scanning" is only half
+  built.** A wait screen (`waiting_for_host` phase) exists, but it does not poll
+  `GET /v1/me/visits/{id}` every 3s per SDD, and there is no `Cancel request` button
+  (the `cancelWalkIn` service function exists from the visits milestone but has no
+  HTTP route) — because nothing in this milestone can ever change a `pending_host`
+  visit's status to observe (that's `approveWalkIn`, a Resident-app action), the
+  guest-side polling would have nothing to react to yet. Flagged as a known gap
+  rather than built speculatively; the Resident app milestone should add both the
+  polling/cancel route and the thing that makes polling meaningful.
+- **Host-assisted entry/exit have routes but no UI** — explicitly deferred to the
+  Resident app milestone per the task's own scope boundary; this milestone is
+  API-only for those two actions.
+- **No warden-facing gate status** (FR-29's "warden sees gate status, alerted after 5
+  min offline") — `gate_devices.last_seen_at`/`offline_alerted_at` are tracked and
+  `job_gate_offline()` already exists in the DB (§0b), but no warden dashboard reads
+  them. Same for `GATE_NOT_CONFIGURED`'s dashboard red banner (E-14) and W-09's Gates
+  screen generally — this milestone's two `/admin/*` routes are the minimum needed to
+  pair/revoke a device for real, not the Warden app.
+- **No SSE/live updates (SDD §9.9).** "My visits" and the visit-status screen still
+  refetch on navigation/focus only — building the notify-worker/SSE fan-out
+  infrastructure is a separate subsystem or in and of itself, unrelated to the gate
+  (visits service already produces the notification rows; nothing delivers them
+  live). Reviewed against DEC-009's gap list per the task's own instruction and named
+  here as its own future milestone rather than folded into this one.
+- **E-23 (two devices paired to one gate, same secret, either works) is true by
+  construction** (the secret is per-gate, not per-device) but not exercised by a
+  dedicated two-device test. E-24 (approved visit at a different hostel's gate ->
+  `request_entry`, not `check_in`) is correctly implemented (the scan-session actions
+  query is scoped to the scanned gate's own `hostel_id`) but likewise untested by a
+  dedicated case.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -396,17 +512,17 @@ is (same discipline as every milestone above):**
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-20 | M | Gate device shows rotating QR + countdown + hostel name + instruction | — | — | — |
-| FR-21 | M | Scanning QR opens guest web app; requests location, validates token + GPS first | — | — | — |
+| FR-20 | M | Gate device shows rotating QR + countdown + hostel name + instruction | `apps/mobile/app/gate/index.tsx` (`qrcode`, 250ms tick, 10s countdown bar), `apps/mobile/lib/gateToken.ts` (Web Crypto HMAC-SHA256 token generation) | Manually verified live (QR redraws on step change; never renders personal data) — no automated test of the display page itself | WIP — genuinely implemented and manually verified; no Playwright coverage of the display page's own rendering (the Playwright suite drives the *guest* side with a locally-generated token, not this page) |
+| FR-21 | M | Scanning QR opens guest web app; requests location, validates token + GPS first | `apps/api/src/gate/token.ts`/`scanSessions.ts`/`geofence.ts`, `POST /v1/scan-sessions`, `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/src/gate/token.test.ts`, `geofence.test.ts`, `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-errors.spec.ts` | Done |
 | FR-22 | S | Guest app offers an in-app scanner on home screen | — | — | — |
-| FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `checkIn`, `checkOut` (`visits/service.ts`) + `POST /v1/visits/:id/check-in`/`check-out` (`visits/routes.ts`, with real haversine geofence verification) + `apps/mobile/app/(guest)/visits/[id].tsx` | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` | WIP — a real UI, real routes, and a real (simplified) geofence check now exist and are proven end to end; still no gate/scan-session (QR/rotating token) layer, so "Request entry" via a scanned gate isn't offered, only the direct status-screen actions |
-| FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | `apps/mobile/components/LiveCamera.tsx` (web `getUserMedia`, no file input anywhere) | `apps/mobile/e2e/tests/golden-path.spec.ts` (fake camera device) | WIP — live-only capture is genuinely enforced and exercised at both the profile and gate steps; the captured photo is never uploaded or persisted (no media endpoint), so there is nothing for a host to compare against yet |
-| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) + `POST /v1/visits/walk-in` (`visits/routes.ts`) + `apps/mobile/app/(guest)/walk-in.tsx` (room search, resident picker, visit-type picker) | `visits-service.integration.test.ts` | WIP — the full guest-facing submission UI now exists (room search through submit); live photo at walk-in time, the scan session, and the live host-facing push are still not built |
-| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `approveWalkIn` (`visits/service.ts`) is the server-side half; `apps/mobile/app/(guest)/visits/[id].tsx` is a real status screen | `visits-service.integration.test.ts` | WIP — a real status screen now exists and shows the status change, but only on next navigation/focus, not live/polling/SSE — "without re-scan" is satisfied, "flips to green" in real time is not |
-| FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | — | — | — |
-| FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `createHostAssistedEntry` (`visits/service.ts`) covers "creates a visitor + checks in"; checkout reuses `checkOut` | `visits-service.integration.test.ts` | WIP — the two state transitions are implemented and tested (including straight-to-`inside` creation); QR scanning, GPS, and live photo capture are gate-module/UI work not built here |
-| FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | — | — | — |
-| FR-30 | M | Gate device keeps screen awake; recovers automatically after network loss | — | — | — |
+| FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `GET /v1/scan-sessions/:id` (`gate/routes.ts`), `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-retry-and-walkin.spec.ts` | Done |
+| FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | `apps/mobile/components/LiveCamera.tsx`, `apps/api/src/gate/media.ts` (`storeGatePhoto`/`storeVisitorProfilePhoto`) | `apps/api/test/gate-routes.integration.test.ts` (photo upload, dedup), `apps/mobile/e2e` suite (fake camera device) | Done — live-only capture is enforced and every captured photo (profile and gate) is now actually processed and persisted, closing the DEC-009 gap |
+| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) + `POST /v1/scan-sessions/:id/walk-in` (`gate/routes.ts`) + `apps/mobile/app/(guest)/g/[token].tsx`'s `find_host`/`visit_type` phases | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
+| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `apps/mobile/app/(guest)/g/[token].tsx`'s `waiting_for_host` phase | `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` (reaches the waiting screen) | WIP — a real wait screen exists (no re-scan needed), but it doesn't poll `GET /v1/me/visits/{id}` every 3s per SDD and there's no `Cancel request` button; nothing in this milestone can change a `pending_host` visit's status yet (that's a Resident-app action), so polling would have nothing to observe — see §0h |
+| FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | `apps/mobile/app/(guest)/g/[token].tsx` (3-attempt retry, then "Ask host to confirm"), gate check-in route's `awaiting_host_confirmation` short-circuit | `apps/api/test/gate-routes.integration.test.ts` ("awaiting_host_confirmation"), `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
+| FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `POST /v1/scan-sessions/:id/host-assisted-entry`/`host-assisted-exit` (`gate/routes.ts`), delegating to `createHostAssistedEntry`/`checkOut` (`visits/service.ts`) | `apps/api/test/gate-routes.integration.test.ts` | WIP — the API (scan session + state transition) is implemented and tested end to end; there is no Resident-app UI to drive it (native QR scan, GPS, live photo capture on a resident's phone) — explicitly deferred, see §0h |
+| FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | `POST /v1/gate-devices/heartbeat` (`gate/devices.ts`), `gate_devices.last_seen_at`/`offline_alerted_at` columns | `apps/api/test/gate-routes.integration.test.ts` | WIP — heartbeat itself (and secret refresh on rotation) is implemented and tested; `job_gate_offline()` already exists at the DB layer (§0b) but no warden-facing UI reads gate status or shows the alert |
+| FR-30 | M | Gate device keeps screen awake; recovers automatically after network loss | `apps/mobile/app/gate/index.tsx` (`navigator.wakeLock`, heartbeat backoff 5s/15s/60s, offline badge) | Manually verified live — no automated test (Wake Lock API and real network-loss simulation aren't practical in this test setup) | WIP — genuinely implemented; not proven by an automated test |
 
 ### 5.4 Host actions
 
@@ -494,7 +610,7 @@ is (same discipline as every milestone above):**
 
 | ID | Situation (summary) | Required behaviour | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| E-01 | Gate device offline when guest scans | QR still valid (local gen); warden alerted after 5 min | — | — | — |
+| E-01 | Gate device offline when guest scans | QR still valid (local gen); warden alerted after 5 min | `apps/mobile/app/gate/index.tsx` (local token generation, offline badge) | Manually verified — no automated test | WIP — the QR-still-valid-offline half is implemented; the warden-alert half has no UI (same gap as FR-29) |
 | E-02 | Guest's phone clock is wrong | Irrelevant — server time decides token age | — | — | — |
 | E-03 | Guest opens link in in-app browser (WhatsApp/IG/FB) | Detect via UA; show "Open in Chrome/Safari" | — | — | — |
 | E-04 | Three friends arrive together | Each needs own visit; same token works for all within 30s | — | — | — |
@@ -507,7 +623,7 @@ is (same discipline as every milestone above):**
 | E-11 | Host suspended while guest inside | Guest stays inside; no new entries; future visits cancelled | — | — | — |
 | E-12 | Guest banned while inside | Warden force-checks out; ban blocks re-entry | — | — | — |
 | E-13 | Rules changed during the day | New entries use new rules; existing visits keep their `rules_version` | — | — | — |
-| E-14 | Gate location not set | `GATE_NOT_CONFIGURED`; red dashboard banner | — | — | — |
+| E-14 | Gate location not set | `GATE_NOT_CONFIGURED`; red dashboard banner | `apps/api/src/gate/geofence.ts`/`scanSessions.ts` (`GATE_NOT_CONFIGURED` 503) | — (no fixture exercises a gate with no location set) | WIP — the error code is implemented; no dedicated test, and no warden dashboard banner |
 | E-15 | Guest has no mobile data at the gate | Host-assisted entry (F4) fallback | — | — | — |
 | E-16 | GPS inside geofence but guest actually in a nearby room | Mitigated by calibration + live photo; documented limitation | — | — | — |
 | E-17 | Guest denies camera permission | G-16 enable instructions; no check-in without photo | `apps/mobile/components/LiveCamera.tsx`'s `onPermissionDenied`, handled by `profile.tsx` and `visits/[id].tsx` | — (manually verified; no automated permission-denial test) | WIP — both the profile and gate screens show "Allow camera access..." instructions instead of a dead end; no check-in/profile-completion is possible without a captured photo. The gate screen's handling was a real bug found while writing this milestone's own traceability entry (it originally reused the geolocation-denied message and left the Take-photo button disabled with no explanation) — fixed, see `docs/DECISIONS.md` DEC-009 |
@@ -516,8 +632,8 @@ is (same discipline as every milestone above):**
 | E-20 | Two residents claim the same room | Allowed (roommates) | — | — | — |
 | E-21 | Host disputes by mistake | Warden resolves after talking to host; visit stays as is | — | — | — |
 | E-22 | Guest never checks out, host doesn't respond | Overstay → warden escalation → night sweep → force check-out | — | — | — |
-| E-23 | Two gate devices paired to one gate | Both show valid QRs (same secret); either works | — | — | — |
-| E-24 | Approved guest arrives at a different hostel's gate | No matching visit there; only Request entry offered | — | — | — |
+| E-23 | Two gate devices paired to one gate | Both show valid QRs (same secret); either works | `apps/api/src/gate/devices.ts`'s `pairDevice` (secret is per-gate, every paired device gets the same one) | — (true by construction; no dedicated two-device test) | WIP |
+| E-24 | Approved guest arrives at a different hostel's gate | No matching visit there; only Request entry offered | `apps/api/src/gate/routes.ts`'s `GET /scan-sessions/:id` (approved-visit query scoped to the scanned gate's own `hostel_id`) | — (correctly implemented; no dedicated cross-hostel test case) | WIP |
 
 ## 5. Test cases (TC-xx) — SDD §19.2
 
@@ -536,35 +652,35 @@ is (same discipline as every milestone above):**
 
 | ID | Case | Expected | Test file | Status |
 |---|---|---|---|---|
-| TC-TOK-01 | Token generated at step s, verified at s, s+1, s+2 | valid | — | — |
-| TC-TOK-02 | Verified at s+3 | `GATE_TOKEN_EXPIRED` | — | — |
-| TC-TOK-03 | Verified at s−1 (device ahead); s−2 | valid; invalid | — | — |
-| TC-TOK-04 | One MAC character changed | `GATE_TOKEN_INVALID` | — | — |
-| TC-TOK-05 | Old secret within 120s of rotation; after 120s | valid; invalid | — | — |
+| TC-TOK-01 | Token generated at step s, verified at s, s+1, s+2 | valid | `apps/api/src/gate/token.test.ts` | Done |
+| TC-TOK-02 | Verified at s+3 | `GATE_TOKEN_EXPIRED` | `apps/api/src/gate/token.test.ts` | Done |
+| TC-TOK-03 | Verified at s−1 (device ahead); s−2 | valid; invalid | `apps/api/src/gate/token.test.ts` | Done |
+| TC-TOK-04 | One MAC character changed | `GATE_TOKEN_INVALID` | `apps/api/src/gate/token.test.ts` | Done |
+| TC-TOK-05 | Old secret within 120s of rotation; after 120s | valid; invalid | `apps/api/src/gate/token.test.ts` | Done |
 
 ### Geofence (TC-GEO)
 
 | ID | Case | Expected | Test file | Status |
 |---|---|---|---|---|
-| TC-GEO-01 | Point 49m away, accuracy 20 | `gps_ok` | — | — |
-| TC-GEO-02 | Point 51m away | `outside_geofence` | — | — |
-| TC-GEO-03 | Accuracy 80m | `low_accuracy` | — | — |
-| TC-GEO-04 | Fix age 61s | `stale_fix` | — | — |
-| TC-GEO-05 | Fourth location attempt | `LOCATION_RETRY_LIMIT` | — | — |
+| TC-GEO-01 | Point 49m away, accuracy 20 | `gps_ok` | `apps/api/src/gate/geofence.test.ts` | Done |
+| TC-GEO-02 | Point 51m away | `outside_geofence` | `apps/api/src/gate/geofence.test.ts` | Done |
+| TC-GEO-03 | Accuracy 80m | `low_accuracy` | `apps/api/src/gate/geofence.test.ts` | Done |
+| TC-GEO-04 | Fix age 61s | `stale_fix` | `apps/api/src/gate/geofence.test.ts` | Done |
+| TC-GEO-05 | Fourth location attempt | `LOCATION_RETRY_LIMIT` | `apps/api/test/gate-routes.integration.test.ts` | Done |
 
 ### Flows (TC-FLOW)
 
 | ID | Case | Expected | Test file | Status |
 |---|---|---|---|---|
-| TC-FLOW-01 | F1 end to end: invite → claim → scan → photo → check-in → host notified | `inside`, 1 gate event, 1 N-ARRIVED | — | — |
-| TC-FLOW-02 | F2 walk-in approved | `inside`, entry event ts = approval time, session consumed | — | — |
+| TC-FLOW-01 | F1 end to end: invite → claim → scan → photo → check-in → host notified | `inside`, 1 gate event, 1 N-ARRIVED | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` | Done |
+| TC-FLOW-02 | F2 walk-in approved | `inside`, entry event ts = approval time, session consumed | — | — (`approveWalkIn` itself is tested in the visits milestone; no test here drives it through a scan session, since that's a Resident-app action) |
 | TC-FLOW-03 | F2 walk-in, no answer 10 min (clock advanced) | `expired`, host notified | — | — |
-| TC-FLOW-04 | F3 location unverified, host confirms | `inside`, `location_unverified = true` | — | — |
+| TC-FLOW-04 | F3 location unverified, host confirms | `inside`, `location_unverified = true` | `apps/api/test/gate-routes.integration.test.ts` | WIP — the "stays `approved`, not yet confirmed" half is tested; the "host confirms -> `inside`" half has no route yet (Resident-app action) |
 | TC-FLOW-05 | F5 overnight guest steps out mid-stay | back to `approved`; re-entry allowed | — | — |
 | TC-FLOW-06 | F9 dispute | `host_disputed_at` set, warden push+SMS rows | — | — |
 | TC-FLOW-07 | Invite opened with different phone | `INVITE_PHONE_MISMATCH` | — | — |
-| TC-FLOW-08 | Same scan session used twice | 2nd call `SCAN_SESSION_EXPIRED` | — | — |
-| TC-FLOW-09 | Scan session used with wrong nonce | `SCAN_SESSION_FORBIDDEN` | — | — |
+| TC-FLOW-08 | Same scan session used twice | 2nd call `SCAN_SESSION_EXPIRED` | `apps/api/test/gate-routes.integration.test.ts` | Done |
+| TC-FLOW-09 | Scan session used with wrong nonce | `SCAN_SESSION_FORBIDDEN` | `apps/api/test/gate-routes.integration.test.ts` | Done |
 | TC-FLOW-10 | Check-in replay with same Idempotency-Key | identical response, still one gate event | — | — |
 | TC-FLOW-11 | Visitor tries to be inside two visits | `ALREADY_INSIDE` | — | — |
 | TC-FLOW-12 | Host approves while expiry job runs | exactly one of approve/expire wins; other 409 | — | — |
@@ -596,11 +712,11 @@ is (same discipline as every milestone above):**
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
-| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 3 (FR-01, FR-03, FR-12) | 18 (FR-02, FR-04, FR-06, FR-07, FR-10, FR-13, FR-14, FR-15, FR-23, FR-24, FR-25, FR-26, FR-28, FR-45, FR-53, FR-70, FR-71, FR-74) | 29 | 0 |
+| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 9 (FR-01, FR-03, FR-12, FR-20, FR-21, FR-23, FR-24, FR-25, FR-27) | 17 (FR-02, FR-04, FR-06, FR-07, FR-10, FR-13, FR-14, FR-15, FR-26, FR-28, FR-29, FR-30, FR-45, FR-53, FR-70, FR-71, FR-74) | 24 | 0 |
 | NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
 | BR | 20 | 1 (BR-15) | 16 (BR-01..12, 16, 17, 19, 20) | 3 (BR-13, 14, 18) | 0 |
-| E | 24 | 1 (E-19) | 1 (E-17) | 22 | 0 |
-| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 21 (TC-RULE ×16, TC-SEC-05, TC-SEC-06, TC-SEC-07, TC-SEC-08, TC-SEC-09) | 0 | 30 | 0 |
+| E | 24 | 1 (E-19) | 5 (E-01, E-14, E-17, E-23, E-24) | 18 | 0 |
+| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 34 (TC-RULE ×16, TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09, TC-SEC-05, TC-SEC-06, TC-SEC-07, TC-SEC-08, TC-SEC-09) | 1 (TC-FLOW-04) | 16 | 0 |
 
 Corrected during the rules-engine milestone: this table had silently gone stale after
 the API-foundation milestone set NFR-13 to WIP without updating the summary row —
@@ -616,6 +732,12 @@ Updated 2026-10-03 for the guest web golden-path milestone (§0g): FR-12 moved W
 Done; FR-02 and FR-24 moved not-started → WIP; E-17 moved not-started → WIP. No ID
 range changed, so this was a direct re-tally of the rows above, not a re-enumeration
 against the SDD.
+
+Updated 2026-10-04 for the gate subsystem milestone (§0h): FR-20, FR-21, FR-23,
+FR-24, FR-25, FR-27 moved to Done; FR-26 and FR-28 stayed WIP (updated notes); FR-29
+and FR-30 moved not-started → WIP. E-01, E-14, E-23, E-24 moved not-started → WIP.
+TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09 moved not-started → Done; TC-FLOW-04 moved
+not-started → WIP. Again a direct re-tally, no SDD ID range changed.
 
 ## 6a. Database-level guarantees implemented but not mapped to a single ID
 
