@@ -480,6 +480,45 @@ is (same discipline as every milestone above):**
   query is scoped to the scanned gate's own `hostel_id`) but likewise untested by a
   dedicated case.
 
+## 0i. Demo milestone (2026-10-04)
+
+A resident minimal slice, FR-26's full polling/cancel behaviour, and a `pnpm demo`
+environment, built to support a live demo without building the full Resident, Warden,
+or Office apps (docs/DECISIONS.md DEC-011).
+
+**What this builds:**
+- Four resident screens at `/resident/*` (sign-in, invite, requests, visits) — see
+  FR-10/FR-11/FR-40/FR-45 and the coverage table below.
+- `POST /v1/visits` (invite only), `GET /v1/me/hosted-visits`, `POST /v1/visits/:id/
+  approve` ★, `POST /v1/visits/:id/reject` ★, `POST /v1/me/visits/:id/cancel`
+  (`apps/api/src/visits/host-routes.ts`), per SDD §12.6.
+- `scan_sessions.visit_id` (new column) so walk-in approval can reuse the original
+  scan session's GPS facts instead of re-checking location (SDD F2 step 9).
+- FR-26's missing half: 3s polling + `Cancel request` on the guest wait screen.
+- A dev-only sign-in bypass (`POST /v1/auth/dev-login`), gated two independent ways
+  (route registration + a `buildApp`-level `NODE_ENV` boot refusal) — see DEC-011.
+- `pnpm demo`: its own embedded Postgres, real clock, configurable gate coordinates,
+  and a startup banner with the gate pairing code and sign-in instructions
+  (`apps/api/scripts/demo-*.ts`, `scripts/demo.mjs`).
+- `docs/DEMO.md`: the full presentation script, HTTPS tunnel setup, and failure-case/
+  fallback guidance.
+
+**What this explicitly does NOT do:**
+- **No full Resident app shell.** Only the four screens this demo needs; no tab bar,
+  no Home/Overnight-request/Guest-without-phone/Charges/Profile screens (SDD §13.4).
+- **No native share sheet** (FR-11) — Copy-link only; see the FR-11 row.
+- **No push notifications, photo comparison, or end-time adjustment on approval**
+  (FR-40) — see the FR-40 row.
+- **`GET /v1/me/hosted-visits` returns one flat list**, not the SDD's Upcoming/Inside/
+  History segments (R-13).
+- **Warden and office remain entirely unbuilt** — not reviewed or touched this
+  milestone, per the task's explicit scope instruction.
+- **No real Google OAuth** — the dev-login bypass exists specifically because no
+  Google OAuth credentials are configured for this environment; a real deployment
+  still requires SDD §9.5's Google Sign-In, this milestone does not change that
+  requirement, it only adds a demo/dev-only alternative that cannot run outside
+  `NODE_ENV=development`.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -500,8 +539,8 @@ is (same discipline as every milestone above):**
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-10 | M | Verified host creates pre-invite (name, phone, type, date, window) | `apps/api/src/visits/service.ts`'s `createPreInvite` | `apps/api/test/visits-service.integration.test.ts` | WIP — the service call (validate, create `approved` visit, issue invite token) is implemented and tested against a real DB; no HTTP route, so a host cannot actually do this yet |
-| FR-11 | M | Host shares invite link via native share sheet | — | — | — |
+| FR-10 | M | Verified host creates pre-invite (name, phone, type, date, window) | `apps/api/src/visits/service.ts`'s `createPreInvite`, `POST /v1/visits` (`apps/api/src/visits/host-routes.ts`), `apps/mobile/app/resident/invite.tsx` | `apps/api/test/visits-service.integration.test.ts`, `apps/api/test/host-routes.integration.test.ts`, `apps/mobile/e2e/tests/resident-actions.spec.ts` ("resident creates an invite and gets a shareable link") | Done |
+| FR-11 | M | Host shares invite link via native share sheet | `apps/mobile/app/resident/invite.tsx`'s Share invite screen (SDD §15 T-INVITE message, Copy link) | `apps/mobile/e2e/tests/resident-actions.spec.ts` | WIP — the R-07 screen and the exact T-INVITE copy are implemented, with a working Copy-link action; there is no native share-sheet integration (`navigator.share`/`Share.share`) — the host must copy-paste rather than tap a WhatsApp-first share button |
 | FR-12 | M | Opening invite link requires OTP to invited number; other numbers refused | `apps/api/src/auth/invites.ts`'s `claimInvite` + `POST /invites/:token/claim` (`src/auth/routes.ts`, §0e) + the new public `GET /v1/invites/:token` landing route (`apps/api/src/visits/routes.ts`) + guest web UI (`apps/mobile/app/(guest)/i/[token].tsx`, `login.tsx`) | `apps/api/test/invites.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` (happy path only) | Done — the full "open link → sign in → claim" flow (SDD F1) now has a real UI and real routes at both ends, proven end to end; the `INVITE_PHONE_MISMATCH` rejection path is implemented (`login.tsx` surfaces it as a user-facing error, not swallowed) but has no dedicated automated test — TC-FLOW-07 stays unmarked |
 | FR-13 | M | Host edits window / cancels visit until guest checks in | `cancelApprovedVisit`, `cancelOvernightRequest`, `cancelWalkIn` (`visits/service.ts`) | `visits-service.integration.test.ts` | WIP — cancel exists for every pre-entry state; *editing* the window is not implemented at all; no route |
 | FR-14 | M | Host requests overnight/guest-room with quota + charge preview | `createOvernightRequest` (`visits/service.ts`) | `visits-service.integration.test.ts` (incl. `QUOTA_EXCEEDED`) | WIP — the request itself, with real quota enforcement, is implemented; the `POST /v1/visits/preview` charge/quota *preview* endpoint (SDD F6 step 2) is not built |
@@ -518,7 +557,7 @@ is (same discipline as every milestone above):**
 | FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `GET /v1/scan-sessions/:id` (`gate/routes.ts`), `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-retry-and-walkin.spec.ts` | Done |
 | FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | `apps/mobile/components/LiveCamera.tsx`, `apps/api/src/gate/media.ts` (`storeGatePhoto`/`storeVisitorProfilePhoto`) | `apps/api/test/gate-routes.integration.test.ts` (photo upload, dedup), `apps/mobile/e2e` suite (fake camera device) | Done — live-only capture is enforced and every captured photo (profile and gate) is now actually processed and persisted, closing the DEC-009 gap |
 | FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) + `POST /v1/scan-sessions/:id/walk-in` (`gate/routes.ts`) + `apps/mobile/app/(guest)/g/[token].tsx`'s `find_host`/`visit_type` phases | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
-| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `apps/mobile/app/(guest)/g/[token].tsx`'s `waiting_for_host` phase | `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` (reaches the waiting screen) | WIP — a real wait screen exists (no re-scan needed), but it doesn't poll `GET /v1/me/visits/{id}` every 3s per SDD and there's no `Cancel request` button; nothing in this milestone can change a `pending_host` visit's status yet (that's a Resident-app action), so polling would have nothing to observe — see §0h |
+| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `apps/mobile/app/(guest)/g/[token].tsx`'s `waiting_for_host` phase (3s poll of `GET /v1/visits/{id}`, `Cancel request` via `POST /v1/me/visits/{id}/cancel`) | `apps/mobile/e2e/tests/resident-actions.spec.ts` ("...turns green without reload", exercises the real poll against a real host approval) | Done — closes the gap §0h/DEC-010 named, now that the Resident app's approve/reject action exists to poll for (docs/DECISIONS.md DEC-011) |
 | FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | `apps/mobile/app/(guest)/g/[token].tsx` (3-attempt retry, then "Ask host to confirm"), gate check-in route's `awaiting_host_confirmation` short-circuit | `apps/api/test/gate-routes.integration.test.ts` ("awaiting_host_confirmation"), `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
 | FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `POST /v1/scan-sessions/:id/host-assisted-entry`/`host-assisted-exit` (`gate/routes.ts`), delegating to `createHostAssistedEntry`/`checkOut` (`visits/service.ts`) | `apps/api/test/gate-routes.integration.test.ts` | WIP — the API (scan session + state transition) is implemented and tested end to end; there is no Resident-app UI to drive it (native QR scan, GPS, live photo capture on a resident's phone) — explicitly deferred, see §0h |
 | FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | `POST /v1/gate-devices/heartbeat` (`gate/devices.ts`), `gate_devices.last_seen_at`/`offline_alerted_at` columns | `apps/api/test/gate-routes.integration.test.ts` | WIP — heartbeat itself (and secret refresh on rotation) is implemented and tested; `job_gate_offline()` already exists at the DB layer (§0b) but no warden-facing UI reads gate status or shows the alert |
@@ -528,7 +567,7 @@ is (same discipline as every milestone above):**
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-40 | M | Host push for every walk-in with both photos; approve (adjust end time) or reject | — | — | — |
+| FR-40 | M | Host push for every walk-in with both photos; approve (adjust end time) or reject | `approveWalkIn`/`rejectWalkIn` (`apps/api/src/visits/service.ts`), `POST /v1/visits/:id/approve`/`reject` ★ (`apps/api/src/visits/host-routes.ts`), `apps/mobile/app/resident/requests.tsx` (R-08) | `apps/api/test/host-routes.integration.test.ts`, `apps/mobile/e2e/tests/resident-actions.spec.ts` (approve + reject) | WIP — approve/reject itself, reusing the original scan session's GPS facts (SDD F2 step 9) rather than re-checking location, is implemented and tested end to end; there is no push notification (SDD §15's `N-WALKIN`) and no side-by-side live/profile-photo comparison UI (R-08's wireframe) — the host sees a location-verified line, not the photos; adjusting the end time on approval (`ApproveBody.windowEnd`) is accepted by the route but not exposed in the UI |
 | FR-41 | S | SMS fallback if walk-in push unopened in 60s | — | — | — |
 | FR-42 | M | Host push for every check-in with photo compare; Yes/Not my guest (30 min window) | — | — | — |
 | FR-43 | M | "Not my guest" disputes the visit; alerts warden immediately (push + SMS) | — | — | — |
@@ -712,7 +751,7 @@ is (same discipline as every milestone above):**
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
-| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 9 (FR-01, FR-03, FR-12, FR-20, FR-21, FR-23, FR-24, FR-25, FR-27) | 17 (FR-02, FR-04, FR-06, FR-07, FR-10, FR-13, FR-14, FR-15, FR-26, FR-28, FR-29, FR-30, FR-45, FR-53, FR-70, FR-71, FR-74) | 24 | 0 |
+| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 11 (FR-01, FR-03, FR-10, FR-12, FR-20, FR-21, FR-23, FR-24, FR-25, FR-26, FR-27) | 17 (FR-02, FR-04, FR-06, FR-07, FR-11, FR-13, FR-14, FR-15, FR-28, FR-29, FR-30, FR-40, FR-45, FR-53, FR-70, FR-71, FR-74) | 22 | 0 |
 | NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
 | BR | 20 | 1 (BR-15) | 16 (BR-01..12, 16, 17, 19, 20) | 3 (BR-13, 14, 18) | 0 |
 | E | 24 | 1 (E-19) | 5 (E-01, E-14, E-17, E-23, E-24) | 18 | 0 |
@@ -738,6 +777,10 @@ FR-24, FR-25, FR-27 moved to Done; FR-26 and FR-28 stayed WIP (updated notes); F
 and FR-30 moved not-started → WIP. E-01, E-14, E-23, E-24 moved not-started → WIP.
 TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09 moved not-started → Done; TC-FLOW-04 moved
 not-started → WIP. Again a direct re-tally, no SDD ID range changed.
+
+Updated 2026-10-04 for the demo milestone (§0i): FR-10 and FR-26 moved WIP → Done;
+FR-11 and FR-40 moved not-started → WIP. Again a direct re-tally, no SDD ID range
+changed.
 
 ## 6a. Database-level guarantees implemented but not mapped to a single ID
 
