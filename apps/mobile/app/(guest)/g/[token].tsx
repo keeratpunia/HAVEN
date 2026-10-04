@@ -112,6 +112,9 @@ export default function GateScan() {
   const [hostelId, setHostelId] = useState<string | null>(null);
   const [resultKind, setResultKind] = useState<'check_in' | 'check_out' | 'walk_in'>('check_in');
   const [resultStatus, setResultStatus] = useState<string | null>(null);
+  const [walkInVisitId, setWalkInVisitId] = useState<string | null>(null);
+  const [walkInStatus, setWalkInStatus] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const clientNonceRef = useRef<string>(randomClientNonce());
 
@@ -248,17 +251,58 @@ export default function GateScan() {
         setPhase('done');
       } else {
         if (!hostId) throw new api.ApiError('VALIDATION_FAILED', 400, 'Pick a host first.');
-        await api.scanSessionWalkIn(session.scanSessionId, clientNonceRef.current, {
-          hostId,
-          type: visitType,
-          durationMinutes: visitType === 'quick_drop' ? 15 : 120,
-          photoId,
-        });
+        const { visit } = await api.scanSessionWalkIn(
+          session.scanSessionId,
+          clientNonceRef.current,
+          {
+            hostId,
+            type: visitType,
+            durationMinutes: visitType === 'quick_drop' ? 15 : 120,
+            photoId,
+          },
+        );
+        setWalkInVisitId(visit.id);
         setPhase('waiting_for_host');
       }
     } catch (err) {
       setErrorCode(err instanceof api.ApiError ? err.code : 'INTERNAL_5XX_GATE');
       setPhase('error');
+    }
+  }
+
+  // FR-26: poll every 3 seconds while waiting for the host's decision, so the screen
+  // turns green on its own without a reload.
+  useEffect(() => {
+    if (phase !== 'waiting_for_host' || !walkInVisitId) return;
+    let cancelled = false;
+    const interval = setInterval(() => {
+      api
+        .getVisit(walkInVisitId)
+        .then((visit) => {
+          if (cancelled) return;
+          if (visit.status !== 'pending_host') {
+            setWalkInStatus(visit.status);
+          }
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [phase, walkInVisitId]);
+
+  async function cancelWalkIn() {
+    if (!walkInVisitId) return;
+    setCancelling(true);
+    try {
+      await api.cancelMyVisit(walkInVisitId);
+      setWalkInStatus('cancelled');
+    } catch (err) {
+      setErrorCode(err instanceof api.ApiError ? err.code : 'INTERNAL_5XX_GATE');
+      setPhase('error');
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -429,12 +473,44 @@ export default function GateScan() {
 
       {phase === 'waiting_for_host' ? (
         <View style={styles.card}>
-          <Text style={styles.title}>Waiting for host</Text>
-          <Text style={styles.body}>We've notified your host.</Text>
-          <Countdown seconds={600} label={(s) => `Expires in ${Math.ceil(s / 60)} min`} />
-          <View style={styles.action}>
-            <Button label="Go to My visits" onPress={() => router.replace('/visits')} />
-          </View>
+          {walkInStatus === 'inside' ? (
+            <>
+              <Text style={styles.title}>{copyFor('CHECK_IN_SUCCESS').title}</Text>
+              <StatusChip status="inside" />
+              <View style={styles.action}>
+                <Button label="Done" onPress={() => router.replace('/visits')} />
+              </View>
+            </>
+          ) : walkInStatus === 'rejected' ? (
+            <>
+              <Text style={styles.title}>{copyFor('WALK_IN_REJECTED').title}</Text>
+              <Text style={styles.body}>{copyFor('WALK_IN_REJECTED').body}</Text>
+              <View style={styles.action}>
+                <Button label="Go to My visits" onPress={() => router.replace('/visits')} />
+              </View>
+            </>
+          ) : walkInStatus === 'cancelled' ? (
+            <>
+              <Text style={styles.title}>Request cancelled</Text>
+              <View style={styles.action}>
+                <Button label="Go to My visits" onPress={() => router.replace('/visits')} />
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.title}>Waiting for host</Text>
+              <Text style={styles.body}>We've notified your host.</Text>
+              <Countdown seconds={600} label={(s) => `Expires in ${Math.ceil(s / 60)} min`} />
+              <View style={styles.action}>
+                <Button
+                  label="Cancel request"
+                  variant="secondary"
+                  onPress={cancelWalkIn}
+                  loading={cancelling}
+                />
+              </View>
+            </>
+          )}
         </View>
       ) : null}
 

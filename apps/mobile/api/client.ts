@@ -145,6 +145,16 @@ export function verifyOtp(phone: string, code: string, purpose: 'guest_login' | 
   });
 }
 
+/** Dev-only resident/staff sign-in bypass (docs/DECISIONS.md DEC-011) — only reachable
+ * when the API registered the route (DEV_LOGIN_ENABLED=true, NODE_ENV=development). */
+export function devLogin(email: string) {
+  return request<{
+    accessToken: string;
+    expiresAt: string;
+    principal: { type: 'user'; id: string; roles: { h: string; r: string }[] };
+  }>('/v1/auth/dev-login', { method: 'POST', auth: false, body: { email } });
+}
+
 export function logout() {
   return request<void>('/v1/auth/logout', { method: 'POST' });
 }
@@ -160,8 +170,19 @@ export interface MeVisitor {
   isAdultConfirmed: boolean;
 }
 
+export interface MeUser {
+  type: 'user';
+  id: string;
+  fullName: string;
+  email: string | null;
+  phone: string | null;
+  phoneVerified: boolean;
+  roles: { h: string; r: string }[];
+  residentStatus: string | null;
+}
+
 export function getMe() {
-  return request<MeVisitor>('/v1/me');
+  return request<MeVisitor | MeUser>('/v1/me');
 }
 
 export function patchMe(patch: {
@@ -226,6 +247,41 @@ export function getVisit(id: string) {
 
 export function getMyVisits() {
   return request<VisitDto[]>('/v1/me/visits');
+}
+
+/** FR-26 — guest cancels their own pending walk-in request (SDD §12.4). */
+export function cancelMyVisit(id: string) {
+  return request<VisitDto>(`/v1/me/visits/${id}/cancel`, { method: 'POST' });
+}
+
+// ---- Host (resident) visit actions (SDD §12.6) ----
+
+export function createInvite(params: {
+  guest: { name: string; phone: string; gender?: 'male' | 'female' | 'undisclosed' };
+  type: 'quick_drop' | 'day';
+  windowStart: string;
+  windowEnd: string;
+}) {
+  return request<{ visit: VisitDto; inviteUrl: string }>('/v1/visits', {
+    method: 'POST',
+    body: { kind: 'invite', ...params },
+  });
+}
+
+export interface HostedVisitDto extends VisitDto {
+  guestName: string;
+}
+
+export function getHostedVisits() {
+  return request<HostedVisitDto[]>('/v1/me/hosted-visits');
+}
+
+export function approveVisit(id: string) {
+  return request<VisitDto>(`/v1/visits/${id}/approve`, { method: 'POST', body: {} });
+}
+
+export function rejectVisit(id: string) {
+  return request<VisitDto>(`/v1/visits/${id}/reject`, { method: 'POST', body: {} });
 }
 
 export function getHostels() {

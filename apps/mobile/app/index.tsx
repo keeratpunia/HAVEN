@@ -16,6 +16,13 @@ export default function Home() {
       <View style={styles.action}>
         <Button label="Sign in" onPress={() => router.push('/login')} />
       </View>
+      <View style={styles.action}>
+        <Button
+          label="Resident sign-in"
+          variant="secondary"
+          onPress={() => router.push('/resident/login')}
+        />
+      </View>
     </View>
   );
 }

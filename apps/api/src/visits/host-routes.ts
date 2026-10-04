@@ -120,18 +120,29 @@ export async function registerHostVisitRoutes(
     },
   );
 
-  // GET /v1/me/hosted-visits — host's own visits (SDD §12.6, R-13).
+  // GET /v1/me/hosted-visits — host's own visits (SDD §12.6, R-13/R-08). `guestName`
+  // isn't part of the shared VisitDTO (visitDto() is also used by the guest-facing
+  // routes, which must never show a host another guest's identity) — it's added here
+  // only, from invited_name (pre-claim invite) or the claimed visitor's name (walk-in
+  // or claimed invite).
   api.get('/me/hosted-visits', { preHandler: requireAuth }, async (request, reply) => {
     if (!request.principal || request.principal.type !== 'user') {
       throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
     }
     const rows = await db
       .selectFrom('haven.visits')
-      .selectAll()
-      .where('host_id', '=', request.principal.userId)
-      .orderBy('window_start', 'desc')
+      .leftJoin('haven.visitors', 'haven.visitors.id', 'haven.visits.visitor_id')
+      .selectAll('haven.visits')
+      .select(['haven.visitors.full_name as visitor_full_name'])
+      .where('haven.visits.host_id', '=', request.principal.userId)
+      .orderBy('haven.visits.window_start', 'desc')
       .execute();
-    reply.send(rows.map((row) => visitDto(row)));
+    reply.send(
+      rows.map((row) => ({
+        ...visitDto(row),
+        guestName: row.visitor_full_name ?? row.invited_name ?? 'Guest',
+      })),
+    );
   });
 
   // POST /v1/visits/:id/approve ★ — host (walk-in) or warden (overnight) (SDD §12.6).
