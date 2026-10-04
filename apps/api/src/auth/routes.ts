@@ -21,12 +21,14 @@ import { claimInvite } from './invites.js';
 import { requireAuth } from './authenticate.js';
 import { authorize } from './policy.js';
 import { registerAuthPolicies } from './policy-rules.js';
+import { storeVisitorProfilePhoto, type MediaStorage } from '../gate/media.js';
 
 export interface AuthRoutesOptions {
   env: Env;
   db: Kysely<Database>;
   clock: Clock;
   googleVerifier: GoogleIdTokenVerifier;
+  mediaStorage: MediaStorage;
 }
 
 const PhoneSchema = z.string().min(1);
@@ -310,6 +312,25 @@ export async function registerAuthRoutes(
       reply.status(204).send();
     },
   );
+
+  // POST /v1/me/profile-photo — guest profile selfie (SDD §9.4, G-05).
+  api.post('/me/profile-photo', { preHandler: requireAuth }, async (request, reply) => {
+    const principal = request.principal;
+    if (!principal || principal.type !== 'visitor') {
+      throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to upload a profile photo.');
+    }
+    const file = await request.file();
+    if (!file) throw new AppError('PHOTO_REQUIRED', 400, 'A photo is required.');
+    const raw = await file.toBuffer();
+    const result = await storeVisitorProfilePhoto({
+      db,
+      storage: opts.mediaStorage,
+      clock,
+      raw,
+      visitorId: principal.visitorId,
+    });
+    reply.send(result);
+  });
 
   api.post(
     '/invites/:token/claim',

@@ -172,6 +172,13 @@ export function patchMe(patch: {
   return request<void>('/v1/me', { method: 'PATCH', body: patch });
 }
 
+/** SDD §9.4, G-05 — the guest's live profile selfie. */
+export function uploadProfilePhoto(photo: Blob) {
+  const formData = new FormData();
+  formData.append('photo', photo, 'photo.jpg');
+  return request<{ photoId: string }>('/v1/me/profile-photo', { method: 'POST', formData });
+}
+
 // ---- Invites ----
 
 export interface InviteLanding {

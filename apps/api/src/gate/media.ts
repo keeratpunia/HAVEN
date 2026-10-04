@@ -68,20 +68,14 @@ export function gatePhotoPath(params: GatePhotoPathParams): string {
   return `${params.hostelId}/${yyyy}/${mm}/${params.mediaId}.jpg`;
 }
 
-export interface StoreGatePhotoParams {
-  db: Kysely<Database>;
-  storage: MediaStorage;
-  clock: Clock;
-  raw: Buffer;
-  hostelId: string;
-  ownerVisitorId?: string | null;
-  ownerUserId?: string | null;
+/** `visitor-photos/{visitorId}/{mediaId}.jpg` (SDD §9.11). */
+export function visitorProfilePhotoPath(params: { visitorId: string; mediaId: string }): string {
+  return `${params.visitorId}/${params.mediaId}.jpg`;
 }
 
-/** Processes and stores one gate photo upload; returns the new `media.id`. */
-export async function storeGatePhoto(params: StoreGatePhotoParams): Promise<{ photoId: string }> {
-  const { db, storage, clock, raw } = params;
-
+/** Shared magic-byte/size/EXIF-strip/resize/re-encode steps (SDD §9.4), independent of
+ * which bucket/kind the caller eventually stores the result under. */
+async function processPhotoBytes(raw: Buffer): Promise<Buffer> {
   if (raw.length === 0) {
     throw new AppError('PHOTO_REQUIRED', 400, 'A photo is required.');
   }
@@ -92,9 +86,8 @@ export async function storeGatePhoto(params: StoreGatePhotoParams): Promise<{ ph
     throw new AppError('PHOTO_INVALID', 400, 'Photo must be a JPEG or PNG image.');
   }
 
-  let processed: Buffer;
   try {
-    processed = await sharp(raw)
+    return await sharp(raw)
       .rotate() // auto-orient from EXIF, then strip all metadata (no .withMetadata() call)
       .resize({
         width: MAX_DIMENSION,
@@ -107,11 +100,27 @@ export async function storeGatePhoto(params: StoreGatePhotoParams): Promise<{ ph
   } catch {
     throw new AppError('PHOTO_INVALID', 400, 'Photo could not be read.');
   }
+}
 
+export interface StorePhotoParams {
+  db: Kysely<Database>;
+  storage: MediaStorage;
+  clock: Clock;
+  raw: Buffer;
+  kind: MediaKind;
+  bucket: string;
+  path: (mediaId: string, now: Date) => string;
+  ownerVisitorId?: string | null;
+  ownerUserId?: string | null;
+}
+
+/** Generic photo-upload pipeline: process, dedupe-check (per visitor), store, insert `media` row. */
+async function storePhoto(params: StorePhotoParams): Promise<{ photoId: string }> {
+  const processed = await processPhotoBytes(params.raw);
   const hash = sha256(processed);
 
   if (params.ownerVisitorId) {
-    const existing = await db
+    const existing = await params.db
       .selectFrom('haven.media')
       .select('id')
       .where('owner_visitor_id', '=', params.ownerVisitorId)
@@ -123,16 +132,16 @@ export async function storeGatePhoto(params: StoreGatePhotoParams): Promise<{ ph
     }
   }
 
-  const now = clock.now();
+  const now = params.clock.now();
   const mediaId = randomUUID();
-  const path = gatePhotoPath({ hostelId: params.hostelId, mediaId, now });
+  const path = params.path(mediaId, now);
 
-  const inserted = await db
+  const inserted = await params.db
     .insertInto('haven.media')
     .values({
       id: mediaId,
-      kind: 'gate_photo' satisfies MediaKind,
-      bucket: 'gate-photos',
+      kind: params.kind,
+      bucket: params.bucket,
       path,
       sha256: hash,
       bytes: processed.length,
@@ -142,7 +151,62 @@ export async function storeGatePhoto(params: StoreGatePhotoParams): Promise<{ ph
     .returning('id')
     .executeTakeFirstOrThrow();
 
-  await storage.put(path, processed);
+  await params.storage.put(path, processed);
 
   return { photoId: inserted.id };
+}
+
+export interface StoreGatePhotoParams {
+  db: Kysely<Database>;
+  storage: MediaStorage;
+  clock: Clock;
+  raw: Buffer;
+  hostelId: string;
+  ownerVisitorId?: string | null;
+  ownerUserId?: string | null;
+}
+
+/** Processes and stores one gate photo upload; returns the new `media.id`. */
+export async function storeGatePhoto(params: StoreGatePhotoParams): Promise<{ photoId: string }> {
+  return storePhoto({
+    db: params.db,
+    storage: params.storage,
+    clock: params.clock,
+    raw: params.raw,
+    kind: 'gate_photo',
+    bucket: 'gate-photos',
+    path: (mediaId, now) => gatePhotoPath({ hostelId: params.hostelId, mediaId, now }),
+    ownerVisitorId: params.ownerVisitorId,
+    ownerUserId: params.ownerUserId,
+  });
+}
+
+export interface StoreVisitorProfilePhotoParams {
+  db: Kysely<Database>;
+  storage: MediaStorage;
+  clock: Clock;
+  raw: Buffer;
+  visitorId: string;
+}
+
+/** `POST /v1/me/profile-photo` (SDD §9.4). */
+export async function storeVisitorProfilePhoto(
+  params: StoreVisitorProfilePhotoParams,
+): Promise<{ photoId: string }> {
+  const result = await storePhoto({
+    db: params.db,
+    storage: params.storage,
+    clock: params.clock,
+    raw: params.raw,
+    kind: 'visitor_profile',
+    bucket: 'visitor-photos',
+    path: (mediaId) => visitorProfilePhotoPath({ visitorId: params.visitorId, mediaId }),
+    ownerVisitorId: params.visitorId,
+  });
+  await params.db
+    .updateTable('haven.visitors')
+    .set({ profile_media_id: result.photoId })
+    .where('id', '=', params.visitorId)
+    .execute();
+  return result;
 }

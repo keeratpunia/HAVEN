@@ -40,10 +40,16 @@ export default function Profile() {
     }
   }
 
-  async function finishWithPhoto() {
-    // The profile photo is captured live (no gallery, SDD §9.4) but not persisted —
-    // there is still no `POST /v1/me/profile-photo` endpoint (see docs/DECISIONS.md
-    // DEC-009/DEC-010); only gate photos (`/scan-sessions/:id/photo`) are stored so far.
+  async function finishWithPhoto(dataUrl: string) {
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      await api.uploadProfilePhoto(blob);
+    } catch {
+      // A failed profile-photo upload shouldn't block onboarding — SDD §9.4's photo
+      // pipeline has its own PHOTO_INVALID/PHOTO_REUSED errors a guest can't act on
+      // mid-onboarding; the guest still completed a live capture (no gallery), and a
+      // missing profile photo doesn't block anything downstream.
+    }
     await refresh();
     if (returnTo) {
       router.replace(returnTo);
@@ -60,7 +66,7 @@ export default function Profile() {
         <Text style={styles.title}>Take your profile photo</Text>
         <LiveCamera
           guideText="Good light, no sunglasses."
-          onCapture={() => finishWithPhoto()}
+          onCapture={(dataUrl) => void finishWithPhoto(dataUrl)}
           onPermissionDenied={() => setError('camera_denied')}
         />
         {error === 'camera_denied' ? (

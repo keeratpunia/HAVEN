@@ -246,7 +246,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   await app.register(
     async (v1) => {
-      await registerAuthRoutes(v1, { env, db, clock, googleVerifier });
+      await registerAuthRoutes(v1, {
+        env,
+        db,
+        clock,
+        googleVerifier,
+        mediaStorage: options.mediaStorage,
+      });
       await registerVisitRoutes(v1, { db, clock });
       await registerGateRoutes(v1, {
         db,

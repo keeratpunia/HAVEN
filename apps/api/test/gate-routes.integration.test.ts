@@ -605,6 +605,70 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
   });
 });
 
+describe('POST /v1/me/profile-photo (SDD §9.4, G-05)', () => {
+  let app: FastifyInstance;
+  let clock: FakeClock;
+
+  beforeEach(async () => {
+    await resetAllHavenTables();
+    __resetPolicyRegistryForTests();
+    __resetVisitPoliciesForTests();
+    __resetGatePoliciesForTests();
+    __resetAuthPoliciesForTests();
+    registerVisitPolicies();
+    registerGatePolicies();
+    clock = new FakeClock(NOW);
+    app = await buildApp({
+      env: testEnv(),
+      logger: createLogger(testEnv()),
+      db,
+      clock,
+      googleVerifier: new FakeGoogleIdTokenVerifier(new Map()),
+      mediaStorage: fakeMediaStorage,
+      checkDb: async () => true,
+    });
+    await app.ready();
+  });
+
+  it('stores the photo and sets visitors.profile_media_id', async () => {
+    const visitorId = await makeVisitor(db);
+    const accessToken = await issueToken(clock, { type: 'visitor', id: visitorId });
+    const photoBuf = await tinyJpeg();
+
+    const res = await supertest(app.server)
+      .post('/v1/me/profile-photo')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .attach('photo', photoBuf, 'selfie.jpg');
+
+    expect(res.status).toBe(200);
+    expect(res.body.photoId).toBeTruthy();
+
+    const visitorRow = await db
+      .selectFrom('haven.visitors')
+      .select('profile_media_id')
+      .where('id', '=', visitorId)
+      .executeTakeFirstOrThrow();
+    expect(visitorRow.profile_media_id).toBe(res.body.photoId);
+
+    const mediaRow = await db
+      .selectFrom('haven.media')
+      .select(['kind', 'bucket', 'owner_visitor_id'])
+      .where('id', '=', res.body.photoId)
+      .executeTakeFirstOrThrow();
+    expect(mediaRow.kind).toBe('visitor_profile');
+    expect(mediaRow.bucket).toBe('visitor-photos');
+    expect(mediaRow.owner_visitor_id).toBe(visitorId);
+  });
+
+  it('rejects an unauthenticated request', async () => {
+    const photoBuf = await tinyJpeg();
+    const res = await supertest(app.server)
+      .post('/v1/me/profile-photo')
+      .attach('photo', photoBuf, 'selfie.jpg');
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('gate device pairing and heartbeat (SDD F8)', () => {
   let app: FastifyInstance;
   let clock: FakeClock;
