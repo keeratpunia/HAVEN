@@ -15,6 +15,9 @@ export interface ButtonProps {
   disabled?: boolean;
   loading?: boolean;
   accessibilityHint?: string;
+  /** Overrides the accessible name when the visible label repeats across a list (e.g.
+   * "Approve" on every card) and a screen reader needs to disambiguate which row. */
+  accessibilityLabel?: string;
   fullWidth?: boolean;
 }
 
@@ -25,6 +28,7 @@ export function Button({
   disabled,
   loading,
   accessibilityHint,
+  accessibilityLabel,
   fullWidth = true,
 }: ButtonProps) {
   const isDisabled = disabled || loading;
@@ -33,7 +37,7 @@ export function Button({
       onPress={isDisabled ? undefined : onPress}
       disabled={isDisabled}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={accessibilityLabel ?? label}
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: isDisabled, busy: loading }}
       style={({ pressed }) => [

@@ -6,7 +6,14 @@
  * against (`E2E_FIXED_NOW`) — so the rules engine's time-of-day checks
  * (`AFTER_HARD_CUTOFF` etc.) behave the same no matter what time of day the test
  * actually runs in CI. Dev/E2E-only; never used in `server.ts`.
+ *
+ * `DEV_LOGIN_ENABLED=true` (docs/DECISIONS.md DEC-011) lets the resident-actions specs
+ * sign in as the seeded host (`e2e-host@haven.test`) without real Google OAuth; `
+ * process.env.NODE_ENV` is set to `'development'` below because `buildApp` refuses to
+ * start with the flag on otherwise — same two-layer gate as the demo scripts.
  */
+process.env.NODE_ENV = 'development';
+
 import path from 'node:path';
 import { buildApp } from '../src/app.js';
 import { __resetEnvCacheForTests, loadEnv } from '../src/config.js';
@@ -30,6 +37,7 @@ async function main() {
     SMS_PROVIDER: 'console',
     CORS_ORIGINS: 'http://localhost:8081,http://127.0.0.1:8081',
     DATA_ENCRYPTION_KEY: E2E_DATA_ENCRYPTION_KEY,
+    DEV_LOGIN_ENABLED: 'true',
   });
   const logger = createLogger(env);
   const db = createDb(env);

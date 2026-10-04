@@ -52,3 +52,5 @@ test-results/
 apps/api/.e2e-pgdata/
 apps/api/.media-storage/
 apps/api/.e2e-media/
+apps/api/.demo-pgdata/
+apps/api/.demo-media/

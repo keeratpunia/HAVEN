@@ -85,6 +85,7 @@ export default function Requests() {
           <View style={styles.actions}>
             <Button
               label="Reject"
+              accessibilityLabel={`Reject request from ${visit.guestName}`}
               variant="secondary"
               fullWidth={false}
               onPress={() => decide(visit.id, 'reject')}
@@ -92,6 +93,7 @@ export default function Requests() {
             />
             <Button
               label="Approve"
+              accessibilityLabel={`Approve request from ${visit.guestName}`}
               fullWidth={false}
               onPress={() => decide(visit.id, 'approve')}
               loading={actingOn === visit.id}

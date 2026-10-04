@@ -784,6 +784,84 @@ Source for all of Part 1: SDD §2.7.
   correct. The documented simplifications are implementation-detail/scope choices in
   the same spirit as every earlier DEC-00x entry, not SDD contradictions.
 
+### DEC-011 — Demo milestone: dev-only resident sign-in bypass, host visit actions, FR-26 polling, and the demo environment
+
+- **Date:** 2026-10-04
+- **Context:** A live demo (for an academic supervisor, not a real deployment) needed
+  to show a resident signing in, creating an invite, and approving/rejecting a walk-in
+  — none of which has a built UI yet, and the demo environment has no real Google
+  OAuth credentials configured (SDD §9.5 assumes Google Sign-In is always available;
+  it is silent on what a resident does when it isn't). It also needed FR-26's 3-second
+  wait-screen polling and Cancel action, which DEC-010 explicitly deferred "until the
+  Resident app's walk-in approval action" existed — it now does.
+- **Decision:**
+  1. **Dev-only sign-in bypass.** `POST /v1/auth/dev-login` (`apps/api/src/auth/
+     dev-login.ts`) issues real tokens for an existing `haven.users` row by email alone
+     — no Google ID token, no password. It is gated two independent ways: the route is
+     only *registered* when `env.DEV_LOGIN_ENABLED` is true, and `buildApp` separately
+     refuses to construct the Fastify instance at all if `DEV_LOGIN_ENABLED` is true
+     **and** `process.env.NODE_ENV !== 'development'` — checked against the raw
+     process env, not the validated `Env` object, so a copied `.env` or a
+     misconfigured pipeline that sets the flag in staging/production fails loudly at
+     boot instead of quietly exposing an auth bypass. The mobile resident sign-in
+     screen (`apps/mobile/app/resident/login.tsx`) only shows the dev-login form when
+     a parallel public flag, `EXPO_PUBLIC_DEV_LOGIN_ENABLED`, is set — this is a UI
+     convenience only; hiding the button does not and must not substitute for the
+     API's own two-layer gate.
+  2. **Host visit actions implemented per SDD §12.6**, not invented: `POST /visits`
+     (invite only — overnight/warden flows stay out of scope), `GET /me/hosted-visits`,
+     `POST /visits/:id/approve` ★, `POST /visits/:id/reject` ★, `POST /me/visits/:id/
+     cancel`. `GET /me/hosted-visits` adds one field, `guestName`, that is not part of
+     the shared `visitDto()` the guest-facing routes also use — resident-only, so a
+     guest-visible response can never carry another guest's name through the same
+     helper.
+  3. **`scan_sessions.visit_id`** (new column + migration) links a walk-in's scan
+     session to the visit it produced, so `POST /visits/:id/approve` can reuse that
+     session's already-checked GPS facts instead of re-checking location — SDD F2 step
+     9 ("server runs evaluateEntry using the scan session's GPS result... so no second
+     scan").
+  4. **FR-26 polling + Cancel**: `apps/mobile/app/(guest)/g/[token].tsx`'s
+     `waiting_for_host` phase now polls `GET /v1/visits/{id}` every 3 seconds and
+     renders the SDD §13.6 `CHECK_IN_SUCCESS`/`WALK_IN_REJECTED` copy the moment the
+     host decides, plus a `Cancel request` button calling the new cancel endpoint.
+  5. **Demo environment** (`apps/api/scripts/demo-*.ts`, `scripts/demo.mjs`, `pnpm
+     demo`): its own embedded-Postgres instance (DEC-004-style), the real
+     `SystemClock` (not a frozen one, unlike the E2E fixtures), a GH-8 hostel, two
+     verified residents, and one gate at `DEMO_GATE_LAT`/`DEMO_GATE_LNG`/
+     `DEMO_GATE_RADIUS_M` (configurable per presentation room). `demo-server.ts` sets
+     both `DEV_LOGIN_ENABLED=true` and `process.env.NODE_ENV = 'development'` itself,
+     so the two-layer gate in (1) is satisfied by the script, not by an operator's
+     shell state.
+- **Alternatives considered:** Building real Google OAuth for the demo (rejected — no
+  credentials exist for this environment, and SDD §9.5 doesn't require it; getting
+  real credentials provisioned was out of scope for an academic demo). Skipping
+  dev-login entirely and demoing sign-in only via a pre-issued token pasted into
+  localStorage (rejected — doesn't actually demonstrate "a resident can log in," which
+  the demo's own requirements list explicitly as a thing to show).
+- **Why:** The two-layer gate on dev-login exists because a sign-in bypass that skips
+  Google verification entirely is exactly the kind of control that must never reach a
+  real deployment by accident (CLAUDE.md §4's "two people max hold Supabase owner
+  access" spirit extends to "no auth bypass reachable in prod, full stop") — a single
+  env flag an operator could forget to unset is not enough on its own, so the check
+  that actually matters (`NODE_ENV`) is enforced by the server itself, redundantly.
+  `scan_sessions.visit_id` is a minimal, targeted schema addition rather than a
+  timestamp-proximity join or a new `gate_event_kind` value, because both alternatives
+  would have been fragile (a proximity join can match the wrong session under load; a
+  new enum value duplicates information the row already has via its existing
+  `consumed_action`).
+- **Documented simplifications:** The full Resident app (SDD §13.4's "Resident
+  (native)" shell: Home with quick actions, Overnight request, Guest-without-phone,
+  Charges, Profile) is not built — only the four screens (sign-in, invite, requests,
+  hosted visits) this demo needs, reachable at `/resident/*` rather than through a tab
+  bar. `GET /me/hosted-visits` returns one flat list, not the SDD's Upcoming/Inside/
+  History segments. Warden/office milestones remain entirely unbuilt, per the task's
+  explicit instruction not to build them yet.
+- **SDD updated?** No — the dev-login bypass is additive, demo/dev-only
+  infrastructure, not a product behaviour the SDD specifies (the SDD assumes Google
+  Sign-In throughout §9.5); it does not change or contradict any SDD requirement. The
+  host visit actions and FR-26 polling implement SDD text that already existed, they
+  don't reinterpret it.
+
 Template for a new entry:
 
 ```markdown

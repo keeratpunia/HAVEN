@@ -106,6 +106,7 @@ export default function GateScan() {
   const [session, setSession] = useState<api.ScanSessionResult | null>(null);
   const [scanActions, setScanActions] = useState<api.ScanSessionActions | null>(null);
   const [hostId, setHostId] = useState<string | null>(null);
+  const [hostFirstName, setHostFirstName] = useState<string>('your host');
   const [visitType, setVisitType] = useState<'quick_drop' | 'day'>('day');
   const [room, setRoom] = useState('');
   const [residents, setResidents] = useState<{ userId: string; fullName: string }[] | null>(null);
@@ -414,6 +415,7 @@ export default function GateScan() {
                     key={r.userId}
                     onPress={() => {
                       setHostId(r.userId);
+                      setHostFirstName(r.fullName.split(' ')[0] ?? 'your host');
                       setResultKind('walk_in');
                       setPhase('visit_type');
                     }}
@@ -483,7 +485,9 @@ export default function GateScan() {
             </>
           ) : walkInStatus === 'rejected' ? (
             <>
-              <Text style={styles.title}>{copyFor('WALK_IN_REJECTED').title}</Text>
+              <Text style={styles.title}>
+                {fillCopy(copyFor('WALK_IN_REJECTED'), { hostFirstName }).title}
+              </Text>
               <Text style={styles.body}>{copyFor('WALK_IN_REJECTED').body}</Text>
               <View style={styles.action}>
                 <Button label="Go to My visits" onPress={() => router.replace('/visits')} />
