@@ -1,232 +1,487 @@
 import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 import { z } from 'zod';
-import { GH8_RULES_CONFIG_V1 } from '@haven/shared';
+import {
+  ApproveBodySchema,
+  CancelBodySchema,
+  ChargesQuerySchema,
+  CreateVisitBodySchema,
+  DisputeBodySchema,
+  GH8_RULES_CONFIG_V1,
+  HostedVisitsQuerySchema,
+  nightsBetween,
+  PatchVisitBodySchema,
+  QuotaQuerySchema,
+  RejectBodySchema,
+  toLocalDateString,
+  type ChargeDTO,
+  type VisitDetailDTO,
+} from '@haven/shared';
 import type { ZodTypeProvider } from '../lib/validation.js';
 import type { Database } from '../db/index.js';
 import type { Clock } from '../lib/clock.js';
 import { AppError } from '../lib/errors.js';
+import { decodeCursor, pageOf } from '../lib/paging.js';
+import { runIdempotent } from '../lib/idempotency.js';
 import { requireAuth } from '../auth/authenticate.js';
+import { authorize } from '../auth/policy.js';
+import type { Principal, UserPrincipal } from '../auth/principal.js';
+import type { MediaUrlSigner } from '../media/signing.js';
 import {
   approveOvernight,
   approveWalkIn,
+  cancelApprovedVisit,
+  cancelOvernightRequest,
   cancelWalkIn,
+  createOvernightRequest,
   createPreInvite,
+  hostMarksGuestLeft,
   rejectOvernight,
   rejectWalkIn,
   type VisitServiceDeps,
   type WalkInGateContext,
 } from './service.js';
-import { findWalkInSessionForVisit } from '../gate/scanSessions.js';
+import {
+  confirmArrival,
+  disputeArrival,
+  editVisitWindow,
+  overnightWindow,
+  previewVisit,
+  quotaFor,
+  regenerateInviteLink,
+} from './host-actions.js';
+import { buildHostVisitDtos, buildVisitEvents, type DtoDeps } from './dto.js';
+import { findVisitById, type VisitRow } from './repository.js';
 import { visitDto } from './routes.js';
+import { findWalkInSessionForVisit } from '../gate/scanSessions.js';
 
 /**
- * Host-facing visits routes (SDD §12.6): creating a pre-invite and acting on a
- * pending request. Minimal slice for the demo milestone — only what R-06/R-07/R-08/
- * R-13 need; the full host surface (preview, edit window, cancel, dispute, mark-left)
- * stays unbuilt (see docs/TRACEABILITY.md).
+ * Host-facing visits routes (SDD §12.6) plus the resident's quota and charges
+ * (§12.5). Every ★ route requires `Idempotency-Key` (§9.12). A visit the caller may
+ * not read is NOT_FOUND, never FORBIDDEN (SDD §12.2 "missing or not visible to
+ * caller"; TC-SEC-01/02).
  */
 
 const VISIT_ID_PARAMS = z.object({ id: z.string().uuid() });
 
-const CreateVisitBody = z.object({
-  kind: z.enum(['invite', 'overnight']),
-  guest: z.object({
-    name: z.string().min(1),
-    phone: z
-      .string()
-      .regex(/^\+91[6-9][0-9]{9}$/)
-      .nullable()
-      .optional(),
-    gender: z.enum(['male', 'female', 'undisclosed']).nullable().optional(),
-  }),
-  type: z.enum(['quick_drop', 'day', 'overnight_room', 'guest_room']),
-  windowStart: z.string().datetime().optional(),
-  windowEnd: z.string().datetime().optional(),
-  arrivalDate: z.string().optional(),
-  departureDate: z.string().optional(),
-});
-
-const ApproveBody = z.object({ windowEnd: z.string().datetime().optional() });
-const RejectBody = z.object({ reason: z.string().optional() });
-
 export interface HostVisitRoutesOptions {
   db: Kysely<Database>;
   clock: Clock;
+  signer: MediaUrlSigner;
+  webBaseUrl: string;
+}
+
+function requireUser(principal: Principal | null | undefined): UserPrincipal {
+  if (!principal || principal.type !== 'user') {
+    throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a resident to do this.');
+  }
+  return principal;
 }
 
 export async function registerHostVisitRoutes(
   app: FastifyInstance,
   opts: HostVisitRoutesOptions,
 ): Promise<void> {
-  const { db, clock } = opts;
-  const deps: VisitServiceDeps = { db, clock, rulesConfig: GH8_RULES_CONFIG_V1, rulesVersion: 1 };
+  const { db, clock, signer } = opts;
+  const rulesConfig = GH8_RULES_CONFIG_V1;
+  const deps: VisitServiceDeps = {
+    db,
+    clock,
+    rulesConfig,
+    rulesVersion: 1,
+    webBaseUrl: opts.webBaseUrl,
+  };
+  const dtoDeps: DtoDeps = { db, clock, signer, rulesConfig };
   const api = app.withTypeProvider<ZodTypeProvider>();
 
-  async function requireVerifiedHost(userId: string) {
+  /** The caller's own resident row; 403 when the user isn't a resident at all. */
+  async function residentOf(userId: string) {
     const resident = await db
       .selectFrom('haven.residents')
       .select(['hostel_id', 'status'])
       .where('user_id', '=', userId)
       .executeTakeFirst();
-    if (!resident || resident.status !== 'verified') {
-      throw new AppError('FORBIDDEN', 403, 'Only a verified resident can do this.');
-    }
+    if (!resident) throw new AppError('FORBIDDEN', 403, 'Only residents can host guests.');
     return resident;
   }
 
-  // POST /v1/visits — host creates a pre-invite (SDD §12.6, F1 step 1). Overnight
-  // (warden-approved) requests are out of scope for this demo slice — only "invite" is wired.
+  /** Loads a visit only if the caller may read it — otherwise NOT_FOUND (SDD §12.2). */
+  async function visibleVisit(principal: Principal | null, visitId: string): Promise<VisitRow> {
+    const visit = await db.transaction().execute((trx) => findVisitById(trx, visitId));
+    if (!visit) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+    try {
+      authorize(principal, 'visits.read', {
+        hostelId: visit.hostel_id,
+        hostUserId: visit.host_id,
+        visitorId: visit.visitor_id,
+      });
+    } catch {
+      throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+    }
+    return visit;
+  }
+
+  async function dtoFor(visit: VisitRow) {
+    const [dto] = await buildHostVisitDtos(dtoDeps, [visit]);
+    // buildHostVisitDtos maps 1:1, so one row in is always one DTO out.
+    if (!dto) throw new AppError('INTERNAL', 500, 'Could not serialize visit.');
+    return dto;
+  }
+
+  /** Fresh row → host DTO; the shape every host mutation returns. */
+  async function freshDto(visitId: string) {
+    const row = await db.transaction().execute((trx) => findVisitById(trx, visitId));
+    if (!row) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+    return dtoFor(row);
+  }
+
+  // POST /v1/visits/preview — no write (SDD §12.6, F6 step 2; R-06/R-11 live hints).
+  api.post(
+    '/visits/preview',
+    { schema: { body: CreateVisitBodySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = requireUser(request.principal);
+      const resident = await residentOf(principal.userId);
+      reply.send(
+        await previewVisit(deps, {
+          principal,
+          hostUserId: principal.userId,
+          hostelId: resident.hostel_id,
+          body: request.body,
+        }),
+      );
+    },
+  );
+
+  // POST /v1/visits — pre-invite (FR-10, F1 step 1) or overnight request (FR-14, F6 step 3).
   api.post(
     '/visits',
-    { schema: { body: CreateVisitBody }, preHandler: requireAuth },
+    { schema: { body: CreateVisitBodySchema }, preHandler: requireAuth },
     async (request, reply) => {
-      if (!request.principal || request.principal.type !== 'user') {
-        throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a resident to create a visit.');
-      }
-      if (request.body.kind !== 'invite') {
-        throw new AppError('VALIDATION_FAILED', 400, 'Only invite creation is implemented.');
-      }
-      if (!request.body.windowStart || !request.body.windowEnd) {
-        throw new AppError('VALIDATION_FAILED', 400, 'windowStart and windowEnd are required.');
-      }
-      // An invite's visitor_id is null until claimed — `haven.visits`' own check
-      // constraint requires invited_phone + invited_name in that case (matching
-      // FR-12: the guest signs in with exactly this phone to claim it).
-      if (!request.body.guest.phone) {
-        throw new AppError('VALIDATION_FAILED', 400, 'guest.phone is required for an invite.');
-      }
-      const resident = await requireVerifiedHost(request.principal.userId);
+      const principal = requireUser(request.principal);
+      const resident = await residentOf(principal.userId);
+      const hostel = await db
+        .selectFrom('haven.hostels')
+        .select('gender_served')
+        .where('id', '=', resident.hostel_id)
+        .executeTakeFirstOrThrow();
+      const hostelGender = hostel.gender_served as 'male' | 'female';
+      const body = request.body;
 
-      const { visit, inviteToken } = await createPreInvite(deps, {
-        principal: request.principal,
+      if (body.kind === 'invite') {
+        const { visit, inviteToken } = await createPreInvite(deps, {
+          principal,
+          requestId: request.id,
+          hostUserId: principal.userId,
+          hostelId: resident.hostel_id,
+          hostelGender,
+          type: body.type,
+          invitedName: body.guest.name,
+          invitedPhone: body.guest.phone,
+          invitedGender: body.guest.gender ?? null,
+          windowStart: new Date(body.windowStart),
+          windowEnd: new Date(body.windowEnd),
+        });
+        reply.status(201).send({
+          visit: await dtoFor(visit),
+          inviteUrl: `${opts.webBaseUrl.replace(/\/$/, '')}/i/${inviteToken}`,
+        });
+        return;
+      }
+
+      const { windowStart, windowEnd } = overnightWindow(
+        rulesConfig,
+        body.arrivalDate,
+        body.departureDate,
+      );
+      const visit = await createOvernightRequest(deps, {
+        principal,
         requestId: request.id,
-        hostUserId: request.principal.userId,
+        hostUserId: principal.userId,
         hostelId: resident.hostel_id,
-        hostelGender: GH8_RULES_CONFIG_V1.hostel_gender,
-        type: request.body.type as 'day' | 'quick_drop',
-        invitedName: request.body.guest.name,
-        invitedPhone: request.body.guest.phone ?? null,
-        invitedGender: request.body.guest.gender ?? null,
-        windowStart: new Date(request.body.windowStart),
-        windowEnd: new Date(request.body.windowEnd),
+        hostelGender,
+        type: body.type,
+        invitedName: body.guest.name,
+        invitedPhone: body.guest.phone,
+        invitedGender: body.guest.gender,
+        windowStart,
+        windowEnd,
+        arrivalDate: body.arrivalDate,
+        departureDate: body.departureDate,
+        nights: nightsBetween(body.arrivalDate, body.departureDate).length,
       });
+      // The invite link only exists once the warden approves (F6 step 5).
+      reply.status(201).send({ visit: await dtoFor(visit) });
+    },
+  );
 
-      const webBaseUrl = process.env.WEB_BASE_URL ?? 'http://localhost:8081';
-      reply.status(201).send({
-        visit: visitDto(visit),
-        inviteUrl: `${webBaseUrl}/i/${inviteToken}`,
+  // GET /v1/me/hosted-visits?bucket=upcoming|inside|history (FR-16, R-13, R-05).
+  api.get(
+    '/me/hosted-visits',
+    { schema: { querystring: HostedVisitsQuerySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = requireUser(request.principal);
+      const offset = decodeCursor(request.query.cursor);
+      const limit = request.query.limit;
+      let query = db.selectFrom('haven.visits').selectAll().where('host_id', '=', principal.userId);
+      switch (request.query.bucket) {
+        case 'upcoming':
+          query = query
+            .where('status', 'in', ['pending_host', 'pending_warden', 'approved'])
+            .orderBy('window_start', 'asc');
+          break;
+        case 'inside':
+          query = query.where('status', '=', 'inside').orderBy('last_entry_at', 'desc');
+          break;
+        case 'history':
+          query = query
+            .where('status', 'in', ['completed', 'rejected', 'expired', 'cancelled'])
+            .orderBy('window_start', 'desc');
+          break;
+        default:
+          query = query.orderBy('window_start', 'desc');
+      }
+      const rows = await query
+        .orderBy('id')
+        .offset(offset)
+        .limit(limit + 1)
+        .execute();
+      const page = pageOf(rows, offset, limit);
+      reply.send({
+        items: await buildHostVisitDtos(dtoDeps, page.items),
+        nextCursor: page.nextCursor,
       });
     },
   );
 
-  // GET /v1/me/hosted-visits — host's own visits (SDD §12.6, R-13/R-08). `guestName`
-  // isn't part of the shared VisitDTO (visitDto() is also used by the guest-facing
-  // routes, which must never show a host another guest's identity) — it's added here
-  // only, from invited_name (pre-claim invite) or the claimed visitor's name (walk-in
-  // or claimed invite).
-  api.get('/me/hosted-visits', { preHandler: requireAuth }, async (request, reply) => {
-    if (!request.principal || request.principal.type !== 'user') {
-      throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
-    }
-    const rows = await db
-      .selectFrom('haven.visits')
-      .leftJoin('haven.visitors', 'haven.visitors.id', 'haven.visits.visitor_id')
-      .selectAll('haven.visits')
-      .select(['haven.visitors.full_name as visitor_full_name'])
-      .where('haven.visits.host_id', '=', request.principal.userId)
-      .orderBy('haven.visits.window_start', 'desc')
-      .execute();
-    reply.send(
-      rows.map((row) => ({
-        ...visitDto(row),
-        guestName: row.visitor_full_name ?? row.invited_name ?? 'Guest',
-      })),
-    );
-  });
-
-  // POST /v1/visits/:id/approve ★ — host (walk-in) or warden (overnight) (SDD §12.6).
-  api.post(
-    '/visits/:id/approve',
-    { schema: { params: VISIT_ID_PARAMS, body: ApproveBody }, preHandler: requireAuth },
+  // GET /v1/visits/:id — host/warden: VisitDTO + events[] (SDD §12.6); guest: status view.
+  api.get(
+    '/visits/:id',
+    { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
     async (request, reply) => {
-      const current = await db
-        .selectFrom('haven.visits')
-        .select(['id', 'status'])
-        .where('id', '=', request.params.id)
-        .executeTakeFirst();
-      if (!current) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+      const visit = await visibleVisit(request.principal, request.params.id);
 
-      if (current.status === 'pending_host') {
-        const session = await findWalkInSessionForVisit(db, current.id);
-        const gate: WalkInGateContext = session
-          ? {
-              gateId: session.gate_id,
-              scanSessionId: session.id,
-              locationVerified: session.gps_ok,
-              distanceM: session.distance_m,
-              accuracyM: session.accuracy_m,
-              photoMediaId: session.photo_media_id,
-            }
-          : { gateId: '', locationVerified: false };
-        const updated = await approveWalkIn(deps, {
-          principal: request.principal,
-          requestId: request.id,
-          visitId: current.id,
-          gate,
+      if (request.principal?.type === 'visitor') {
+        const host = await db
+          .selectFrom('haven.users')
+          .select('full_name')
+          .where('id', '=', visit.host_id)
+          .executeTakeFirstOrThrow();
+        const hostel = await db
+          .selectFrom('haven.hostels')
+          .select('name')
+          .where('id', '=', visit.hostel_id)
+          .executeTakeFirstOrThrow();
+        reply.send({
+          ...visitDto(visit),
+          hostFirstName: host.full_name.split(' ')[0],
+          hostelName: hostel.name,
         });
-        reply.send(visitDto(updated));
         return;
       }
-      if (current.status === 'pending_warden') {
-        const updated = await approveOvernight(deps, {
-          principal: request.principal,
-          requestId: request.id,
-          visitId: current.id,
-        });
-        reply.send(visitDto(updated));
-        return;
-      }
-      throw new AppError('INVALID_TRANSITION', 409, 'This visit is not awaiting approval.');
+
+      const dto = await dtoFor(visit);
+      const detail: VisitDetailDTO = { ...dto, events: await buildVisitEvents(dtoDeps, visit) };
+      // CLAUDE.md §4: viewing a visit detail with photos is audited (threat T15).
+      const principal = requireUser(request.principal);
+      await db
+        .insertInto('haven.audit_log')
+        .values({
+          actor_type: 'user',
+          actor_id: principal.userId,
+          hostel_id: visit.hostel_id,
+          action: 'read.visit',
+          entity: 'visits',
+          entity_id: visit.id,
+          before: null,
+          after: null,
+          ip: request.ip ?? null,
+          request_id: request.id,
+        })
+        .execute();
+      reply.send(detail);
     },
   );
 
-  // POST /v1/visits/:id/reject ★ — host (walk-in) or warden (overnight) (SDD §12.6).
-  api.post(
-    '/visits/:id/reject',
-    { schema: { params: VISIT_ID_PARAMS, body: RejectBody }, preHandler: requireAuth },
+  // PATCH /v1/visits/:id — host edits the window before entry (FR-13).
+  api.patch(
+    '/visits/:id',
+    { schema: { params: VISIT_ID_PARAMS, body: PatchVisitBodySchema }, preHandler: requireAuth },
     async (request, reply) => {
-      const current = await db
-        .selectFrom('haven.visits')
-        .select(['id', 'status'])
-        .where('id', '=', request.params.id)
-        .executeTakeFirst();
-      if (!current) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
+      const principal = requireUser(request.principal);
+      await visibleVisit(principal, request.params.id);
+      const updated = await editVisitWindow(deps, {
+        principal,
+        requestId: request.id,
+        visitId: request.params.id,
+        windowStart: request.body.windowStart ? new Date(request.body.windowStart) : undefined,
+        windowEnd: request.body.windowEnd ? new Date(request.body.windowEnd) : undefined,
+      });
+      reply.send(await dtoFor(updated));
+    },
+  );
 
-      if (current.status === 'pending_host') {
-        const updated = await rejectWalkIn(deps, {
-          principal: request.principal,
+  // POST /v1/visits/:id/cancel — host cancels before check-in (FR-13).
+  api.post(
+    '/visits/:id/cancel',
+    { schema: { params: VISIT_ID_PARAMS, body: CancelBodySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = requireUser(request.principal);
+      const visit = await visibleVisit(principal, request.params.id);
+      if (visit.status === 'pending_warden') {
+        await cancelOvernightRequest(deps, { principal, requestId: request.id, visitId: visit.id });
+      } else if (visit.status === 'approved' && visit.first_entry_at === null) {
+        await cancelApprovedVisit(deps, {
+          principal,
           requestId: request.id,
-          visitId: current.id,
-        });
-        reply.send(visitDto(updated));
-        return;
-      }
-      if (current.status === 'pending_warden') {
-        const updated = await rejectOvernight(deps, {
-          principal: request.principal,
-          requestId: request.id,
-          visitId: current.id,
+          visitId: visit.id,
           reason: request.body.reason,
         });
-        reply.send(visitDto(updated));
-        return;
+      } else {
+        throw new AppError('INVALID_TRANSITION', 409, 'This visit can no longer be cancelled.');
       }
-      throw new AppError('INVALID_TRANSITION', 409, 'This visit is not awaiting a decision.');
+      reply.send(await freshDto(visit.id));
     },
   );
 
-  // POST /v1/me/visits/:id/cancel — visitor cancels their own pending walk-in (SDD §12.4).
+  // POST /v1/visits/:id/invite-link — new link, old one invalidated (SDD §9.6).
+  api.post(
+    '/visits/:id/invite-link',
+    { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = requireUser(request.principal);
+      await visibleVisit(principal, request.params.id);
+      const { inviteToken } = await regenerateInviteLink(deps, {
+        principal,
+        requestId: request.id,
+        visitId: request.params.id,
+      });
+      reply.send({ inviteUrl: `${opts.webBaseUrl.replace(/\/$/, '')}/i/${inviteToken}` });
+    },
+  );
+
+  // POST /v1/visits/:id/approve ★ — host (walk-in, R-08) or warden (overnight).
+  api.post(
+    '/visits/:id/approve',
+    { schema: { params: VISIT_ID_PARAMS, body: ApproveBodySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      await runIdempotent(db, request, reply, async () => {
+        const visit = await visibleVisit(request.principal, request.params.id);
+        if (visit.status === 'pending_warden') {
+          await approveOvernight(deps, {
+            principal: request.principal,
+            requestId: request.id,
+            visitId: visit.id,
+          });
+        } else {
+          // Not pending_host either → approveWalkIn's state machine check answers 409.
+          const session = await findWalkInSessionForVisit(db, visit.id);
+          const gate: WalkInGateContext = session
+            ? {
+                gateId: session.gate_id,
+                scanSessionId: session.id,
+                locationVerified: session.gps_ok,
+                distanceM: session.distance_m,
+                accuracyM: session.accuracy_m,
+                photoMediaId: session.photo_media_id,
+              }
+            : { gateId: await anyGateOf(visit.hostel_id), locationVerified: false };
+          await approveWalkIn(deps, {
+            principal: request.principal,
+            requestId: request.id,
+            visitId: visit.id,
+            gate,
+            windowEnd: request.body.windowEnd ? new Date(request.body.windowEnd) : undefined,
+          });
+        }
+        return { status: 200, body: await freshDto(visit.id) };
+      });
+    },
+  );
+
+  // POST /v1/visits/:id/reject ★ — host (walk-in) or warden (overnight, reason required).
+  api.post(
+    '/visits/:id/reject',
+    { schema: { params: VISIT_ID_PARAMS, body: RejectBodySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      await runIdempotent(db, request, reply, async () => {
+        const visit = await visibleVisit(request.principal, request.params.id);
+        if (visit.status === 'pending_warden') {
+          await rejectOvernight(deps, {
+            principal: request.principal,
+            requestId: request.id,
+            visitId: visit.id,
+            reason: request.body.reason,
+          });
+        } else {
+          await rejectWalkIn(deps, {
+            principal: request.principal,
+            requestId: request.id,
+            visitId: visit.id,
+            reason: request.body.reason,
+          });
+        }
+        return { status: 200, body: await freshDto(visit.id) };
+      });
+    },
+  );
+
+  // POST /v1/visits/:id/confirm-arrival ★ — F3 confirm / R-09 "Yes, that's my guest".
+  api.post(
+    '/visits/:id/confirm-arrival',
+    { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
+    async (request, reply) => {
+      await runIdempotent(db, request, reply, async () => {
+        const principal = requireUser(request.principal);
+        await visibleVisit(principal, request.params.id);
+        await confirmArrival(deps, {
+          principal,
+          requestId: request.id,
+          visitId: request.params.id,
+        });
+        return { status: 200, body: await freshDto(request.params.id) };
+      });
+    },
+  );
+
+  // POST /v1/visits/:id/dispute ★ — R-09 "Not my guest" (FR-43, F9).
+  api.post(
+    '/visits/:id/dispute',
+    { schema: { params: VISIT_ID_PARAMS, body: DisputeBodySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      await runIdempotent(db, request, reply, async () => {
+        const principal = requireUser(request.principal);
+        await visibleVisit(principal, request.params.id);
+        await disputeArrival(deps, {
+          principal,
+          requestId: request.id,
+          visitId: request.params.id,
+          note: request.body.note,
+        });
+        return { status: 200, body: await freshDto(request.params.id) };
+      });
+    },
+  );
+
+  // POST /v1/visits/:id/mark-left ★ — R-10 "My guest has left" (FR-45, F10).
+  api.post(
+    '/visits/:id/mark-left',
+    { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
+    async (request, reply) => {
+      await runIdempotent(db, request, reply, async () => {
+        const principal = requireUser(request.principal);
+        await visibleVisit(principal, request.params.id);
+        await hostMarksGuestLeft(deps, {
+          principal,
+          requestId: request.id,
+          visitId: request.params.id,
+        });
+        return { status: 200, body: await freshDto(request.params.id) };
+      });
+    },
+  );
+
+  // POST /v1/me/visits/:id/cancel — visitor cancels their own pending walk-in (SDD §12.7).
   api.post(
     '/me/visits/:id/cancel',
     { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
@@ -234,6 +489,7 @@ export async function registerHostVisitRoutes(
       if (!request.principal || request.principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to cancel a request.');
       }
+      await visibleVisit(request.principal, request.params.id);
       const updated = await cancelWalkIn(deps, {
         principal: request.principal,
         requestId: request.id,
@@ -242,4 +498,71 @@ export async function registerHostVisitRoutes(
       reply.send(visitDto(updated));
     },
   );
+
+  // GET /v1/me/quota?month=YYYY-MM (SDD §12.5).
+  api.get(
+    '/me/quota',
+    { schema: { querystring: QuotaQuerySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = requireUser(request.principal);
+      await residentOf(principal.userId);
+      const month =
+        request.query.month ?? toLocalDateString(clock.now(), rulesConfig.timezone).slice(0, 7);
+      reply.send(await quotaFor(deps, principal.userId, month));
+    },
+  );
+
+  // GET /v1/me/charges?status (SDD §12.5, R-14).
+  api.get(
+    '/me/charges',
+    { schema: { querystring: ChargesQuerySchema }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = requireUser(request.principal);
+      await residentOf(principal.userId);
+      const offset = decodeCursor(request.query.cursor);
+      const limit = request.query.limit;
+      let query = db
+        .selectFrom('haven.charges')
+        .select([
+          'id',
+          'kind',
+          'amount_inr',
+          'description',
+          'status',
+          'visit_id',
+          'created_at',
+          'receipt_no',
+        ])
+        .where('resident_id', '=', principal.userId);
+      if (request.query.status) query = query.where('status', '=', request.query.status);
+      const rows = await query
+        .orderBy('created_at', 'desc')
+        .orderBy('id')
+        .offset(offset)
+        .limit(limit + 1)
+        .execute();
+      const page = pageOf(rows, offset, limit);
+      const items: ChargeDTO[] = page.items.map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        amountInr: c.amount_inr,
+        description: c.description,
+        status: c.status,
+        visitId: c.visit_id,
+        createdAt: c.created_at.toISOString(),
+        receiptNo: c.receipt_no,
+      }));
+      reply.send({ items, nextCursor: page.nextCursor });
+    },
+  );
+
+  async function anyGateOf(hostelId: string): Promise<string> {
+    const gate = await db
+      .selectFrom('haven.gates')
+      .select('id')
+      .where('hostel_id', '=', hostelId)
+      .executeTakeFirst();
+    if (!gate) throw new AppError('INTERNAL', 500, 'This hostel has no gate.');
+    return gate.id;
+  }
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import supertest from 'supertest';
 import sharp from 'sharp';
@@ -24,7 +25,7 @@ const JWT_SECRET = Buffer.alloc(32, 1).toString('base64');
 const OTP_PEPPER = Buffer.alloc(32, 2).toString('base64');
 const DATA_ENCRYPTION_KEY_B64 = Buffer.alloc(32, 9).toString('base64');
 const DATA_ENCRYPTION_KEY = parseDataEncryptionKey(DATA_ENCRYPTION_KEY_B64);
-const fakeMediaStorage: MediaStorage = { put: async () => undefined };
+const fakeMediaStorage: MediaStorage = { put: async () => undefined, get: async () => null };
 
 const db = getTestDb();
 const NOW = new Date('2026-10-12T10:42:00.000Z');
@@ -594,6 +595,7 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
       .post(`/v1/scan-sessions/${sessionId}/host-assisted-entry`)
       .set('Authorization', `Bearer ${hostToken}`)
       .set('X-Scan-Nonce', 'host-assist-nonce')
+      .set('Idempotency-Key', randomUUID())
       .send({
         guest: { name: 'Walk In Guest', gender: 'female' },
         type: 'day',

@@ -7,7 +7,6 @@ import type { Clock } from '../lib/clock.js';
 import { AppError } from '../lib/errors.js';
 import { sha256 } from '../lib/crypto.js';
 import { requireAuth } from '../auth/authenticate.js';
-import { authorize } from '../auth/policy.js';
 
 /**
  * HTTP routes for the guest-visible, non-gate parts of the visits surface: invite
@@ -21,7 +20,6 @@ import { authorize } from '../auth/policy.js';
  */
 
 const WINDOW_TOKEN_PARAMS = z.object({ token: z.string().min(1) });
-const VISIT_ID_PARAMS = z.object({ id: z.string().uuid() });
 const RoomSearchQuery = z.object({ hostelId: z.string().uuid(), number: z.string().min(1) });
 
 /** `+919876543210` -> `+91•••••43210` — SDD G-01: "invited phone shown as hint" / masked. */
@@ -112,39 +110,8 @@ export async function registerVisitRoutes(
     },
   );
 
-  // GET /v1/visits/:id — visit status (G-07/G-12/G-14/G-17).
-  api.get(
-    '/visits/:id',
-    { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
-    async (request, reply) => {
-      const row = await db
-        .selectFrom('haven.visits')
-        .selectAll()
-        .where('id', '=', request.params.id)
-        .executeTakeFirst();
-      if (!row) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
-      authorize(request.principal, 'visits.read', {
-        hostelId: row.hostel_id,
-        hostUserId: row.host_id,
-        visitorId: row.visitor_id,
-      });
-      const hostRow = await db
-        .selectFrom('haven.users')
-        .select('full_name')
-        .where('id', '=', row.host_id)
-        .executeTakeFirstOrThrow();
-      const hostelRow = await db
-        .selectFrom('haven.hostels')
-        .select('name')
-        .where('id', '=', row.hostel_id)
-        .executeTakeFirstOrThrow();
-      reply.send({
-        ...visitDto(row),
-        hostFirstName: hostRow.full_name.split(' ')[0],
-        hostelName: hostelRow.name,
-      });
-    },
-  );
+  // GET /v1/visits/:id lives in host-routes.ts: one handler serves the guest's status
+  // view and the host's full VisitDTO + timeline, and 404s for anyone else.
 
   // GET /v1/me/visits — G-17 "My visits" (today/upcoming/history cards, SDD §13.4).
   api.get('/me/visits', { preHandler: requireAuth }, async (request, reply) => {

@@ -26,6 +26,18 @@ import { parseDataEncryptionKey } from './lib/crypto.js';
 import { generateRequestId } from './lib/request-id.js';
 import { configureZodValidation, extractZodValidationIssues } from './lib/validation.js';
 import type { MediaStorage } from './gate/media.js';
+import { NotificationWorker } from './notify/worker.js';
+import { registerNotificationPolicies } from './notify/policy.js';
+import { registerNotificationRoutes } from './notify/routes.js';
+import { MediaUrlSigner } from './media/signing.js';
+import { registerMediaRoutes } from './media/routes.js';
+import { registerResidentPolicies, registerResidentRoutes } from './residents/routes.js';
+import {
+  ConsoleSmsSender,
+  ExpoPushSender,
+  type PushSender,
+  type SmsSender,
+} from './notify/senders.js';
 
 export interface BuildAppOptions {
   env: Env;
@@ -50,6 +62,9 @@ export interface BuildAppOptions {
   /** Where gate/profile photos are written (SDD §9.10). Real callers use
    * `server.ts`'s `LocalDiskMediaStorage`; tests can inject an in-memory fake. */
   mediaStorage: MediaStorage;
+  /** Delivery adapters for the notification worker; default to Expo push and console SMS. */
+  pushSender?: PushSender;
+  smsSender?: SmsSender;
 }
 
 const BOOT_TIME = new Date();
@@ -113,6 +128,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     options.googleVerifier ?? new RealGoogleIdTokenVerifier(env.GOOGLE_CLIENT_IDS);
   const revocationCache = new RevocationCache(db, clock);
   const dataEncryptionKey = parseDataEncryptionKey(env.DATA_ENCRYPTION_KEY);
+  const mediaSigner = new MediaUrlSigner(env.JWT_SECRET, env.API_BASE_URL, clock);
 
   const app = Fastify({
     // Cast: our pino instance (packages' own pino types) is runtime-compatible with
@@ -235,9 +251,24 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     version: process.env.npm_package_version ?? '0.0.0',
   }));
 
-  // GET /ready — 200 only if the DB answers `select 1` within 1s (SDD §12.10).
-  // The "worker loop ran in the last 30s" half of this check is added once the notify
-  // worker exists (M2/M3) — tracked, not forgotten; see docs/TRACEABILITY.md.
+  // Notification outbox worker (SDD §9.7) — only in the one instance with
+  // WORKER_ENABLED=true.
+  const worker = env.WORKER_ENABLED
+    ? new NotificationWorker({
+        db,
+        clock,
+        push: options.pushSender ?? new ExpoPushSender(env.EXPO_ACCESS_TOKEN),
+        sms: options.smsSender ?? new ConsoleSmsSender(env.APP_ENV),
+        logger,
+      })
+    : null;
+  if (worker) {
+    worker.start();
+    app.addHook('onClose', async () => worker.stop());
+  }
+
+  // GET /ready — 200 only if the DB answers `select 1` within 1s and, where this
+  // instance runs the worker, the worker loop ran in the last 30s (SDD §12.10).
   app.get('/ready', async (_request, reply) => {
     const dbOk = await Promise.race([
       checkDb(db),
@@ -249,6 +280,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return { ok: false, db: false, bootTime: BOOT_TIME.toISOString() };
     }
 
+    if (worker) {
+      const last = worker.lastTickAt;
+      const workerOk = last !== null && clock.now().getTime() - last.getTime() <= 30_000;
+      if (!workerOk) {
+        reply.status(503);
+        return { ok: false, db: true, worker: false, bootTime: BOOT_TIME.toISOString() };
+      }
+    }
+
     return { ok: true, db: true, bootTime: BOOT_TIME.toISOString() };
   });
 
@@ -257,6 +297,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // in later milestones.
   registerVisitPolicies();
   registerGatePolicies();
+  registerNotificationPolicies();
+  registerResidentPolicies();
 
   await app.register(
     async (v1) => {
@@ -268,12 +310,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         mediaStorage: options.mediaStorage,
       });
       await registerVisitRoutes(v1, { db, clock });
-      await registerHostVisitRoutes(v1, { db, clock });
+      await registerHostVisitRoutes(v1, {
+        db,
+        clock,
+        signer: mediaSigner,
+        webBaseUrl: env.WEB_BASE_URL,
+      });
+      await registerMediaRoutes(v1, { db, storage: options.mediaStorage, signer: mediaSigner });
+      await registerNotificationRoutes(v1, { db, clock });
+      await registerResidentRoutes(v1, { db, clock, mediaStorage: options.mediaStorage });
       await registerGateRoutes(v1, {
         db,
         clock,
         dataEncryptionKey,
         mediaStorage: options.mediaStorage,
+        webBaseUrl: env.WEB_BASE_URL,
       });
     },
     { prefix: '/v1' },

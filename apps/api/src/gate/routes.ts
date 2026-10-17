@@ -15,8 +15,11 @@ import {
   createWalkIn,
   type VisitServiceDeps,
 } from '../visits/service.js';
+import { requestHostLocationConfirmation } from '../visits/host-actions.js';
+import { runIdempotent } from '../lib/idempotency.js';
 import { createPairingCode, pairDevice, recordHeartbeat, revokeDevice } from './devices.js';
 import { storeGatePhoto, type MediaStorage } from './media.js';
+import { consumeScanSession } from './repository.js';
 import {
   consumeSession,
   createScanSession,
@@ -120,6 +123,7 @@ export interface GateRoutesOptions {
   clock: Clock;
   dataEncryptionKey: Buffer;
   mediaStorage: MediaStorage;
+  webBaseUrl?: string;
 }
 
 export async function registerGateRoutes(
@@ -133,6 +137,7 @@ export async function registerGateRoutes(
     clock,
     rulesConfig: GH8_RULES_CONFIG_V1,
     rulesVersion: 1,
+    webBaseUrl: opts.webBaseUrl,
   };
   const api = app.withTypeProvider<ZodTypeProvider>();
 
@@ -285,41 +290,19 @@ export async function registerGateRoutes(
 
       // SDD §12.8: "evaluateEntry -> if gpsOk is false and the visit isn't already
       // host-confirmed, set result = awaiting_host_confirmation, store the photo on
-      // the session, notify host (N-CONFIRM-LOCATION), return -- else [complete
-      // entry]." The visits-service `checkIn` (built before the gate module existed)
-      // always completes the entry once rules pass; it has no "wait for host" branch.
-      // Adding that status to the visit state machine is Resident-app-approval work
-      // (out of scope here, per the task's own deferral of host-side UI) — this
-      // short-circuits *before* calling it, so an unconfirmed low-GPS check-in
-      // genuinely does not transition the visit, matching the SDD response contract.
-      // It does skip the rules-engine checks (cutoffs, host-verified, ...) that the
-      // completing path still gets via `checkIn` itself — a disclosed simplification,
-      // not silent, since real rule enforcement happens anyway once a future
-      // host-confirm action actually completes the entry.
+      // the session, notify host (N-CONFIRM-LOCATION), return". The visit stays
+      // `approved` and the session is linked to it; the host's confirm-arrival
+      // (`POST /visits/{id}/confirm-arrival`) completes the entry (SDD F3 step 4).
       if (!session.gps_ok) {
-        const visit = await db
-          .selectFrom('haven.visits')
-          .selectAll()
-          .where('id', '=', request.body.visitId)
-          .executeTakeFirst();
-        if (!visit) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
-        if (!visit.host_confirmed_at) {
-          await setSessionPhoto(db, session.id, request.body.photoId);
-          await db
-            .insertInto('haven.notifications')
-            .values({
-              hostel_id: visit.hostel_id,
-              recipient_type: 'user',
-              recipient_id: visit.host_id,
-              kind: 'N-CONFIRM-LOCATION',
-              channel: 'push',
-              visit_id: visit.id,
-              body: "Your guest is at the gate but we couldn't confirm their location.",
-            })
-            .execute();
-          reply.send({ visit: visitDto(visit), result: 'awaiting_host_confirmation' });
-          return;
-        }
+        const visit = await requestHostLocationConfirmation(visitDeps, {
+          principal: request.principal,
+          requestId: request.id,
+          visitId: request.body.visitId,
+          scanSessionId: session.id,
+          photoMediaId: request.body.photoId,
+        });
+        reply.send({ visit: visitDto(visit), result: 'awaiting_host_confirmation' });
+        return;
       }
 
       const updated = await checkIn(visitDeps, {
@@ -334,10 +317,9 @@ export async function registerGateRoutes(
           accuracyM: session.accuracy_m,
           photoMediaId: request.body.photoId,
         },
+        onEntered: (trx, entered) =>
+          consumeScanSession(trx, session.id, 'check_in', clock.now(), entered.id),
       });
-      await db
-        .transaction()
-        .execute((trx) => consumeSession(trx, clock, session.id, 'check_in', updated.id));
 
       reply.send({ visit: visitDto(updated), result: 'inside' });
     },
@@ -410,6 +392,7 @@ export async function registerGateRoutes(
         guestGender: null,
         windowStart: now,
         windowEnd,
+        locationVerified: session.gps_ok,
       });
       // The scan session stays queryable (not deleted) after being marked consumed,
       // linked to this visit (`visit_id`) — the host's later approval needs its GPS
@@ -430,41 +413,47 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'user') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a resident to check in a guest.');
       }
-      const nonce = scanNonceFrom(request);
-      const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
-        hostUserId: request.principal.userId,
-      });
-      const hostResident = await db
-        .selectFrom('haven.residents')
-        .select(['hostel_id', 'status'])
-        .where('user_id', '=', request.principal.userId)
-        .executeTakeFirst();
-      if (!hostResident || hostResident.status !== 'verified') {
-        throw new AppError('FORBIDDEN', 403, 'Only a verified resident can do this.');
-      }
+      const principal = request.principal;
+      await runIdempotent(db, request, reply, async () => {
+        const nonce = scanNonceFrom(request);
+        const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
+          hostUserId: principal.userId,
+        });
+        const hostResident = await db
+          .selectFrom('haven.residents')
+          .select(['hostel_id'])
+          .where('user_id', '=', principal.userId)
+          .executeTakeFirst();
+        // Not a resident at all: nothing to host from. A pending/suspended resident
+        // is answered by the rules engine (HOST_NOT_VERIFIED / HOST_SUSPENDED, 422).
+        if (!hostResident) throw new AppError('FORBIDDEN', 403, 'Only residents can host guests.');
 
-      const now = clock.now();
-      const windowEnd = new Date(now.getTime() + request.body.durationMinutes * 60_000);
-      const visit = await createHostAssistedEntry(visitDeps, {
-        principal: request.principal,
-        requestId: request.id,
-        hostUserId: request.principal.userId,
-        hostelId: hostResident.hostel_id,
-        hostelGender: GH8_RULES_CONFIG_V1.hostel_gender,
-        type: request.body.type,
-        invitedName: request.body.guest.name,
-        invitedPhone: request.body.guest.phone ?? null,
-        invitedGender: request.body.guest.gender,
-        windowStart: now,
-        windowEnd,
-        gateId: session.gate_id,
-        photoMediaId: request.body.photoId,
+        const now = clock.now();
+        const windowEnd = new Date(now.getTime() + request.body.durationMinutes * 60_000);
+        const visit = await createHostAssistedEntry(visitDeps, {
+          principal,
+          requestId: request.id,
+          hostUserId: principal.userId,
+          hostelId: hostResident.hostel_id,
+          hostelGender: GH8_RULES_CONFIG_V1.hostel_gender,
+          type: request.body.type,
+          invitedName: request.body.guest.name,
+          invitedPhone: request.body.guest.phone ?? null,
+          invitedGender: request.body.guest.gender,
+          windowStart: now,
+          windowEnd,
+          gateId: session.gate_id,
+          photoMediaId: request.body.photoId,
+          scanSessionId: session.id,
+          locationVerified: session.gps_ok,
+          distanceM: session.distance_m,
+          accuracyM: session.accuracy_m,
+        });
+        await db
+          .transaction()
+          .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted', visit.id));
+        return { status: 201, body: { visit: visitDto(visit) } };
       });
-      await db
-        .transaction()
-        .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted', visit.id));
-
-      reply.status(201).send({ visit: visitDto(visit) });
     },
   );
 
@@ -476,29 +465,31 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'user') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a resident to check out a guest.');
       }
-      const nonce = scanNonceFrom(request);
-      const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
-        hostUserId: request.principal.userId,
-      });
+      const principal = request.principal;
+      await runIdempotent(db, request, reply, async () => {
+        const nonce = scanNonceFrom(request);
+        const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
+          hostUserId: principal.userId,
+        });
 
-      const updated = await checkOut(visitDeps, {
-        principal: request.principal,
-        requestId: request.id,
-        visitId: request.body.visitId,
-        gate: {
-          gateId: session.gate_id,
-          scanSessionId: session.id,
-          locationVerified: session.gps_ok,
-          distanceM: session.distance_m,
-          accuracyM: session.accuracy_m,
-          photoMediaId: null,
-        },
+        const updated = await checkOut(visitDeps, {
+          principal,
+          requestId: request.id,
+          visitId: request.body.visitId,
+          gate: {
+            gateId: session.gate_id,
+            scanSessionId: session.id,
+            locationVerified: session.gps_ok,
+            distanceM: session.distance_m,
+            accuracyM: session.accuracy_m,
+            photoMediaId: null,
+          },
+        });
+        await db
+          .transaction()
+          .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted', updated.id));
+        return { status: 200, body: { visit: visitDto(updated) } };
       });
-      await db
-        .transaction()
-        .execute((trx) => consumeSession(trx, clock, session.id, 'host_assisted', updated.id));
-
-      reply.send({ visit: visitDto(updated) });
     },
   );
 

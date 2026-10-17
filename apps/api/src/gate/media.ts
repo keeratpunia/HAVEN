@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
@@ -28,6 +28,8 @@ const JPEG_QUALITY = 80;
 
 export interface MediaStorage {
   put(path: string, bytes: Buffer): Promise<void>;
+  /** Null when the object doesn't exist (deleted by retention, or never stored). */
+  get(path: string): Promise<Buffer | null>;
 }
 
 export class LocalDiskMediaStorage implements MediaStorage {
@@ -37,6 +39,14 @@ export class LocalDiskMediaStorage implements MediaStorage {
     const fullPath = join(this.rootDir, path);
     await mkdir(dirname(fullPath), { recursive: true });
     await writeFile(fullPath, bytes);
+  }
+
+  async get(path: string): Promise<Buffer | null> {
+    try {
+      return await readFile(join(this.rootDir, path));
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -187,6 +197,27 @@ export interface StoreVisitorProfilePhotoParams {
   clock: Clock;
   raw: Buffer;
   visitorId: string;
+}
+
+/** `resident-docs/{userId}/{mediaId}.jpg` (SDD §9.11) — ID card photo and resident selfie. */
+export async function storeResidentDocument(params: {
+  db: Kysely<Database>;
+  storage: MediaStorage;
+  clock: Clock;
+  raw: Buffer;
+  userId: string;
+  kind: 'resident_id_card' | 'resident_selfie';
+}): Promise<{ photoId: string }> {
+  return storePhoto({
+    db: params.db,
+    storage: params.storage,
+    clock: params.clock,
+    raw: params.raw,
+    kind: params.kind,
+    bucket: 'resident-docs',
+    path: (mediaId) => `${params.userId}/${mediaId}.jpg`,
+    ownerUserId: params.userId,
+  });
 }
 
 /** `POST /v1/me/profile-photo` (SDD §9.4). */

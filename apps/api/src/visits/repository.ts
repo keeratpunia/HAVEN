@@ -1,4 +1,4 @@
-import type { Transaction } from 'kysely';
+import type { Kysely, Transaction } from 'kysely';
 import type { Database } from '../db/index.js';
 import type {
   Gender,
@@ -168,6 +168,8 @@ export interface UpdateVisitStatusParams {
     cancelReason: string | null;
     exitLocationUnverified: boolean;
     locationUnverified: boolean;
+    windowStart: Date;
+    windowEnd: Date;
   }>;
 }
 
@@ -229,6 +231,10 @@ export async function updateVisitStatus(
         ...(patch.locationUnverified !== undefined
           ? { location_unverified: patch.locationUnverified }
           : {}),
+        ...(patch.windowStart !== undefined
+          ? { window_start: patch.windowStart.toISOString() }
+          : {}),
+        ...(patch.windowEnd !== undefined ? { window_end: patch.windowEnd.toISOString() } : {}),
       })
       .where('id', '=', params.id)
       .where('status', '=', params.expectedStatus)
@@ -257,9 +263,13 @@ export async function findVisitById(
   return trx.selectFrom('haven.visits').selectAll().where('id', '=', id).executeTakeFirst();
 }
 
-/** Active (approved/inside) overnight_room bookings for a host — for BR-05/BR-06. */
+/**
+ * A host's overnight_room bookings that count for BR-05/BR-06: approved and inside
+ * (upcoming/current — they can overlap), plus completed (nights already stayed still
+ * use up that month's quota: "max 3 nights per host per calendar month").
+ */
 export async function findActiveOvernightBookings(
-  trx: Transaction<Database>,
+  trx: Transaction<Database> | Kysely<Database>,
   hostId: string,
 ): Promise<{ windowStart: Date; windowEnd: Date }[]> {
   const rows = await trx
@@ -267,7 +277,7 @@ export async function findActiveOvernightBookings(
     .select(['window_start', 'window_end'])
     .where('host_id', '=', hostId)
     .where('type', '=', 'overnight_room')
-    .where('status', 'in', ['approved', 'inside'])
+    .where('status', 'in', ['approved', 'inside', 'completed'])
     .execute();
   return rows.map((r) => ({ windowStart: r.window_start, windowEnd: r.window_end }));
 }

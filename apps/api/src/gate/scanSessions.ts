@@ -115,6 +115,7 @@ export async function createScanSession(
     distanceM: geofence.distanceM,
     gpsOk: geofence.gpsOk,
     gpsFailure: geofence.gpsFailure,
+    createdAt: now,
     expiresAt,
     ip: params.ip,
     userAgent: params.userAgent,

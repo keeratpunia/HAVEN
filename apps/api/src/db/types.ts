@@ -373,6 +373,40 @@ interface NotificationsTable {
   created_at: Generated<Date>;
 }
 
+interface PushTokensTable {
+  id: Generated<string>;
+  user_id: string;
+  expo_token: string;
+  platform: 'android' | 'ios' | 'web';
+  created_at: Generated<Date>;
+  last_seen_at: Generated<Date>;
+  disabled_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
+}
+
+interface AuditLogTable {
+  id: Generated<number>;
+  at: Generated<Date>;
+  actor_type: ActorType;
+  actor_id: string | null;
+  hostel_id: string | null;
+  action: string;
+  entity: string;
+  entity_id: string | null;
+  before: unknown;
+  after: unknown;
+  ip: string | null;
+  request_id: string | null;
+}
+
+interface IdempotencyKeysTable {
+  key: string;
+  principal_id: string;
+  route: string;
+  status_code: number;
+  response: unknown;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
   'haven.hostels': HostelsTable;
   'haven.rooms': RoomsTable;
@@ -394,4 +428,7 @@ export interface Database {
   'haven.gate_events': GateEventsTable;
   'haven.charges': ChargesTable;
   'haven.notifications': NotificationsTable;
+  'haven.push_tokens': PushTokensTable;
+  'haven.idempotency_keys': IdempotencyKeysTable;
+  'haven.audit_log': AuditLogTable;
 }

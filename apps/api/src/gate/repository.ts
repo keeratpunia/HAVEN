@@ -65,6 +65,8 @@ export interface InsertScanSessionParams {
   distanceM: number | null;
   gpsOk: boolean;
   gpsFailure: GpsFailure | null;
+  /** From the injected Clock — the scan time cut-offs are judged at (SDD E-05). */
+  createdAt: Date;
   expiresAt: Date;
   ip: string | null;
   userAgent: string | null;
@@ -92,6 +94,7 @@ export async function insertScanSession(
       ip: params.ip,
       user_agent: params.userAgent,
       expires_at: params.expiresAt.toISOString(),
+      created_at: params.createdAt,
     })
     .returningAll()
     .executeTakeFirstOrThrow() as Promise<ScanSessionRow>;

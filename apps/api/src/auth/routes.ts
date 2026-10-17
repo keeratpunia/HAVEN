@@ -23,6 +23,7 @@ import { requireAuth } from './authenticate.js';
 import { authorize } from './policy.js';
 import { registerAuthPolicies } from './policy-rules.js';
 import { storeVisitorProfilePhoto, type MediaStorage } from '../gate/media.js';
+import { loadResidentProfile } from '../residents/service.js';
 
 export interface AuthRoutesOptions {
   env: Env;
@@ -279,6 +280,7 @@ export async function registerAuthRoutes(
         phoneVerified: row.phone_verified_at !== null,
         roles: principal.roles,
         residentStatus,
+        resident: await loadResidentProfile(db, principal.userId),
       });
       return;
     }

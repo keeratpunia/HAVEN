@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import supertest from 'supertest';
 import sharp from 'sharp';
@@ -24,7 +25,7 @@ const JWT_SECRET = Buffer.alloc(32, 1).toString('base64');
 const OTP_PEPPER = Buffer.alloc(32, 2).toString('base64');
 const DATA_ENCRYPTION_KEY_B64 = Buffer.alloc(32, 9).toString('base64');
 const DATA_ENCRYPTION_KEY = parseDataEncryptionKey(DATA_ENCRYPTION_KEY_B64);
-const fakeMediaStorage: MediaStorage = { put: async () => undefined };
+const fakeMediaStorage: MediaStorage = { put: async () => undefined, get: async () => null };
 
 const db = getTestDb();
 const NOW = new Date('2026-10-12T10:42:00.000Z');
@@ -192,7 +193,8 @@ describe('host visits routes (SDD §12.6) end to end', () => {
       .get('/v1/me/hosted-visits')
       .set('Authorization', `Bearer ${hostToken}`);
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(1);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.nextCursor).toBeNull();
   });
 
   it('approving a walk-in reuses the original scan session’s GPS facts and checks the guest in', async () => {
@@ -234,6 +236,7 @@ describe('host visits routes (SDD §12.6) end to end', () => {
     const hostToken = await issueToken(clock, { type: 'user', id: hostId });
     const approveRes = await supertest(app.server)
       .post(`/v1/visits/${visitId}/approve`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${hostToken}`)
       .send({});
     expect(approveRes.status).toBe(200);
@@ -278,6 +281,7 @@ describe('host visits routes (SDD §12.6) end to end', () => {
     const hostToken = await issueToken(clock, { type: 'user', id: hostId });
     const rejectRes = await supertest(app.server)
       .post(`/v1/visits/${visitId}/reject`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${hostToken}`)
       .send({});
     expect(rejectRes.status).toBe(200);

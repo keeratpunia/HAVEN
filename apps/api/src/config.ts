@@ -9,10 +9,10 @@ import { z } from 'zod';
  * `JWT_SECRET` was added in the API-foundation milestone because the authentication
  * hook (`apps/api/src/auth/jwt.ts`) now actually verifies tokens with it. `OTP_PEPPER`,
  * `GOOGLE_CLIENT_IDS`, and `SMS_PROVIDER` were added in the authentication milestone
- * because the OTP and Google sign-in handlers now use them. Still not validated here:
- * DATA_ENCRYPTION_KEY, EXPO_ACCESS_TOKEN, TURNSTILE_SECRET, SENTRY_DSN,
- * WORKER_ENABLED — those wait for the gate/notify milestones that actually make the
- * *server* use them.
+ * because the OTP and Google sign-in handlers now use them. `WORKER_ENABLED` and
+ * `EXPO_ACCESS_TOKEN` were added in the resident-app milestone, when the notification
+ * worker started delivering push. Still not validated here: TURNSTILE_SECRET,
+ * SENTRY_DSN — they wait for the milestones that make the *server* use them.
  *
  * `SEED_SUPER_ADMIN_EMAIL`/`SEED_WARDEN_EMAIL` are deliberately NOT here even though
  * `apps/api/scripts/seed.ts` needs them now — the seed script is a separate process
@@ -102,6 +102,17 @@ const EnvSchema = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((value) => value === 'true'),
+
+  // Notification outbox worker (SDD §9.7): "in the API process when
+  // WORKER_ENABLED=true" — exactly one running instance must have it on. Defaults off
+  // so a test or a second replica never starts a competing loop by accident.
+  WORKER_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  // Expo push access token (SDD §20.3). Optional: Expo accepts unauthenticated sends
+  // unless the project enables "enhanced security for push".
+  EXPO_ACCESS_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

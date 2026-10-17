@@ -12,7 +12,7 @@ const VALID_OTP_PEPPER = Buffer.alloc(32, 3).toString('base64');
 const VALID_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
 
 /** No business route in this file touches media; a no-op fake is enough. */
-const fakeMediaStorage: MediaStorage = { put: async () => undefined };
+const fakeMediaStorage: MediaStorage = { put: async () => undefined, get: async () => null };
 
 function testEnv(overrides: Record<string, string> = {}) {
   __resetEnvCacheForTests();
