@@ -13,6 +13,7 @@ export { evaluateEntry } from './evaluate-entry.js';
 export { evaluateExit } from './evaluate-exit.js';
 export { monthsTouched, nightsBetween, quotaUsed } from './nights.js';
 export { computeZone, isOppositeGender } from './zone.js';
+export { localDateTimeToUtc, toLocalDateString } from './time.js';
 
 export type {
   CreateContext,
