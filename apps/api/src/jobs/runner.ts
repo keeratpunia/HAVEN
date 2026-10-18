@@ -31,6 +31,7 @@ export type JobName =
   | 'job_expire_sessions'
   | 'job_night_sweep'
   | 'job_retention'
+  | 'job_daily_digest'
   | 'media_purge'
   | 'push_receipts'
   | 'account_deletion';
@@ -44,6 +45,8 @@ const SQL_JOBS = {
   job_expire_sessions: (now: Date) => sql`select haven.job_expire_sessions(${now})`,
   job_night_sweep: (now: Date) => sql`select haven.job_night_sweep(${now})`,
   job_retention: (now: Date) => sql`select haven.job_retention(${now})`,
+  // FR-60, team-approved addition to the catalogue (docs/DECISIONS.md DEC-016).
+  job_daily_digest: (now: Date) => sql`select haven.job_daily_digest(${now})`,
 } as const;
 type SqlJobName = keyof typeof SQL_JOBS;
 
@@ -67,6 +70,7 @@ export const SDD_JOBS: Job[] = [
   { fn: 'job_expire_sessions', every: 60 },
   { fn: 'job_night_sweep', dailyIst: '22:00' },
   { fn: 'job_retention', dailyIst: '03:00' },
+  { fn: 'job_daily_digest', dailyIst: '08:00' },
   { fn: 'media_purge', every: 60 },
   { fn: 'push_receipts', every: 5 },
   { fn: 'account_deletion', every: 15 },

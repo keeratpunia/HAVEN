@@ -1198,7 +1198,7 @@ Source for all of Part 1: SDD §2.7.
       - revokes every session and push token;
       - writes `account.deleted` to the audit log.
       Visit rows keep their ids, so the host's record survives.
-- **Proposed copy — not in §13.6; awaiting the team's approval** (keys in
+- **Proposed copy — not in §13.6; APPROVED by the team in DEC-016** (keys in
   `packages/shared/src/copy/en.ts`). The button label "Delete my account" and the
   sheet's "Reason (optional)" field are the only fixed UI strings.
   - `ACCOUNT_DELETE_CONFIRM_GUEST`: "Delete your account?" / "You'll be signed out
@@ -1218,7 +1218,7 @@ Source for all of Part 1: SDD §2.7.
     out."
   - `ACCOUNT_DELETION_UNPAID`: "Clear your charges first" / "You owe ₹{amount}. You
     can delete your account once the warden's office marks it paid."
-- **FR-60 daily digest — deferred, needs a decision.** The brief says to build it
+- **FR-60 daily digest — deferred, needs a decision. (Resolved: approved and built, DEC-016.)** The brief says to build it
   only once everything else is done; it would be next. But §15.2 has no kind or text
   for it, and "Anything not in this table must not be sent", so it isn't built
   without approved text. Proposal: kind `N-DIGEST`, push (alerts) to each warden at
@@ -1243,6 +1243,49 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** No. Item 3 needs §15.2 changed to the §15.3 text. Items 21–26
   fill gaps in §16.6 and §12.4. The proposed copy and the FR-60 text need approval
   before they become SDD text.
+
+### DEC-016 — Team decisions on DEC-015: deletion copy, daily digest, overstay SMS, SMS phone retention
+
+- **Date:** 2026-10-18
+- **Decided by:** the team, on the open items in DEC-015.
+- **Decision:**
+  1. **Account-deletion copy approved as proposed.** The six DEC-015 strings
+     (`ACCOUNT_DELETE_CONFIRM_GUEST`, `ACCOUNT_DELETE_CONFIRM_RESIDENT`,
+     `ACCOUNT_DELETION_REQUESTED`, `ACCOUNT_DELETION_WAITS_INSIDE`,
+     `ACCOUNT_DELETION_WAITS_UPCOMING`, `ACCOUNT_DELETION_UNPAID`) are approved
+     product copy. They are marked so in `packages/shared/src/copy/en.ts`.
+  2. **FR-60 daily digest built with the proposed text.** The SDD lacked this string:
+     §15.2 has no row for FR-60. `N-DIGEST` is a team-approved addition to the
+     catalogue:
+     - to each warden, push (alerts channel), 08:00 IST (`30 2 * * *` UTC);
+     - title "Yesterday at {hostelCode}";
+     - body "{visits} visits · {disputes} disputed · {overstays} overstayed ·
+       {unverified} location not verified · {forced} forced check-outs.";
+     - tap opens W-12 for that day.
+
+     "Yesterday" is the hostel's local calendar day. The counts are:
+     - visits whose first entry fell in it;
+     - visits disputed in it;
+     - visits flagged as overstaying in it;
+     - gate entries with location not verified;
+     - forced check-outs.
+
+     One push per warden per day. Built as `haven.job_daily_digest(p_now)`
+     (migration 20261020000002), run by pg_cron or the JobRunner. **§15.2 must gain
+     this row.**
+  3. **Overstay guest SMS keeps the §15.3 DLT template text** ("Your HAVEN visit
+     ended at {#var#}. Please check out at the gate now."). **§15.2's N-OVERSTAY-GUEST
+     body must be corrected to match**; the template is what the operator accepts.
+  4. **SMS recipient phones aren't kept indefinitely.** Once an SMS row is past the
+     §16.5 notifications period (90 days) and can no longer be sent (sent, failed or
+     cancelled), retention nulls `recipient_phone` along with the body.
+     - The table check now requires the phone only while the row is queued or sending
+       (migration 20261020000001).
+     - The job change is in migration 20261020000003.
+     - Tested in `apps/api/test/retention.integration.test.ts`.
+- **SDD updated?** Not yet. Items 2 and 3 are recorded as required SDD corrections
+  (§15.2 gains N-DIGEST; §15.2's N-OVERSTAY-GUEST text changes to the §15.3 template).
+  The deletion copy becomes §13.6 text at the next revision.
 
 Template for a new entry:
 

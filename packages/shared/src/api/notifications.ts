@@ -38,7 +38,9 @@ export type NotificationKind =
   | 'N-RES-DECIDED'
   | 'N-GATE-OFFLINE'
   | 'N-CHARGE'
-  | 'N-HOST-SUSPENDED';
+  | 'N-HOST-SUSPENDED'
+  // FR-60 daily digest: not in SDD §15.2; added with the team's approval (DEC-016).
+  | 'N-DIGEST';
 
 /** SDD §15.1 Android channels. */
 export type AndroidChannelId = 'approvals' | 'alerts' | 'updates';
@@ -66,6 +68,7 @@ export function channelForKind(kind: string): AndroidChannelId {
     case 'N-NIGHT-SWEEP':
     case 'N-NIGHT-SWEEP-HOST':
     case 'N-GATE-OFFLINE':
+    case 'N-DIGEST':
       return 'alerts';
     default:
       return 'updates';
@@ -122,6 +125,12 @@ export function defaultScreenForKind(kind: string, visitId: string | null): stri
     case 'N-OVERNIGHT-REQ':
     case 'N-RES-SUBMITTED':
       return WARDEN_SCREENS.approvals;
+    case 'N-NIGHT-SWEEP':
+      return '/warden/inside';
+    case 'N-GATE-OFFLINE':
+      return '/warden/gates';
+    case 'N-DIGEST':
+      return '/warden/reports';
     default:
       return visitId ? RESIDENT_SCREENS.visit(visitId) : RESIDENT_SCREENS.home;
   }

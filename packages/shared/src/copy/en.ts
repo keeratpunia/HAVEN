@@ -92,8 +92,8 @@ export const EN_COPY: Record<string, CopyEntry> = {
   },
 
   // ---- Account deletion (FR-09, SDD §16.6) ----
-  // The SDD names only the button, "Delete my account" (§16.6). Everything below is
-  // PROPOSED copy, not in §13.6 — docs/DECISIONS.md DEC-015, awaiting the team's approval.
+  // The SDD names only the button, "Delete my account" (§16.6). Everything below is not
+  // in §13.6: proposed in docs/DECISIONS.md DEC-015 and APPROVED by the team (DEC-016).
   ACCOUNT_DELETE_CONFIRM_GUEST: {
     title: 'Delete your account?',
     body: "You'll be signed out everywhere. Within 7 days we delete your photos and remove your name and phone number. Your hosts keep a record of past visits, without your details.",

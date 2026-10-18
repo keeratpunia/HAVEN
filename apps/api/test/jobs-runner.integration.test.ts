@@ -144,6 +144,7 @@ describe('JobRunner', () => {
       job_expire_sessions: 60,
       job_night_sweep: '22:00',
       job_retention: '03:00',
+      job_daily_digest: '08:00',
       media_purge: 60,
       push_receipts: 5,
       account_deletion: 15,
@@ -467,6 +468,81 @@ describe('FR-29 / §15.5: gate offline, at most one push per outage (job_gate_of
     await runner.run('job_gate_offline');
     await runner.run('job_gate_offline');
     expect(await notes('N-GATE-OFFLINE')).toHaveLength(4);
+  });
+});
+
+describe('FR-60: daily digest at 08:00 IST (job_daily_digest, DEC-016)', () => {
+  it("counts yesterday's IST day for each warden, once per day, and opens W-12 for that day", async () => {
+    const w = await hostelWorld();
+    const secondWarden = await makeUser('Second Warden');
+    await grant(secondWarden, 'warden', w.hostelId);
+    // Yesterday (17 Oct, IST): two entries, one unverified; one dispute, one overstay,
+    // one forced check-out. Plus one entry just before and one just after that day.
+    const day = async (start: string, extra: Record<string, unknown> = {}) => {
+      const id = await insertVisit({
+        w,
+        visitorId: await makeVisitor(db),
+        status: 'completed',
+        windowStart: ist(start),
+        windowEnd: new Date(ist(start).getTime() + 60 * MIN),
+      });
+      if (Object.keys(extra).length > 0) {
+        await db.updateTable('haven.visits').set(extra).where('id', '=', id).execute();
+      }
+      return id;
+    };
+    const a = await day('2026-10-17T00:10:00', {
+      host_disputed_at: ist('2026-10-17T00:20:00').toISOString(),
+    });
+    const b = await day('2026-10-17T23:50:00', {
+      overstay_since: ist('2026-10-17T23:55:00').toISOString(),
+      close_reason: 'forced',
+      closed_at: ist('2026-10-17T23:59:00').toISOString(),
+    });
+    await day('2026-10-16T23:59:00');
+    await day('2026-10-18T00:00:00');
+    for (const [visitId, verified] of [
+      [a, true],
+      [b, false],
+    ] as const) {
+      await db
+        .insertInto('haven.gate_events')
+        .values({
+          visit_id: visitId,
+          hostel_id: w.hostelId,
+          gate_id: w.gate.gateId,
+          kind: 'entry',
+          actor_type: 'visitor',
+          location_verified: verified,
+          at: (visitId === a
+            ? ist('2026-10-17T00:10:00')
+            : ist('2026-10-17T23:50:00')
+          ).toISOString(),
+        })
+        .execute();
+    }
+
+    clock.set(ist('2026-10-18T07:59:00'));
+    expect(await runner.tick()).not.toContain('job_daily_digest');
+    clock.set(ist('2026-10-18T08:00:00'));
+    expect(await runner.tick()).toContain('job_daily_digest');
+    await runner.run('job_daily_digest'); // a second run the same day adds nothing
+
+    const rows = await notes('N-DIGEST');
+    expect(rows.map((r) => r.recipient_id).sort()).toEqual([w.wardenId, secondWarden].sort());
+    const code = (
+      await db
+        .selectFrom('haven.hostels')
+        .select('code')
+        .where('id', '=', w.hostelId)
+        .executeTakeFirstOrThrow()
+    ).code;
+    expect(rows[0]).toMatchObject({
+      channel: 'push',
+      title: `Yesterday at ${code}`,
+      body: '2 visits · 1 disputed · 1 overstayed · 1 location not verified · 1 forced check-outs.',
+      data: { screen: '/warden/reports?from=2026-10-17&to=2026-10-17' },
+    });
   });
 });
 

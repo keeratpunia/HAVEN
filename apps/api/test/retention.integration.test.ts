@@ -312,6 +312,45 @@ describe('§16.5 retention (job_retention + media purge)', () => {
     expect(byId[young.id]).toMatchObject({ title: 'Asha Rani has arrived' });
   });
 
+  it('SMS rows past 90 days lose their recipient phone too, once they can no longer be sent (DEC-016)', async () => {
+    const sms = (createdAt: Date, status: 'sent' | 'queued') =>
+      db
+        .insertInto('haven.notifications')
+        .values({
+          recipient_type: 'phone',
+          recipient_phone: '+919812300077',
+          kind: 'N-OVERSTAY-GUEST',
+          channel: 'sms',
+          body: 'Your HAVEN visit ended at 4:30 pm. Please check out at the gate now.',
+          sms_template_id: 'HAVEN_OVERSTAY',
+          status,
+          created_at: createdAt.toISOString(),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    const oldSent = await sms(ago(90), 'sent');
+    const youngSent = await sms(ago(90, 60_000), 'sent');
+
+    await runner.run('job_retention');
+    const rows = await db
+      .selectFrom('haven.notifications')
+      .select(['id', 'recipient_phone', 'body'])
+      .where('id', 'in', [oldSent.id, youngSent.id])
+      .execute();
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId[oldSent.id]).toMatchObject({ recipient_phone: null, body: '' });
+    expect(byId[youngSent.id]?.recipient_phone).toBe('+919812300077');
+    // A row that can still be sent must keep its phone: the constraint still holds there.
+    const queued = await sms(ago(1), 'queued');
+    await expect(
+      db
+        .updateTable('haven.notifications')
+        .set({ recipient_phone: null })
+        .where('id', '=', queued.id)
+        .execute(),
+    ).rejects.toThrow(/notifications_check/);
+  });
+
   it('records what it did in the audit log, without personal data (FR-74)', async () => {
     await guest(ago(365));
     await runner.run('job_retention');

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocalSearchParams } from 'expo-router';
 import { View } from 'react-native';
 import { plusDays, toLocalDateString, VISIT_TYPE_LABELS, type ReportDTO } from '@haven/shared';
 import * as api from '../../api/client.js';
@@ -21,8 +22,10 @@ const today = toLocalDateString(new Date(), 'Asia/Kolkata');
 
 export default function Reports() {
   const { hostel } = useStaff();
-  const [from, setFrom] = useState(plusDays(today, -30));
-  const [to, setTo] = useState(today);
+  // The FR-60 daily digest opens this screen for one day (?from=&to=).
+  const params = useLocalSearchParams<{ from?: string; to?: string }>();
+  const [from, setFrom] = useState(params.from ?? plusDays(today, -30));
+  const [to, setTo] = useState(params.to ?? today);
   const [report, setReport] = useState<ReportDTO | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
