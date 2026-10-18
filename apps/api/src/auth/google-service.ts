@@ -5,6 +5,7 @@ import { sha256 } from '../lib/crypto.js';
 import type { Clock } from '../lib/clock.js';
 import type { GoogleIdTokenVerifier } from './google.js';
 import type { RoleGrant } from './jwt.js';
+import { loadUserRoles } from './principal-loader.js';
 
 /**
  * Resident/staff Google sign-in (SDD §9.5, §9.6, F11): verify the ID token, require
@@ -96,7 +97,7 @@ export async function signInWithGoogle(
 
   const pendingInvites = await trx
     .selectFrom('haven.staff_invites')
-    .select(['id', 'hostel_id', 'role'])
+    .select(['id', 'hostel_id', 'role', 'invited_by'])
     .where('email', '=', verified.email)
     .where('accepted_at', 'is', null)
     .where('revoked_at', 'is', null)
@@ -104,10 +105,31 @@ export async function signInWithGoogle(
     .execute();
 
   for (const invite of pendingInvites) {
-    await trx
-      .insertInto('haven.role_assignments')
-      .values({ user_id: userId, hostel_id: invite.hostel_id, role: invite.role })
-      .execute();
+    // An invite for a role the user already holds there is accepted without a
+    // duplicate grant (role_assignments_active_uq).
+    const held = await trx
+      .selectFrom('haven.role_assignments')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where('role', '=', invite.role)
+      .where('revoked_at', 'is', null)
+      .where((eb) =>
+        invite.hostel_id === null
+          ? eb('hostel_id', 'is', null)
+          : eb('hostel_id', '=', invite.hostel_id),
+      )
+      .executeTakeFirst();
+    if (!held) {
+      await trx
+        .insertInto('haven.role_assignments')
+        .values({
+          user_id: userId,
+          hostel_id: invite.hostel_id,
+          role: invite.role,
+          granted_by: invite.invited_by,
+        })
+        .execute();
+    }
     await trx
       .updateTable('haven.staff_invites')
       .set({ accepted_by: userId, accepted_at: now.toISOString() })
@@ -115,15 +137,7 @@ export async function signInWithGoogle(
       .execute();
   }
 
-  const roleRows = await trx
-    .selectFrom('haven.role_assignments')
-    .select(['hostel_id', 'role'])
-    .where('user_id', '=', userId)
-    .where('revoked_at', 'is', null)
-    .execute();
-  const roles: RoleGrant[] = roleRows
-    .filter((row): row is { hostel_id: string; role: RoleGrant['r'] } => row.hostel_id !== null)
-    .map((row) => ({ h: row.hostel_id, r: row.role }));
+  const roles: RoleGrant[] = await loadUserRoles(trx, userId);
 
   return { userId, isNewUser, roles };
 }

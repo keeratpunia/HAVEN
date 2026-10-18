@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 import {
   displayName,
+  GH8_RULES_CONFIG_V1,
   maskPhone,
   type RulesConfig,
   type VisitAction,
@@ -25,7 +26,8 @@ export interface DtoDeps {
   db: Kysely<Database>;
   clock: Clock;
   signer: MediaUrlSigner;
-  rulesConfig: RulesConfig;
+  /** The hostel's current rules (only the dispute window is needed here). */
+  rulesFor: (hostelId: string) => Promise<RulesConfig>;
 }
 
 export async function buildHostVisitDtos(deps: DtoDeps, rows: VisitRow[]): Promise<VisitDTO[]> {
@@ -85,6 +87,9 @@ export async function buildHostVisitDtos(deps: DtoDeps, rows: VisitRow[]): Promi
   ]);
 
   const now = deps.clock.now();
+  const rulesByHostel = new Map(
+    await Promise.all(hostelIds.map(async (h) => [h, await deps.rulesFor(h)] as const)),
+  );
   const hostelById = new Map(hostels.map((h) => [h.id, h]));
   const hostById = new Map(hosts.map((h) => [h.id, h]));
   const visitorById = new Map(visitors.map((v) => [v.id, v]));
@@ -153,7 +158,12 @@ export async function buildHostVisitDtos(deps: DtoDeps, rows: VisitRow[]): Promi
       lastExitAt: row.last_exit_at?.toISOString() ?? null,
       latestPhoto: deps.signer.signOrNull(latestPhotoId),
       charge: charge ? { amountInr: charge.amount_inr, status: charge.status } : null,
-      allowedActions: hostAllowedActions(row, awaitingHostConfirmation, now, deps.rulesConfig),
+      allowedActions: hostAllowedActions(
+        row,
+        awaitingHostConfirmation,
+        now,
+        rulesByHostel.get(row.hostel_id) ?? GH8_RULES_CONFIG_V1,
+      ),
       hostConfirmedAt: row.host_confirmed_at?.toISOString() ?? null,
       awaitingHostConfirmation,
     };

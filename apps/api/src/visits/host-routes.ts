@@ -7,7 +7,6 @@ import {
   ChargesQuerySchema,
   CreateVisitBodySchema,
   DisputeBodySchema,
-  GH8_RULES_CONFIG_V1,
   HostedVisitsQuerySchema,
   nightsBetween,
   PatchVisitBodySchema,
@@ -53,6 +52,7 @@ import {
 import { buildHostVisitDtos, buildVisitEvents, type DtoDeps } from './dto.js';
 import { findVisitById, type VisitRow } from './repository.js';
 import { visitDto } from './routes.js';
+import type { RulesProvider } from '../rules/provider.js';
 import { findWalkInSessionForVisit } from '../gate/scanSessions.js';
 
 /**
@@ -69,6 +69,7 @@ export interface HostVisitRoutesOptions {
   clock: Clock;
   signer: MediaUrlSigner;
   webBaseUrl: string;
+  rules: RulesProvider;
 }
 
 function requireUser(principal: Principal | null | undefined): UserPrincipal {
@@ -83,15 +84,18 @@ export async function registerHostVisitRoutes(
   opts: HostVisitRoutesOptions,
 ): Promise<void> {
   const { db, clock, signer } = opts;
-  const rulesConfig = GH8_RULES_CONFIG_V1;
-  const deps: VisitServiceDeps = {
+  const dtoDeps: DtoDeps = {
     db,
     clock,
-    rulesConfig,
-    rulesVersion: 1,
-    webBaseUrl: opts.webBaseUrl,
+    signer,
+    rulesFor: async (h) => (await opts.rules.forHostel(h)).config,
   };
-  const dtoDeps: DtoDeps = { db, clock, signer, rulesConfig };
+
+  /** Service deps carrying the hostel's current rules version (SDD §4, E-13). */
+  async function depsFor(hostelId: string): Promise<VisitServiceDeps> {
+    const { config, version } = await opts.rules.forHostel(hostelId);
+    return { db, clock, rulesConfig: config, rulesVersion: version, webBaseUrl: opts.webBaseUrl };
+  }
   const api = app.withTypeProvider<ZodTypeProvider>();
 
   /** The caller's own resident row; 403 when the user isn't a resident at all. */
@@ -142,6 +146,7 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       const principal = requireUser(request.principal);
       const resident = await residentOf(principal.userId);
+      const deps = await depsFor(resident.hostel_id);
       reply.send(
         await previewVisit(deps, {
           principal,
@@ -160,6 +165,8 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       const principal = requireUser(request.principal);
       const resident = await residentOf(principal.userId);
+      const deps = await depsFor(resident.hostel_id);
+      const rulesConfig = deps.rulesConfig;
       const hostel = await db
         .selectFrom('haven.hostels')
         .select('gender_served')
@@ -309,7 +316,8 @@ export async function registerHostVisitRoutes(
     { schema: { params: VISIT_ID_PARAMS, body: PatchVisitBodySchema }, preHandler: requireAuth },
     async (request, reply) => {
       const principal = requireUser(request.principal);
-      await visibleVisit(principal, request.params.id);
+      const visit = await visibleVisit(principal, request.params.id);
+      const deps = await depsFor(visit.hostel_id);
       const updated = await editVisitWindow(deps, {
         principal,
         requestId: request.id,
@@ -328,6 +336,7 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       const principal = requireUser(request.principal);
       const visit = await visibleVisit(principal, request.params.id);
+      const deps = await depsFor(visit.hostel_id);
       if (visit.status === 'pending_warden') {
         await cancelOvernightRequest(deps, { principal, requestId: request.id, visitId: visit.id });
       } else if (visit.status === 'approved' && visit.first_entry_at === null) {
@@ -350,7 +359,8 @@ export async function registerHostVisitRoutes(
     { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
     async (request, reply) => {
       const principal = requireUser(request.principal);
-      await visibleVisit(principal, request.params.id);
+      const visit = await visibleVisit(principal, request.params.id);
+      const deps = await depsFor(visit.hostel_id);
       const { inviteToken } = await regenerateInviteLink(deps, {
         principal,
         requestId: request.id,
@@ -367,6 +377,7 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       await runIdempotent(db, request, reply, async () => {
         const visit = await visibleVisit(request.principal, request.params.id);
+        const deps = await depsFor(visit.hostel_id);
         if (visit.status === 'pending_warden') {
           await approveOvernight(deps, {
             principal: request.principal,
@@ -406,6 +417,7 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       await runIdempotent(db, request, reply, async () => {
         const visit = await visibleVisit(request.principal, request.params.id);
+        const deps = await depsFor(visit.hostel_id);
         if (visit.status === 'pending_warden') {
           await rejectOvernight(deps, {
             principal: request.principal,
@@ -433,7 +445,8 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       await runIdempotent(db, request, reply, async () => {
         const principal = requireUser(request.principal);
-        await visibleVisit(principal, request.params.id);
+        const visit = await visibleVisit(principal, request.params.id);
+        const deps = await depsFor(visit.hostel_id);
         await confirmArrival(deps, {
           principal,
           requestId: request.id,
@@ -451,7 +464,8 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       await runIdempotent(db, request, reply, async () => {
         const principal = requireUser(request.principal);
-        await visibleVisit(principal, request.params.id);
+        const visit = await visibleVisit(principal, request.params.id);
+        const deps = await depsFor(visit.hostel_id);
         await disputeArrival(deps, {
           principal,
           requestId: request.id,
@@ -470,7 +484,8 @@ export async function registerHostVisitRoutes(
     async (request, reply) => {
       await runIdempotent(db, request, reply, async () => {
         const principal = requireUser(request.principal);
-        await visibleVisit(principal, request.params.id);
+        const visit = await visibleVisit(principal, request.params.id);
+        const deps = await depsFor(visit.hostel_id);
         await hostMarksGuestLeft(deps, {
           principal,
           requestId: request.id,
@@ -489,7 +504,8 @@ export async function registerHostVisitRoutes(
       if (!request.principal || request.principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to cancel a request.');
       }
-      await visibleVisit(request.principal, request.params.id);
+      const visit = await visibleVisit(request.principal, request.params.id);
+      const deps = await depsFor(visit.hostel_id);
       const updated = await cancelWalkIn(deps, {
         principal: request.principal,
         requestId: request.id,
@@ -505,9 +521,11 @@ export async function registerHostVisitRoutes(
     { schema: { querystring: QuotaQuerySchema }, preHandler: requireAuth },
     async (request, reply) => {
       const principal = requireUser(request.principal);
-      await residentOf(principal.userId);
+      const resident = await residentOf(principal.userId);
+      const deps = await depsFor(resident.hostel_id);
       const month =
-        request.query.month ?? toLocalDateString(clock.now(), rulesConfig.timezone).slice(0, 7);
+        request.query.month ??
+        toLocalDateString(clock.now(), deps.rulesConfig.timezone).slice(0, 7);
       reply.send(await quotaFor(deps, principal.userId, month));
     },
   );

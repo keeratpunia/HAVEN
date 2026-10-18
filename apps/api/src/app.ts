@@ -30,6 +30,7 @@ import { NotificationWorker } from './notify/worker.js';
 import { registerNotificationPolicies } from './notify/policy.js';
 import { registerNotificationRoutes } from './notify/routes.js';
 import { MediaUrlSigner } from './media/signing.js';
+import { RulesProvider } from './rules/provider.js';
 import { registerMediaRoutes } from './media/routes.js';
 import { registerResidentPolicies, registerResidentRoutes } from './residents/routes.js';
 import {
@@ -129,6 +130,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const revocationCache = new RevocationCache(db, clock);
   const dataEncryptionKey = parseDataEncryptionKey(env.DATA_ENCRYPTION_KEY);
   const mediaSigner = new MediaUrlSigner(env.JWT_SECRET, env.API_BASE_URL, clock);
+  const rules = new RulesProvider(db);
 
   const app = Fastify({
     // Cast: our pino instance (packages' own pino types) is runtime-compatible with
@@ -315,6 +317,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         clock,
         signer: mediaSigner,
         webBaseUrl: env.WEB_BASE_URL,
+        rules,
       });
       await registerMediaRoutes(v1, { db, storage: options.mediaStorage, signer: mediaSigner });
       await registerNotificationRoutes(v1, { db, clock });
@@ -325,6 +328,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         dataEncryptionKey,
         mediaStorage: options.mediaStorage,
         webBaseUrl: env.WEB_BASE_URL,
+        rules,
       });
     },
     { prefix: '/v1' },

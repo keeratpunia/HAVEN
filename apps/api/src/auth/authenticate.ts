@@ -78,10 +78,13 @@ export function createAuthenticateHook(options: AuthenticateOptions) {
 
       if (options.revocationCache) {
         const userId = principal.type === 'user' ? principal.userId : null;
-        const valid = await options.revocationCache.isValid(principal.sessionId, userId);
-        if (!valid) {
+        const { isValid, roles } = await options.revocationCache.check(principal.sessionId, userId);
+        if (!isValid) {
           throw new AppError('SESSION_REVOKED', 401, 'Your session has been signed out.');
         }
+        // Roles come from role_assignments (SDD §3.4), not the token claim, which can be
+        // up to 15 minutes stale.
+        if (principal.type === 'user') principal.roles = roles;
       }
 
       request.principal = principal;

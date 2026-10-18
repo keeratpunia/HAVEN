@@ -1,4 +1,4 @@
-import type { RoleGrant } from './jwt.js';
+import { ALL_HOSTELS, type RoleGrant } from './jwt.js';
 
 /**
  * The authenticated caller of a request. A discriminated union, not a loose object —
@@ -36,11 +36,27 @@ export interface DevicePrincipal {
   deviceId: string;
 }
 
+/**
+ * True if the principal holds one of `roles` in `hostelId`. A super admin's grant
+ * covers every hostel ("All" in SDD §3.3), but only counts when `super_admin` is one
+ * of the roles the caller asked about — it never stands in for warden or office.
+ */
 export function hasHostelRole(
   principal: Principal | null,
   hostelId: string,
   roles: RoleGrant['r'][],
 ): boolean {
   if (principal?.type !== 'user') return false;
-  return principal.roles.some((grant) => grant.h === hostelId && roles.includes(grant.r));
+  return principal.roles.some(
+    (grant) =>
+      roles.includes(grant.r) &&
+      (grant.h === hostelId || (grant.r === 'super_admin' && grant.h === ALL_HOSTELS)),
+  );
+}
+
+export function isSuperAdmin(principal: Principal | null): boolean {
+  return (
+    principal?.type === 'user' &&
+    principal.roles.some((g) => g.r === 'super_admin' && g.h === ALL_HOSTELS)
+  );
 }

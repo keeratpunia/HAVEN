@@ -16,9 +16,13 @@ const AUDIENCE = 'haven';
 const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 
 export interface RoleGrant {
-  h: string; // hostelId
+  /** Hostel id, or `ALL_HOSTELS` for a super admin (role_assignments.hostel_id is null). */
+  h: string;
   r: 'super_admin' | 'warden' | 'office';
 }
+
+/** SDD §3: roles are granted per hostel "never globally (except super admin)". */
+export const ALL_HOSTELS = '*';
 
 export interface AccessTokenClaims {
   sub: string;

@@ -25,7 +25,15 @@ function isTheVisitor(principal: Principal | null, resource: VisitActorResource)
   return principal?.type === 'visitor' && principal.visitorId === resource.visitorId;
 }
 
+/** Warden of the visit's hostel. SDD §3.3: approving overnight requests and force
+ * check-out are "Hostel" for warden and "--" for super admin. */
 function isWarden(principal: Principal | null, resource: VisitActorResource): boolean {
+  return hasHostelRole(principal, resource.hostelId, ['warden']);
+}
+
+/** SDD §3.3 "See visits": warden (Hostel) and super admin (All). Office sees visits only
+ * through charges, never through these endpoints. */
+function canSeeHostelVisits(principal: Principal | null, resource: VisitActorResource): boolean {
   return hasHostelRole(principal, resource.hostelId, ['warden', 'super_admin']);
 }
 
@@ -43,7 +51,7 @@ export function registerVisitPolicies(): void {
   // Reading a visit: the host, the guest it's for, or a warden of its hostel.
   definePolicy<VisitActorResource>(
     'visits.read',
-    (p, r) => isHost(p, r) || isTheVisitor(p, r) || isWarden(p, r),
+    (p, r) => isHost(p, r) || isTheVisitor(p, r) || canSeeHostelVisits(p, r),
   );
 
   definePolicy<VisitActorResource>('visits.pre_invite_created', isHost);

@@ -227,7 +227,8 @@ describe('Google sign-in (SDD §9.5, §9.6 / F11)', () => {
     const result = await db
       .transaction()
       .execute((trx) => signInWithGoogle(trx, verifier, clock, { idToken: 'tok-8' }));
-    expect(result.roles).toEqual([]); // super_admin grants carry hostel_id null, excluded from the roles claim by design
+    // super_admin grants carry hostel_id null and cover every hostel (SDD §3).
+    expect(result.roles).toEqual([{ h: '*', r: 'super_admin' }]);
     const grant = await db
       .selectFrom('haven.role_assignments')
       .selectAll()

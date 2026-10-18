@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Kysely } from 'kysely';
 import { z } from 'zod';
-import { GH8_RULES_CONFIG_V1 } from '@haven/shared';
 import type { ZodTypeProvider } from '../lib/validation.js';
 import type { Database } from '../db/index.js';
 import type { Clock } from '../lib/clock.js';
@@ -16,6 +15,7 @@ import {
   type VisitServiceDeps,
 } from '../visits/service.js';
 import { requestHostLocationConfirmation } from '../visits/host-actions.js';
+import type { RulesProvider } from '../rules/provider.js';
 import { runIdempotent } from '../lib/idempotency.js';
 import { createPairingCode, pairDevice, recordHeartbeat, revokeDevice } from './devices.js';
 import { storeGatePhoto, type MediaStorage } from './media.js';
@@ -124,6 +124,7 @@ export interface GateRoutesOptions {
   dataEncryptionKey: Buffer;
   mediaStorage: MediaStorage;
   webBaseUrl?: string;
+  rules: RulesProvider;
 }
 
 export async function registerGateRoutes(
@@ -132,13 +133,16 @@ export async function registerGateRoutes(
 ): Promise<void> {
   const { db, clock, dataEncryptionKey, mediaStorage } = opts;
   const gateDeps: GateDeps = { db, clock, dataEncryptionKey };
-  const visitDeps: VisitServiceDeps = {
-    db,
-    clock,
-    rulesConfig: GH8_RULES_CONFIG_V1,
-    rulesVersion: 1,
-    webBaseUrl: opts.webBaseUrl,
-  };
+  /** Service deps with the rules of the hostel this gate belongs to (SDD §4, E-13). */
+  async function depsForGate(gateId: string): Promise<VisitServiceDeps> {
+    const gate = await db
+      .selectFrom('haven.gates')
+      .select('hostel_id')
+      .where('id', '=', gateId)
+      .executeTakeFirstOrThrow();
+    const { config, version } = await opts.rules.forHostel(gate.hostel_id);
+    return { db, clock, rulesConfig: config, rulesVersion: version, webBaseUrl: opts.webBaseUrl };
+  }
   const api = app.withTypeProvider<ZodTypeProvider>();
 
   // POST /v1/scan-sessions — public (SDD §9.3, §12.8). Rate limit: 20/IP/min (SDD §12.11).
@@ -287,6 +291,7 @@ export async function registerGateRoutes(
       const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
         visitorId: request.principal.visitorId,
       });
+      const visitDeps = await depsForGate(session.gate_id);
 
       // SDD §12.8: "evaluateEntry -> if gpsOk is false and the visit isn't already
       // host-confirmed, set result = awaiting_host_confirmation, store the photo on
@@ -337,6 +342,7 @@ export async function registerGateRoutes(
       const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
         visitorId: request.principal.visitorId,
       });
+      const visitDeps = await depsForGate(session.gate_id);
 
       const updated = await checkOut(visitDeps, {
         principal: request.principal,
@@ -371,6 +377,7 @@ export async function registerGateRoutes(
       const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
         visitorId: request.principal.visitorId,
       });
+      const visitDeps = await depsForGate(session.gate_id);
 
       const hostResident = await db
         .selectFrom('haven.residents')
@@ -387,7 +394,7 @@ export async function registerGateRoutes(
         visitorId: request.principal.visitorId,
         hostUserId: request.body.hostId,
         hostelId: hostResident.hostel_id,
-        hostelGender: GH8_RULES_CONFIG_V1.hostel_gender,
+        hostelGender: visitDeps.rulesConfig.hostel_gender,
         type: request.body.type,
         guestGender: null,
         windowStart: now,
@@ -419,6 +426,7 @@ export async function registerGateRoutes(
         const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
           hostUserId: principal.userId,
         });
+        const visitDeps = await depsForGate(session.gate_id);
         const hostResident = await db
           .selectFrom('haven.residents')
           .select(['hostel_id'])
@@ -435,7 +443,7 @@ export async function registerGateRoutes(
           requestId: request.id,
           hostUserId: principal.userId,
           hostelId: hostResident.hostel_id,
-          hostelGender: GH8_RULES_CONFIG_V1.hostel_gender,
+          hostelGender: visitDeps.rulesConfig.hostel_gender,
           type: request.body.type,
           invitedName: request.body.guest.name,
           invitedPhone: request.body.guest.phone ?? null,
@@ -471,6 +479,7 @@ export async function registerGateRoutes(
         const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
           hostUserId: principal.userId,
         });
+        const visitDeps = await depsForGate(session.gate_id);
 
         const updated = await checkOut(visitDeps, {
           principal,

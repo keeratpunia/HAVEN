@@ -3,6 +3,7 @@ import type { Database } from '../db/index.js';
 import { AppError } from '../lib/errors.js';
 import type { Clock } from '../lib/clock.js';
 import type { RoleGrant } from './jwt.js';
+import { loadUserRoles } from './principal-loader.js';
 
 /**
  * Dev-only resident/staff sign-in bypass (demo milestone, docs/DECISIONS.md DEC-011).
@@ -43,15 +44,5 @@ export async function devLogin(
     .where('id', '=', user.id)
     .execute();
 
-  const roleRows = await trx
-    .selectFrom('haven.role_assignments')
-    .select(['hostel_id', 'role'])
-    .where('user_id', '=', user.id)
-    .where('revoked_at', 'is', null)
-    .execute();
-  const roles: RoleGrant[] = roleRows
-    .filter((row): row is { hostel_id: string; role: RoleGrant['r'] } => row.hostel_id !== null)
-    .map((row) => ({ h: row.hostel_id, r: row.role }));
-
-  return { userId: user.id, roles };
+  return { userId: user.id, roles: await loadUserRoles(trx, user.id) };
 }

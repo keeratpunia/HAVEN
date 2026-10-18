@@ -383,6 +383,15 @@ interface PushTokensTable {
   disabled_at: ColumnType<Date | null, Date | null | undefined, Date | null>;
 }
 
+interface HostelRulesTable {
+  id: Generated<string>;
+  hostel_id: string;
+  version: number;
+  config: unknown;
+  created_by: string | null;
+  created_at: Generated<Date>;
+}
+
 interface AuditLogTable {
   id: Generated<number>;
   at: Generated<Date>;
@@ -431,4 +440,5 @@ export interface Database {
   'haven.push_tokens': PushTokensTable;
   'haven.idempotency_keys': IdempotencyKeysTable;
   'haven.audit_log': AuditLogTable;
+  'haven.hostel_rules': HostelRulesTable;
 }
