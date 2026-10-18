@@ -129,15 +129,17 @@ Have two guest phones (or a phone + a desktop browser profile) ready: **Guest A*
 ### A. Resident signs in, creates an invite, copies the link
 
 1. On a laptop, open `<WEB_TUNNEL_URL>/` (or `http://localhost:8081/` if not
-   tunnelling) → **Resident sign-in**.
-2. Enter `priya@haven.demo` → **Sign in**. (This is the dev-only bypass,
-   docs/DECISIONS.md DEC-011 — point out there's no password because there's no real
-   Google OAuth configured for this throwaway environment; a real deployment requires
-   Google Sign-In, SDD §9.5.)
-3. **Invite** tab → fill in Guest A's name and phone, pick **Day visit**, today's date,
-   a start/end time that brackets "now." → **Create invite**.
-4. The **Share invite** screen shows the exact SDD §15 T-INVITE message and the
-   `/i/<token>` link. **Copy link**.
+   tunnelling) → **Resident sign-in** (R-01).
+2. Under **Development sign-in**, enter `priya@haven.demo` → **Sign in**. (This is the
+   dev-only bypass, docs/DECISIONS.md DEC-011 — point out there's no password because
+   there's no real Google OAuth configured for this throwaway environment; a real
+   deployment requires Google Sign-In, SDD §9.5.) You land on **Home** (R-05).
+3. **Invite** tab (centre +) → fill in Guest A's name and phone, keep **Day visit**,
+   today's date, a start/end time that brackets "now." The rule hints under the time
+   fields come from the shared rules engine; **Create invite** enables once the
+   server's preview agrees.
+4. The **Share invite** screen (R-07) shows the exact SDD §15.4 T-INVITE message with
+   **Share on WhatsApp**, **Share…** (phones) and **Copy link**.
 
 ### B. Guest A opens the link, OTP, profile with live selfie
 
@@ -172,15 +174,14 @@ Have two guest phones (or a phone + a desktop browser profile) ready: **Guest A*
 
 ### F. Walk-in: Guest B requests entry, resident approves, guest's screen turns green on its own
 
-**Expect a brand-new Guest B's first scan to expire.** The QR token is only valid 30
-seconds (SDD D2 — specifically sized "to cover a permission prompt," not a full
-sign-up). A first-time walk-in's full detour — location permission → phone/OTP →
-profile form → camera permission for the selfie — routinely takes longer than that,
-so the app correctly shows "That code has changed" partway through and the guest has
-to scan again. Narrate this confidently if it happens live: "first-time guests
-sometimes need a second scan — that's the same 30-second rule that stops someone
-reusing a screenshotted code, not a bug." The *second* scan is always fast, since
-they're now signed in with a complete profile.
+**Known guest-web bug: a brand-new Guest B's first scan can expire.** SDD §9.3 says
+the scan session exists so "slow steps (OTP, profile, selfie) happen after the 30 s
+token window without re-scanning" — but the guest web app currently starts a fresh
+scan session after the sign-in detour, re-checking the (by then stale) 30-second QR
+token, so it shows "That code has changed". (An earlier version of this doc called
+this intended; it isn't — see docs/TRACEABILITY.md, FR-21.) Workaround on stage: have
+Guest B sign in first (open the app → **Sign in** → phone/OTP → profile), *then* scan.
+If it happens anyway, tap **Back to start** and scan once more — it's instant.
 
 17. Guest B (no invite) scans the gate QR directly (`/gate` → camera).
 18. Location check → signs in with OTP (or the test-number shortcut) → profile + live
@@ -188,9 +189,12 @@ they're now signed in with a complete profile.
     type → live selfie → **Waiting for host**. If the code expired partway through
     (see note above), tap **Back to start** and scan the gate QR once more — it picks
     up instantly since Guest B is already signed in.
-19. On the resident's laptop, go to **Requests**. Guest B's card shows their name,
-    visit type, and the location-verified/not-verified line.
-20. Tap **Approve**.
+19. On the resident's laptop (on **Home**): within ~10 seconds a **Guest at the gate**
+    banner appears with the SDD §15 N-WALKIN text (on Android this is a push
+    notification). Tap it — it opens the walk-in request (R-08) with Guest B's live
+    photo next to their profile photo, visit type, duration, editable "Leaves by" time
+    and the location-verified line.
+20. Tap **Approve** (or **Reject** → reason → **Reject request**).
 21. **Without touching Guest B's phone**, within ~3 seconds their screen turns green
     on its own (FR-26) — point this out explicitly, it's the thing that's easy to miss
     if you blink. Guest B's phone never reloads or re-scans.

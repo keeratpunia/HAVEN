@@ -519,6 +519,46 @@ or Office apps (docs/DECISIONS.md DEC-011).
   requirement, it only adds a demo/dev-only alternative that cannot run outside
   `NODE_ENV=development`.
 
+## 0j. Resident app milestone (2026-10-18)
+
+The Resident application (SDD §13.4 R-01..R-15) on the web target, with the API
+surface it needs (§12.4–§12.6), notification delivery (§9.7, §15) and push handling.
+Decisions and interpretations: docs/DECISIONS.md DEC-012.
+
+**What this builds:**
+- **Auth/onboarding** (`apps/mobile/app/(auth)/`): R-01 sign-in (Google Identity
+  Services on web when a client id is set; DEC-011 dev sign-in otherwise), R-02 phone
+  OTP, R-03 hostel/room + live ID card + live selfie + consent, R-04 pending/rejected
+  (one resubmission). API: `POST /residents/me`, `/residents/me/documents`,
+  `/residents/me/submit`; resident profile on `GET /me`.
+- **Resident shell** (`apps/mobile/app/(resident)/`): five tabs — R-05 Home (waiting
+  requests in amber, inside now, upcoming today, quick actions), R-13 Guests (Upcoming/
+  Inside/History, paged), R-06/R-07 Invite + Share (WhatsApp, share sheet, copy link;
+  shared-rules hints + server preview), R-14 Charges (totals), R-15 Profile — plus R-08
+  walk-in request (photos, editable end time, approve/reject), R-09 arrival (photo
+  compare, confirm / "Not my guest"), R-10 visit detail (flags, timeline, cancel/edit/
+  share/mark-left), R-11 overnight request (server preview: nights, charge, quota bars),
+  R-12 host-assisted entry/exit (in-app QR scan, GPS with mock refusal, live photo), and
+  the in-app notifications list.
+- **API** (`apps/api/src/visits/host-routes.ts`, `host-actions.ts`, `dto.ts`):
+  preview, invite/overnight create, bucketed paged list returning the §12.3 VisitDTO
+  with `allowedActions`, detail + timeline (audited read), edit, cancel, invite-link,
+  approve/reject/confirm-arrival/dispute/mark-left ★ under `Idempotency-Key`
+  (`lib/idempotency.ts`), `/me/quota`, `/me/charges`, signed photo URLs
+  (`media/`).
+- **Notifications** (`apps/api/src/notify/`): verbatim §15 templates, outbox producer
+  with 60 s SMS fallbacks, the worker (Expo push, console SMS, retries, dead-token
+  disabling, staleness), push-token registration, in-app list, opened; the app routes
+  taps via the shared screen table (`packages/shared/src/api/notifications.ts`).
+- **Shared contracts** (`packages/shared/src/api/`) and display formats.
+
+**What this does NOT do (see DEC-012):** native Google Sign-In; running on Android (no
+SDK on this machine — native push, camera, location and secure-store code is
+typechecked but unexecuted); the R-06 contact picker; account deletion (FR-09); the
+push receipts job; `Idempotency-Key` on the guest's own ★ routes; warden/office
+screens. A guest-web bug was found and left for its own milestone: after the sign-in
+detour the guest app re-checks the stale gate token (FR-21 row).
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -527,39 +567,39 @@ or Office apps (docs/DECISIONS.md DEC-011).
 |---|---|---|---|---|---|
 | FR-01 | M | Guest signs in with 6-digit SMS OTP | `src/auth/otp-service.ts`, `src/auth/routes.ts`; guest web UI at `apps/mobile/app/(guest)/login.tsx` | `test/otp-service.integration.test.ts`, `test/auth-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` | Done |
 | FR-02 | M | First-time guest profile: name, gender, 18+, consent, profile selfie | `apps/mobile/app/(guest)/profile.tsx`, `PATCH /me` (`isAdultConfirmed`, `src/auth/routes.ts`) | `apps/mobile/e2e/tests/golden-path.spec.ts` | WIP — name/gender/18+ confirmation genuinely implemented and tested end to end; the profile photo is captured live (no gallery) but never uploaded/persisted — no media endpoint exists yet |
-| FR-03 | M | Residents and staff sign in with Google | `src/auth/google-service.ts`, `src/auth/google.ts` | `test/google-service.integration.test.ts`, `test/auth-routes.integration.test.ts` | Done |
-| FR-04 | M | Resident phone OTP, room number, ID card photo, selfie, awaits verification | `src/auth/otp-service.ts` (`phone_verify` purpose only) | `test/otp-service.integration.test.ts` | WIP — phone verification only; room/photo/submit not built |
+| FR-03 | M | Residents and staff sign in with Google | `src/auth/google-service.ts`, `src/auth/google.ts`; R-01 `apps/mobile/app/(auth)/sign-in.tsx` + `components/GoogleSignInButton.tsx` (web Google Identity Services) | `test/google-service.integration.test.ts`, `test/auth-routes.integration.test.ts` | WIP — server side done; the web button is wired but untested without a Google client id, and native (`@react-native-google-signin`) is not built (DEC-012). The DEC-011 dev sign-in is what the e2e suite and demo use |
+| FR-04 | M | Resident phone OTP, room number, ID card photo, selfie, awaits verification | `phone_verify` OTP; `POST /residents/me`, `/residents/me/documents`, `/residents/me/submit` (`apps/api/src/residents/`); R-02/R-03/R-04 (`apps/mobile/app/(auth)/phone.tsx`, `onboarding.tsx`, `pending.tsx`) | `apps/api/test/resident-onboarding-visits.integration.test.ts` (flow, missing-phone refusal, one resubmission, guest refused), `apps/mobile/e2e/tests/resident-app.spec.ts` (R-01 → R-04) | Done — the warden's side of verification is FR-05 |
 | FR-05 | M | Warden sees pending residents, approves/rejects in one tap; ID card deleted on decision | — | — | — |
 | FR-06 | S | Warden invites office by email; super admin invites wardens; 48h expiry bound to email | `src/auth/google-service.ts` (acceptance only) | `test/google-service.integration.test.ts` | WIP — invite acceptance only; invite creation not built |
 | FR-07 | M | Warden deactivates staff / marks resident left; sessions end immediately | `src/auth/principal-loader.ts` (`RevocationCache`), `src/auth/authenticate.ts` | `test/sessions.integration.test.ts`, `test/auth-routes.integration.test.ts` | WIP — session-end-within-30s consequence only; the deactivate/mark-left action itself not built |
 | FR-08 | S | Guest/resident edit name, retake profile photo | — | — | — |
-| FR-09 | S | Guest/resident request account deletion | — | — | — |
+| FR-09 | S | Guest/resident request account deletion | — | — | — (R-15 has no delete button until `POST /me/deletion-request` exists) |
 
 ### 5.2 Visits and invites
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-10 | M | Verified host creates pre-invite (name, phone, type, date, window) | `apps/api/src/visits/service.ts`'s `createPreInvite`, `POST /v1/visits` (`apps/api/src/visits/host-routes.ts`), `apps/mobile/app/resident/invite.tsx` | `apps/api/test/visits-service.integration.test.ts`, `apps/api/test/host-routes.integration.test.ts`, `apps/mobile/e2e/tests/resident-actions.spec.ts` ("resident creates an invite and gets a shareable link") | Done |
-| FR-11 | M | Host shares invite link via native share sheet | `apps/mobile/app/resident/invite.tsx`'s Share invite screen (SDD §15 T-INVITE message, Copy link) | `apps/mobile/e2e/tests/resident-actions.spec.ts` | WIP — the R-07 screen and the exact T-INVITE copy are implemented, with a working Copy-link action; there is no native share-sheet integration (`navigator.share`/`Share.share`) — the host must copy-paste rather than tap a WhatsApp-first share button |
+| FR-10 | M | Verified host creates pre-invite (name, phone, type, date, window) | `createPreInvite`, `POST /v1/visits` + `POST /v1/visits/preview` (`apps/api/src/visits/host-routes.ts`, `host-actions.ts`); R-06 `apps/mobile/app/(resident)/invite.tsx` (shared Zod schema + shared `evaluateCreate` hints; server preview decides) | `apps/api/test/resident-onboarding-visits.integration.test.ts` (create, preview, TC-RULE-13), `apps/api/test/host-routes.integration.test.ts`, `apps/mobile/e2e/tests/resident-app.spec.ts` (create invite; 10 pm window refused) | Done — the contact picker for the phone field is not built (typed phone) |
+| FR-11 | M | Host shares invite link via native share sheet | R-07 `apps/mobile/components/SharePanel.tsx` (T-INVITE / T-INVITE-OVERNIGHT verbatim, `packages/shared/src/format.ts`; WhatsApp first, OS share sheet, copy link); `POST /visits/{id}/invite-link` | `apps/api/test/resident-onboarding-visits.integration.test.ts` (new link invalidates the old one), `apps/mobile/e2e/tests/resident-app.spec.ts` (T-INVITE text + link) | Done |
 | FR-12 | M | Opening invite link requires OTP to invited number; other numbers refused | `apps/api/src/auth/invites.ts`'s `claimInvite` + `POST /invites/:token/claim` (`src/auth/routes.ts`, §0e) + the new public `GET /v1/invites/:token` landing route (`apps/api/src/visits/routes.ts`) + guest web UI (`apps/mobile/app/(guest)/i/[token].tsx`, `login.tsx`) | `apps/api/test/invites.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` (happy path only) | Done — the full "open link → sign in → claim" flow (SDD F1) now has a real UI and real routes at both ends, proven end to end; the `INVITE_PHONE_MISMATCH` rejection path is implemented (`login.tsx` surfaces it as a user-facing error, not swallowed) but has no dedicated automated test — TC-FLOW-07 stays unmarked |
-| FR-13 | M | Host edits window / cancels visit until guest checks in | `cancelApprovedVisit`, `cancelOvernightRequest`, `cancelWalkIn` (`visits/service.ts`) | `visits-service.integration.test.ts` | WIP — cancel exists for every pre-entry state; *editing* the window is not implemented at all; no route |
-| FR-14 | M | Host requests overnight/guest-room with quota + charge preview | `createOvernightRequest` (`visits/service.ts`) | `visits-service.integration.test.ts` (incl. `QUOTA_EXCEEDED`) | WIP — the request itself, with real quota enforcement, is implemented; the `POST /v1/visits/preview` charge/quota *preview* endpoint (SDD F6 step 2) is not built |
-| FR-15 | M | Warden approves/rejects overnight/guest-room requests; approval creates pending charge | `approveOvernight`, `rejectOvernight` (`visits/service.ts`) | `visits-service.integration.test.ts` (incl. pending-charge assertion) | WIP — service logic implemented and tested against a real DB, including the pending charge; no HTTP route for the warden to actually act through |
-| FR-16 | M | Host sees all visits: upcoming, inside, history, status, charges | — | — | — |
+| FR-13 | M | Host edits window / cancels visit until guest checks in | `PATCH /visits/{id}` (`editVisitWindow`, rules re-checked), `POST /visits/{id}/cancel`; R-10 Edit time / Cancel visit | `apps/api/test/resident-onboarding-visits.integration.test.ts` (edit incl. WINDOW_INVALID; cancel, second cancel 409) | Done |
+| FR-14 | M | Host requests overnight/guest-room with quota + charge preview | `POST /visits/preview` + `POST /visits` kind overnight, `GET /me/quota`; R-11 `apps/mobile/app/(resident)/overnight.tsx` | `apps/api/test/resident-onboarding-visits.integration.test.ts` (preview numbers, N-OVERNIGHT-REQ text, QUOTA_EXCEEDED counting completed stays, TYPE_NOT_ALLOWED_FOR_GENDER), `apps/mobile/e2e/tests/resident-app.spec.ts` (R-11) | Done |
+| FR-15 | M | Warden approves/rejects overnight/guest-room requests; approval creates pending charge | `approveOvernight`, `rejectOvernight` via `POST /visits/{id}/approve`/`reject` (warden branch; reason required) | `visits-service.integration.test.ts`, `apps/api/test/resident-onboarding-visits.integration.test.ts` (pending charge on R-14, N-OVERNIGHT-DECIDED both ways) | WIP — API works for a warden; no warden screen (W-04) |
+| FR-16 | M | Host sees all visits: upcoming, inside, history, status, charges | `GET /me/hosted-visits?bucket=` (paged VisitDTO), `GET /visits/{id}` (+ timeline), `GET /me/charges`; R-05, R-13, R-10, R-14 | `apps/api/test/resident-onboarding-visits.integration.test.ts` (buckets + paging, audited detail read, TC-SEC-01/02), `apps/mobile/e2e/tests/resident-app.spec.ts` | Done |
 
 ### 5.3 Gate
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
 | FR-20 | M | Gate device shows rotating QR + countdown + hostel name + instruction | `apps/mobile/app/gate/index.tsx` (`qrcode`, 250ms tick, 10s countdown bar), `apps/mobile/lib/gateToken.ts` (Web Crypto HMAC-SHA256 token generation) | Manually verified live (QR redraws on step change; never renders personal data) — no automated test of the display page itself | WIP — genuinely implemented and manually verified; no Playwright coverage of the display page's own rendering (the Playwright suite drives the *guest* side with a locally-generated token, not this page) |
-| FR-21 | M | Scanning QR opens guest web app; requests location, validates token + GPS first | `apps/api/src/gate/token.ts`/`scanSessions.ts`/`geofence.ts`, `POST /v1/scan-sessions`, `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/src/gate/token.test.ts`, `geofence.test.ts`, `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-errors.spec.ts` | Done |
+| FR-21 | M | Scanning QR opens guest web app; requests location, validates token + GPS first | `apps/api/src/gate/token.ts`/`scanSessions.ts`/`geofence.ts`, `POST /v1/scan-sessions`, `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/src/gate/token.test.ts`, `geofence.test.ts`, `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-errors.spec.ts` | Done — known bug (DEC-012): after the sign-in detour the guest app starts a new scan session and re-checks the stale 30 s token, contrary to SDD §9.3; a first-time walk-in can see "That code has changed" |
 | FR-22 | S | Guest app offers an in-app scanner on home screen | — | — | — |
 | FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `GET /v1/scan-sessions/:id` (`gate/routes.ts`), `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-retry-and-walkin.spec.ts` | Done |
 | FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | `apps/mobile/components/LiveCamera.tsx`, `apps/api/src/gate/media.ts` (`storeGatePhoto`/`storeVisitorProfilePhoto`) | `apps/api/test/gate-routes.integration.test.ts` (photo upload, dedup), `apps/mobile/e2e` suite (fake camera device) | Done — live-only capture is enforced and every captured photo (profile and gate) is now actually processed and persisted, closing the DEC-009 gap |
 | FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) + `POST /v1/scan-sessions/:id/walk-in` (`gate/routes.ts`) + `apps/mobile/app/(guest)/g/[token].tsx`'s `find_host`/`visit_type` phases | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
-| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `apps/mobile/app/(guest)/g/[token].tsx`'s `waiting_for_host` phase (3s poll of `GET /v1/visits/{id}`, `Cancel request` via `POST /v1/me/visits/{id}/cancel`) | `apps/mobile/e2e/tests/resident-actions.spec.ts` ("...turns green without reload", exercises the real poll against a real host approval) | Done — closes the gap §0h/DEC-010 named, now that the Resident app's approve/reject action exists to poll for (docs/DECISIONS.md DEC-011) |
+| FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `apps/mobile/app/(guest)/g/[token].tsx`'s `waiting_for_host` phase (3s poll of `GET /v1/visits/{id}`, `Cancel request` via `POST /v1/me/visits/{id}/cancel`) | `apps/mobile/e2e/tests/resident-app.spec.ts` (approval turns the guest screen green without reload; reject) | Done |
 | FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | `apps/mobile/app/(guest)/g/[token].tsx` (3-attempt retry, then "Ask host to confirm"), gate check-in route's `awaiting_host_confirmation` short-circuit | `apps/api/test/gate-routes.integration.test.ts` ("awaiting_host_confirmation"), `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
-| FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `POST /v1/scan-sessions/:id/host-assisted-entry`/`host-assisted-exit` (`gate/routes.ts`), delegating to `createHostAssistedEntry`/`checkOut` (`visits/service.ts`) | `apps/api/test/gate-routes.integration.test.ts` | WIP — the API (scan session + state transition) is implemented and tested end to end; there is no Resident-app UI to drive it (native QR scan, GPS, live photo capture on a resident's phone) — explicitly deferred, see §0h |
+| FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `POST /v1/scan-sessions/:id/host-assisted-entry`/`-exit` ★ (now runs `evaluateEntry`, records real GPS facts); R-12 `apps/mobile/app/(resident)/assist.tsx` (web QR via `@zxing/browser`, native via expo-camera; native GPS refuses mock location) | `apps/api/test/gate-routes.integration.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts` (GPS facts, no N-LEFT to self, AFTER_ENTRY_CUTOFF) | WIP — API fully tested; the R-12 screen has no e2e test (the fake camera can't show a QR) and the native path hasn't run |
 | FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | `POST /v1/gate-devices/heartbeat` (`gate/devices.ts`), `gate_devices.last_seen_at`/`offline_alerted_at` columns | `apps/api/test/gate-routes.integration.test.ts` | WIP — heartbeat itself (and secret refresh on rotation) is implemented and tested; `job_gate_offline()` already exists at the DB layer (§0b) but no warden-facing UI reads gate status or shows the alert |
 | FR-30 | M | Gate device keeps screen awake; recovers automatically after network loss | `apps/mobile/app/gate/index.tsx` (`navigator.wakeLock`, heartbeat backoff 5s/15s/60s, offline badge) | Manually verified live — no automated test (Wake Lock API and real network-loss simulation aren't practical in this test setup) | WIP — genuinely implemented; not proven by an automated test |
 
@@ -567,12 +607,12 @@ or Office apps (docs/DECISIONS.md DEC-011).
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-40 | M | Host push for every walk-in with both photos; approve (adjust end time) or reject | `approveWalkIn`/`rejectWalkIn` (`apps/api/src/visits/service.ts`), `POST /v1/visits/:id/approve`/`reject` ★ (`apps/api/src/visits/host-routes.ts`), `apps/mobile/app/resident/requests.tsx` (R-08) | `apps/api/test/host-routes.integration.test.ts`, `apps/mobile/e2e/tests/resident-actions.spec.ts` (approve + reject) | WIP — approve/reject itself, reusing the original scan session's GPS facts (SDD F2 step 9) rather than re-checking location, is implemented and tested end to end; there is no push notification (SDD §15's `N-WALKIN`) and no side-by-side live/profile-photo comparison UI (R-08's wireframe) — the host sees a location-verified line, not the photos; adjusting the end time on approval (`ApproveBody.windowEnd`) is accepted by the route but not exposed in the UI |
-| FR-41 | S | SMS fallback if walk-in push unopened in 60s | — | — | — |
-| FR-42 | M | Host push for every check-in with photo compare; Yes/Not my guest (30 min window) | — | — | — |
-| FR-43 | M | "Not my guest" disputes the visit; alerts warden immediately (push + SMS) | — | — | — |
-| FR-44 | M | Host push on guest check-out and on guest overstay | — | — | — |
-| FR-45 | M | Host can mark "My guest has left"; logged and flagged to warden | `hostMarksGuestLeft` (`apps/api/src/visits/service.ts`) | `apps/api/test/visits-service.integration.test.ts` | WIP — the transition (`inside -> completed`, `close_reason = host_marked_left`) is implemented and tested; "flagged to warden" (a dashboard indicator) is not built — no route, no dashboard |
+| FR-40 | M | Host push for every walk-in with both photos; approve (adjust end time) or reject | N-WALKIN / N-CONFIRM-LOCATION (§15 text) via `apps/api/src/notify/`; R-08 `apps/mobile/app/(resident)/walk-in/[id].tsx` (live photo large + profile photo, editable end time, approve right / reject left) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (text, fallback, adjusted end + approvals row, idempotent replay, 409 on new key, expired, BR-11, authorization), `apps/mobile/e2e/tests/resident-app.spec.ts` (banner tap → R-08 → approve; reject) | Done on the web target — Android push is implemented but unexecuted here (DEC-012) |
+| FR-41 | S | SMS fallback if walk-in push unopened in 60s | outbox producer `cancel_if_opened` + worker (`apps/api/src/notify/`) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (cancelled when opened; sent after 60 s; released at once with no push token; stale after approval) | Done (console SMS — MSG91 per DEC-007) |
+| FR-42 | M | Host push for every check-in with photo compare; Yes/Not my guest (30 min window) | N-ARRIVED; `POST /visits/{id}/confirm-arrival` ★; R-09 `apps/mobile/app/(resident)/arrival/[id].tsx` | `apps/api/test/resident-approvals-notifications.integration.test.ts` (N-ARRIVED text, confirm once, 30-min expiry, TC-FLOW-04 host confirm, expired session 410), `apps/mobile/e2e/tests/resident-app.spec.ts` (Notifications → R-09) | Done |
+| FR-43 | M | "Not my guest" disputes the visit; alerts warden immediately (push + SMS) | `POST /visits/{id}/dispute` ★ (`disputeArrival`), N-DISPUTE push + immediate SMS | `apps/api/test/resident-approvals-notifications.integration.test.ts` (TC-FLOW-06, duplicate 409, window expiry, not for walk-ins), `apps/mobile/e2e/tests/resident-app.spec.ts` | Done (warden W-05 not built) |
+| FR-44 | M | Host push on guest check-out and on guest overstay | N-LEFT (§15 + F5 unverified sentence) from `checkOut`; N-OVERSTAY-HOST from `job_flag_overstays()` (text fixed by migration 20261017000001) | `apps/api/src/notify/templates.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts` | WIP — produced and delivered by the worker; the job has no scheduler outside Supabase pg_cron |
+| FR-45 | M | Host can mark "My guest has left"; logged and flagged to warden | `POST /visits/{id}/mark-left` ★ (`hostMarksGuestLeft`, `close_reason = host_marked_left`); R-10 | `apps/api/test/resident-approvals-notifications.integration.test.ts` (completed + identical replay) | WIP — host side done; the warden's flag view isn't built |
 
 ### 5.5 Warden and office
 
@@ -594,7 +634,7 @@ or Office apps (docs/DECISIONS.md DEC-011).
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-70 | M | Walk-in requests expire after 10 min; both parties told | `expireWalkIn` (`apps/api/src/visits/service.ts`) | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts` | WIP — the transition itself (callable by a system/`null` principal, per SDD §7.1's "System" actor) is implemented and tested, including its race against host approval; no scheduled job calls it yet, and no notification is sent ("both parties told" has no SDD-named N-code to send) |
+| FR-70 | M | Walk-in requests expire after 10 min; both parties told | `haven.job_expire_walkins()` (N-WALKIN-EXPIRED text fixed); the guest page sees the expiry through its poll | `apps/api/test/resident-approvals-notifications.integration.test.ts` (job expires it, host told by name, later approve 409), `visits-concurrency.integration.test.ts` | WIP — no scheduler runs the job outside Supabase pg_cron |
 | FR-71 | M | Approved-never-entered visits expire at window_end | `expireApprovedVisit` (`apps/api/src/visits/service.ts`) | `visits-service.integration.test.ts` | WIP — the transition and charge-waiving side effect are implemented and tested; no scheduled job calls it yet |
 | FR-72 | M | Overstay detection every 5 min; alerts host/guest; escalates to warden after 30 min | — | — | — |
 | FR-73 | M | Night sweep at 22:00 lists day/quick guests still inside to the warden | — | — | — |

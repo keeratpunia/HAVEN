@@ -862,6 +862,102 @@ Source for all of Part 1: SDD §2.7.
   host visit actions and FR-26 polling implement SDD text that already existed, they
   don't reinterpret it.
 
+### DEC-012 — Resident app milestone: notification delivery and routing, host actions, and what could not run here
+
+- **Date:** 2026-10-18
+- **Context:** Building the Resident app (SDD §13.4 R-01..R-15, flows F1–F4, F6, F7,
+  F9, F10, §12.4–§12.6, §15) on top of the gate and demo milestones. Several places
+  needed an interpretation, and several existing behaviours turned out not to match
+  the SDD once the host side existed.
+- **Decision — notifications (§9.7, §15):**
+  1. Every producer now writes §15's catalogue text verbatim through
+     `apps/api/src/notify/templates.ts` (the service had paraphrased bodies such as "A
+     guest is waiting at the gate."). The SQL jobs' resident-facing kinds were fixed by
+     migration `20261017000001_job_notification_text.sql` (also "4:42 pm", not "04:42
+     pm"). Two additions to catalogue text, both from other SDD sections: N-LEFT appends
+     "Location was not verified." when the exit's GPS failed (F5 step 5, a normative
+     flow, says the notification must say so); N-WALKIN-REJECTED (§7.1, guest page, not
+     in §15.2) uses §13.6's "Walk-in rejected" copy.
+  2. A walk-in whose scan session failed GPS sends **N-CONFIRM-LOCATION instead of
+     N-WALKIN** (§15.2 lists "Check-in or walk-in with unverified location" as its
+     trigger; F3 step 4 says approval doubles as confirmation). Both open R-08.
+  3. The API stamps `screen` into every row's `data` and the worker builds the §15.1
+     payload `{ kind, notificationId, visitId?, screen }`; the kind → screen and kind →
+     Android channel tables live in `packages/shared/src/api/notifications.ts` and are
+     shared by API and app. The app only ever navigates through `safeScreen()`, an
+     allow-list, so a malformed payload lands on Home. Warden screens are fixed as
+     `/warden/...` paths now so payloads produced today stay valid.
+  4. **Web fallback for push.** Expo push tokens don't exist in browsers, so on the web
+     the resident shell polls `GET /me/notifications` every 10 s and shows new items as
+     a banner that goes through the *same* tap handler as a push; the worker's "no
+     active push token → release the SMS fallback now" rule (§15.5) covers delivery.
+     Native push (expo-notifications: channels, permission, token registration, tap
+     routing incl. cold start) is implemented but **could not be run**: this machine has
+     no Android SDK/emulator, and getting an Expo push token needs an EAS project id.
+  5. Opening R-08/R-09/R-10 marks that visit's unopened notifications opened (§9.7: "or
+     opens the related screen"), so the SMS fallback is cancelled however the host
+     arrived.
+- **Decision — host actions (§12.6):**
+  6. `allowedActions` is computed by the API (`apps/api/src/visits/dto.ts`). Interpretations:
+     *confirm/dispute* ("Yes, that's my guest / Not my guest", FR-42) only for visits the
+     guest checked into themself (`origin` invite or overnight_request) and only within
+     `dispute_window_minutes` of the latest entry — walk-ins and host-assisted entries
+     were approved by the host with the photo in hand ("Host does not get a separate
+     arrival confirmation", F2 step 9); *edit* only for day/quick drop-off invites before
+     entry (an overnight window comes from warden-approved dates); *share_invite* while
+     approved and never entered.
+  7. `POST /visits/{id}/confirm-arrival` has two meanings, both in §12.6: completing a
+     location-unverified check-in (F3) — via `checkIn` with the waiting scan session's
+     facts, cut-offs judged at the scan time (E-05), no N-ARRIVED; after the 10-minute
+     session lifetime it answers `410 SCAN_SESSION_EXPIRED` — or R-09's "Yes, that's my
+     guest", setting `host_confirmed_at`.
+  8. Approving a walk-in re-runs `evaluateCreate` on the (possibly host-adjusted) window
+     — BR-11 says the day-guest limit is enforced at "Create + approval" — and every
+     host/warden decision writes the insert-only `approvals` row (with
+     `adjusted_window_end`), which also feeds the R-10 timeline (E-09).
+  9. The dispute `note` is kept in the N-DISPUTE row's `data` (the schema has no column
+     for it). A warden decline requires `reason` (§12.6 "warden: required").
+  10. Approving an overnight request does not mint an invite token: the raw token can't
+      be recovered later, so the host gets the link through `POST /visits/{id}/
+      invite-link` (R-10 "Share invite"), which is what "invite link generated and shown
+      to the host" (F6 step 5) needs in practice.
+  11. Every ★ route a resident calls requires `Idempotency-Key` (approve, reject,
+      confirm-arrival, dispute, mark-left, host-assisted entry/exit). Only 2xx responses
+      are stored: a 4xx is deterministic and a 5xx should genuinely retry.
+- **Decision — existing behaviour corrected:** `checkIn` committed the status change and
+  then wrote the gate event and notification in a second transaction (now one, per §8.2);
+  host-assisted entry skipped `evaluateEntry` (§4.5 lists it) and recorded GPS as always
+  verified; the guest's location-unverified check-in skipped ownership/rule checks and
+  never linked its session, so nothing could complete it; BR-05's quota ignored
+  completed stays; scan sessions took `created_at` from the database clock instead of
+  the injected `Clock` (§19.3). `GET /visits/{id}` now answers 404, not 403, for a visit
+  the caller can't see (§12.2, TC-SEC-01/02). N-LEFT is skipped when the host did the
+  check-out themself (host-assisted exit).
+- **Decision — other:** photos are served through 120 s HMAC-signed URLs
+  (`apps/api/src/media/`), the local stand-in for Supabase's signed URLs behind the same
+  `MediaStorage` seam as DEC-004. R-12 offers "Continue without location" after three
+  failed fixes, mirroring FR-27; the entry is flagged `location_unverified`. R-03's
+  consent is a required checkbox in the app only — there is no resident consent column.
+  The resident app uses a custom five-tab bar over Expo Router's `Stack` (this Expo
+  Router version vendors its navigation; a plain bar behaves the same on web and
+  Android).
+- **Not built / not run (recorded in TRACEABILITY):** native Google Sign-In (needs a
+  development build and an Android OAuth client; web Google Identity Services is wired
+  but untested without a client id, so DEC-011's dev sign-in remains the way in here);
+  the R-06 contact picker; account deletion (FR-09, priority S, no API); the push
+  receipts job; `Idempotency-Key` on the guest's own ★ routes; any warden screen.
+- **Known guest-web bug found (not fixed here):** after the sign-in detour the guest app
+  starts a new scan session and re-checks the stale 30-second QR token, so a first-time
+  walk-in can see "That code has changed" — contrary to §9.3 ("lets slow steps ... happen
+  after the 30 s token window without re-scanning"). An earlier DEMO.md note called this
+  intended; that was wrong and has been corrected.
+- **Alternatives considered:** Re-deriving permissions in the app (rejected — §12.3
+  forbids it); a web-push (VAPID) channel for browsers (rejected — not in the SDD's
+  stack, and Expo push is the specified provider); sending both N-WALKIN and
+  N-CONFIRM-LOCATION for an unverified walk-in (rejected — two pushes for one decision).
+- **SDD updated?** No. Items 1, 2, 6–10 are interpretations of text the SDD already
+  has, flagged here for review; nothing above contradicts an SDD requirement.
+
 Template for a new entry:
 
 ```markdown
