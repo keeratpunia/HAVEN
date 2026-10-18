@@ -164,6 +164,24 @@ describe('upload pipeline (SDD §9.4)', () => {
   });
 });
 
+describe('SA-17: the same photo uploaded twice at once', () => {
+  it('only one of several parallel identical uploads is stored; the rest are PHOTO_REUSED', async () => {
+    const photo = await solid(300, 300, 77).jpeg().toBuffer();
+    const results = await Promise.all(Array.from({ length: 6 }, () => upload(photo)));
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses.filter((x) => x === 200)).toHaveLength(1);
+    expect(
+      results.filter((r) => r.status === 400).every((r) => r.body.error.code === 'PHOTO_REUSED'),
+    ).toBe(true);
+    const rows = await db
+      .selectFrom('haven.media')
+      .select('id')
+      .where('owner_visitor_id', '=', w.visitorId)
+      .execute();
+    expect(rows).toHaveLength(1);
+  });
+});
+
 describe('local storage keys can’t escape their bucket', () => {
   it('rejects traversal and unknown buckets', async () => {
     const disk = new LocalDiskMediaStorage(mkdtempSync(path.join(tmpdir(), 'haven-media-')));

@@ -5,6 +5,7 @@ import type { ZodTypeProvider } from '../lib/validation.js';
 import type { Database } from '../db/index.js';
 import type { Clock } from '../lib/clock.js';
 import { AppError } from '../lib/errors.js';
+import { authorize } from '../auth/policy.js';
 import { sha256 } from '../lib/crypto.js';
 import { requireAuth } from '../auth/authenticate.js';
 
@@ -73,6 +74,7 @@ export async function registerVisitRoutes(
     '/invites/:token',
     { schema: { params: WINDOW_TOKEN_PARAMS } },
     async (request, reply) => {
+      authorize(request.principal ?? null, 'invites.read_landing', {});
       const tokenHash = sha256(request.params.token);
       const row = await db
         .selectFrom('haven.visits')
@@ -117,6 +119,10 @@ export async function registerVisitRoutes(
     if (!request.principal || request.principal.type !== 'visitor') {
       throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
     }
+    authorize(request.principal, 'me.read', {
+      ownerType: 'visitor',
+      ownerId: request.principal.visitorId,
+    });
     const rows = await db
       .selectFrom('haven.visits')
       .innerJoin('haven.users', 'haven.users.id', 'haven.visits.host_id')
@@ -149,7 +155,8 @@ export async function registerVisitRoutes(
   });
 
   // GET /v1/hostels — public (SDD §12.4 table: "GET /hostels Public -> [{id, code, name}]").
-  api.get('/hostels', async (_request, reply) => {
+  api.get('/hostels', async (request, reply) => {
+    authorize(request.principal ?? null, 'hostels.list', {});
     const rows = await db.selectFrom('haven.hostels').select(['id', 'code', 'name']).execute();
     reply.send(rows);
   });

@@ -114,7 +114,7 @@ export default function Assist() {
       });
     }
     try {
-      const res = await api.retryScanSessionLocation(session.id, location);
+      const res = await api.retryScanSessionLocation(session.id, session.nonce, location);
       setAttempts((a) => a + 1);
       setSession({ ...session, gpsOk: res.gpsOk });
       if (res.gpsOk) await next();

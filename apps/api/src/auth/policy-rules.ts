@@ -48,6 +48,13 @@ export function registerAuthPolicies(): void {
   definePolicy<SelfResource>('me.read', isSelf);
   definePolicy<SelfResource>('me.update', isSelf);
   definePolicy<DeleteSelfResource>('me.delete', canDeleteSelf);
+  // Sign-in endpoints are open by design: the OTP, Google ID token, refresh token or
+  // dev-login gate is the credential they check (SDD §9.5). The policy makes that an
+  // explicit, auditable decision instead of a missing call (SECURITY-AUDIT SA-15).
+  definePolicy<Record<string, never>>('auth.sign_in', () => true);
+  definePolicy<Record<string, never>>('auth.logout', (p) => p !== null && p.type !== 'device');
+  // F1 step 4: only a signed-in guest can claim an invite (the phone check follows).
+  definePolicy<Record<string, never>>('invites.claim', (p) => p?.type === 'visitor');
 }
 
 /** Test-only: lets a test file force a clean registration against a reset registry. */

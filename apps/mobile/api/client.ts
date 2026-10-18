@@ -547,10 +547,15 @@ export function createScanSession(params: {
   });
 }
 
-export function retryScanSessionLocation(sessionId: string, location: ScanLocation | null) {
+export function retryScanSessionLocation(
+  sessionId: string,
+  nonce: string,
+  location: ScanLocation | null,
+) {
   return request<ScanSessionResult>(`/v1/scan-sessions/${sessionId}/location`, {
     method: 'POST',
     auth: false,
+    headers: { 'X-Scan-Nonce': nonce },
     body: { location },
   });
 }

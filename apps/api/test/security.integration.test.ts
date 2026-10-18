@@ -550,3 +550,72 @@ describe('SA-13: errors reach Sentry, scrubbed; nothing is sent without a DSN', 
     );
   });
 });
+
+describe('SA-15: a /v1 handler that never calls authorize() fails closed', () => {
+  async function appWith(register: (app: FastifyInstance) => void) {
+    const env = testEnv();
+    const reporter = {
+      seen: [] as unknown[],
+      captureException(e: unknown) {
+        this.seen.push(e);
+      },
+    };
+    const app = await buildApp({
+      env,
+      logger: createLogger(env),
+      db,
+      clock,
+      mediaStorage: new MemoryMediaStorage(),
+      checkDb: async () => true,
+      errorReporter: reporter,
+    });
+    register(app);
+    await app.ready();
+    return { app, reporter };
+  }
+
+  it('a successful response without authorize() becomes a 500 and is reported', async () => {
+    const { app, reporter } = await appWith((a) => {
+      a.get('/v1/__forgot', async () => ({ secret: 'data' }));
+    });
+    const res = await supertest(app.server).get('/v1/__forgot');
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain('data');
+    expect(String(reporter.seen[0])).toMatch(/without authorize\(\): GET \/v1\/__forgot/);
+    await app.close();
+  });
+
+  it('the same handler with authorize() answers normally; /health is not a /v1 handler', async () => {
+    const { authorize } = await import('../src/auth/policy.js');
+    const { app } = await appWith((a) => {
+      a.get('/v1/__checked', async (request) => {
+        authorize(request.principal ?? null, 'hostels.list', {});
+        return { ok: true };
+      });
+    });
+    expect((await supertest(app.server).get('/v1/__checked')).status).toBe(200);
+    expect((await supertest(app.server).get('/health')).status).toBe(200);
+    await app.close();
+  });
+});
+
+describe('SA-19: browsers never receive the refresh token in a response body', () => {
+  it('X-Client: native is honoured only without an Origin header', async () => {
+    const app = await buildTestApp(clock);
+    const signIn = (headers: Record<string, string>) =>
+      supertest(app.server)
+        .post('/v1/auth/otp/verify')
+        .set(headers)
+        .send({ phone: '9999900001', code: '123456', purpose: 'guest_login' });
+
+    const native = await signIn({ 'X-Client': 'native' });
+    expect(native.status).toBe(200);
+    expect(typeof native.body.refreshToken).toBe('string');
+
+    const browser = await signIn({ 'X-Client': 'native', Origin: 'https://app.haven.test' });
+    expect(browser.status).toBe(200);
+    expect(browser.body.refreshToken).toBeUndefined();
+    expect(String(browser.headers['set-cookie'])).toMatch(/haven_rt=[^;]+;.*HttpOnly/i);
+    await app.close();
+  });
+});

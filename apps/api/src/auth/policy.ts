@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { AppError } from '../lib/errors.js';
 import type { Principal } from './principal.js';
 
@@ -24,6 +25,14 @@ export type PolicyRule<TResource = unknown> = (
 
 const registry = new Map<string, PolicyRule<never>>();
 
+/**
+ * Per-request record that `authorize()` ran (CLAUDE.md §3.10; SECURITY-AUDIT SA-15).
+ * The app opens one context per request; a /v1 handler that finishes successfully
+ * without any `authorize()` call is refused by the app's onSend check, so a forgotten
+ * check fails closed instead of shipping.
+ */
+export const authorizationContext = new AsyncLocalStorage<{ authorized: boolean }>();
+
 /** Called by a feature module's own `policy.ts` to register how it decides one action. */
 export function definePolicy<TResource>(action: string, rule: PolicyRule<TResource>): void {
   if (registry.has(action)) {
@@ -43,6 +52,8 @@ export function authorize<TResource>(
   action: string,
   resource: TResource,
 ): void {
+  const ctx = authorizationContext.getStore();
+  if (ctx) ctx.authorized = true;
   const rule = registry.get(action) as PolicyRule<TResource> | undefined;
   if (!rule) {
     throw new AppError(

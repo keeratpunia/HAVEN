@@ -156,6 +156,7 @@ export async function registerGateRoutes(
       config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
     },
     async (request, reply) => {
+      authorize(request.principal ?? null, 'scan_sessions.create', {});
       const result = await createScanSession(gateDeps, {
         token: request.body.token,
         clientNonce: request.body.clientNonce,
@@ -180,6 +181,15 @@ export async function registerGateRoutes(
     '/scan-sessions/:id/location',
     { schema: { params: SESSION_ID_PARAMS, body: LocationRetryBody } },
     async (request, reply) => {
+      // §12.1: "calls on /v1/scan-sessions/{id}/* require X-Scan-Nonce" — this one
+      // didn't check it (found by the authorize() enforcement, SECURITY-AUDIT SA-15).
+      await validateAndBindSession(
+        db,
+        clock,
+        request.params.id,
+        scanNonceFrom(request),
+        principalBinding(request),
+      );
       const result = await retryScanSessionLocation(
         gateDeps,
         request.params.id,
@@ -562,6 +572,7 @@ export async function registerGateRoutes(
       config: { rateLimit: { max: 5, timeWindow: '10 minutes' } },
     },
     async (request, reply) => {
+      authorize(request.principal ?? null, 'gate_devices.pair', {});
       const result = await pairDevice({
         db,
         clock,
@@ -583,6 +594,7 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'device') {
         throw new AppError('AUTH_REQUIRED', 401, 'Gate device authentication required.');
       }
+      authorize(request.principal, 'gate_devices.heartbeat', {});
       const result = await recordHeartbeat({
         db,
         clock,

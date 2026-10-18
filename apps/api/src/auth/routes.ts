@@ -67,8 +67,15 @@ const PatchMeBody = z.object({
   isAdultConfirmed: z.literal(true).optional(),
 });
 
+/**
+ * Native apps get the refresh token in the JSON body (stored in SecureStore, T12);
+ * browsers only ever get the httpOnly `haven_rt` cookie (§16.4). A browser always sends
+ * `Origin` on these POSTs and a native client never does, so `X-Client: native` from a
+ * request with an Origin is ignored: script on a web page can't ask for a body token
+ * (SECURITY-AUDIT SA-19).
+ */
 function clientFromHeader(request: FastifyRequest): 'web' | 'native' {
-  return request.headers['x-client'] === 'native' ? 'native' : 'web';
+  return request.headers['x-client'] === 'native' && !request.headers.origin ? 'native' : 'web';
 }
 
 function requestIp(request: FastifyRequest): string | null {
@@ -106,6 +113,7 @@ export async function registerAuthRoutes(
   const api = app.withTypeProvider<ZodTypeProvider>();
 
   api.post('/auth/otp/request', { schema: { body: OtpRequestBody } }, async (request, reply) => {
+    authorize(request.principal ?? null, 'auth.sign_in', {});
     const phone = normalizePhone(request.body.phone);
     const result = await requestOtp(
       db,
@@ -129,6 +137,7 @@ export async function registerAuthRoutes(
       config: { rateLimit: { max: opts.otpVerifyMaxPer10Min, timeWindow: '10 minutes' } },
     },
     async (request, reply) => {
+      authorize(request.principal ?? null, 'auth.sign_in', {});
       const phone = normalizePhone(request.body.phone);
       const { purpose, code } = request.body;
 
@@ -186,6 +195,7 @@ export async function registerAuthRoutes(
   );
 
   api.post('/auth/google', { schema: { body: GoogleSignInBody } }, async (request, reply) => {
+    authorize(request.principal ?? null, 'auth.sign_in', {});
     const result = await withTx(db, { principal: null, requestId: request.id }, async (trx) => {
       const signIn = await signInWithGoogle(trx, googleVerifier, clock, {
         idToken: request.body.idToken,
@@ -221,6 +231,7 @@ export async function registerAuthRoutes(
   // `buildApp` has already refused to boot with this flag on outside NODE_ENV=development.
   if (env.DEV_LOGIN_ENABLED) {
     api.post('/auth/dev-login', { schema: { body: DevLoginBody } }, async (request, reply) => {
+      authorize(request.principal ?? null, 'auth.sign_in', {});
       const result = await withTx(db, { principal: null, requestId: request.id }, async (trx) => {
         const signIn = await devLogin(trx, clock, request.body.email);
         const residentStatus = await getResidentStatus(trx, signIn.userId);
@@ -251,6 +262,7 @@ export async function registerAuthRoutes(
   }
 
   api.post('/auth/refresh', { schema: { body: RefreshBody } }, async (request, reply) => {
+    authorize(request.principal ?? null, 'auth.sign_in', {});
     const presented =
       clientFromHeader(request) === 'native'
         ? request.body.refreshToken
@@ -284,6 +296,7 @@ export async function registerAuthRoutes(
 
   api.post('/auth/logout', { preHandler: requireAuth }, async (request, reply) => {
     const principal = request.principal;
+    authorize(principal ?? null, 'auth.logout', {});
     if (principal && principal.type !== 'device') {
       await withTx(db, { principal, requestId: request.id }, async (trx) => {
         await revokeSession(trx, principal.sessionId, 'logout', clock);
@@ -391,6 +404,7 @@ export async function registerAuthRoutes(
     if (!principal || principal.type !== 'visitor') {
       throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to upload a profile photo.');
     }
+    authorize(principal, 'me.update', { ownerType: 'visitor', ownerId: principal.visitorId });
     const file = await request.file();
     if (!file) throw new AppError('PHOTO_REQUIRED', 400, 'A photo is required.');
     const raw = await file.toBuffer();
@@ -412,6 +426,7 @@ export async function registerAuthRoutes(
       if (!principal || principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to claim this invite.');
       }
+      authorize(principal, 'invites.claim', {});
       const { token } = request.params;
       const visitorRow = await db
         .selectFrom('haven.visitors')

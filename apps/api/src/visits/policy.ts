@@ -99,6 +99,10 @@ export function registerVisitPolicies(): void {
   definePolicy<VisitActorResource>('visits.edit_window', isHost);
   definePolicy<VisitActorResource>('visits.invite_link', isHost);
   definePolicy<VisitActorResource>('visits.preview', isHost);
+  // Public by design (SDD §12.4/§12.5): the invite token is the credential for its
+  // landing page; the hostel list carries no personal data (SECURITY-AUDIT SA-15).
+  definePolicy<Record<string, never>>('invites.read_landing', () => true);
+  definePolicy<Record<string, never>>('hostels.list', () => true);
 }
 
 /** Test-only: lets a test file force a clean registration against a reset registry. */

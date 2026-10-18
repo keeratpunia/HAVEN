@@ -45,6 +45,16 @@ export function registerGatePolicies(): void {
   definePolicy<GateActorResource>('gate.create_pairing_code', isWarden);
   definePolicy<GateActorResource>('gate.revoke_device', isWarden);
   definePolicy<ResidentSearchResource>('gate.search_residents', canSearchResidents);
+  // §9.3: a fresh gate token opens a scan session (the token is the credential); every
+  // later call is allowed only when the session's nonce and principal binding hold.
+  definePolicy<Record<string, never>>('scan_sessions.create', () => true);
+  definePolicy<{ nonceMatches: boolean; bindingMatches: boolean }>(
+    'scan_sessions.use',
+    (_p, r) => r.nonceMatches && r.bindingMatches,
+  );
+  // F8: the pairing code is the credential; heartbeats are a paired device's own.
+  definePolicy<Record<string, never>>('gate_devices.pair', () => true);
+  definePolicy<Record<string, never>>('gate_devices.heartbeat', (p) => p?.type === 'device');
 }
 
 /** Test-only: lets a test file force a clean registration against a reset registry. */

@@ -1359,6 +1359,62 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** No. Items 1, 3 and 10 should be reflected in §12.7, §12.2 and §8.4
   at the next revision.
 
+### DEC-018 — Team decisions on the security audit (SA-12, SA-15, SA-17, SA-19, SA-23, SA-24)
+
+- **Date:** 2026-10-19
+- **Decided by:** the team, on the open items of DEC-017 / `docs/SECURITY-AUDIT.md`.
+- **Decision:**
+  1. **SA-24: follow SDD §9.5.** The test-OTP phones (`+919999900001`–`09`, code
+     `123456`) stay allowed in every non-production environment, staging included,
+     and never in production.
+     - Enforced by `APP_ENV !== 'production'`.
+     - `APP_ENV` has no default since SA-02, so a deploy can't fall into the bypass by
+       omission.
+     - The brief's earlier "development only" request is withdrawn.
+  2. **SA-12, web security headers: scheduled for the deployment milestone.** CSP,
+     `frame-ancestors`, HSTS and `nosniff` for the web app ship with the hosting
+     config, once the host and production API domain are fixed.
+  3. **SA-15, authorize() consistency: fixed with runtime enforcement.**
+     - Every request runs in an `AsyncLocalStorage` context that `authorize()` marks.
+     - A successful `/v1` response whose request never reached `authorize()` is
+       replaced by `500 INTERNAL` and reported (`apps/api/src/app.ts`).
+     - Open endpoints call explicit always-allow policies, so "public by design" is
+       a recorded decision, not a missing call: `auth.sign_in`, `invites.read_landing`,
+       `hostels.list`, `scan_sessions.create`, `gate_devices.pair`.
+     - The scan-session nonce and binding check runs through `scan_sessions.use`.
+     - Turning this on across the whole suite found three real gaps, now fixed:
+       - **SA-31:** `POST /scan-sessions/{id}/location` didn't check `X-Scan-Nonce`
+         (§12.1). It does now, and the guest and resident apps send it.
+       - **SA-32:** idempotent replays of ★ host actions returned the stored response
+         without authorizing. Access is now checked before the replay.
+       - **SA-33:** `GET /me/hosted-visits`, `/me/quota` and `/me/charges` relied on
+         self-scoped queries alone. They now call `me.read`.
+  4. **SA-17, duplicate-photo race: fixed in the database.**
+     - A unique index on `media (owner_visitor_id, sha256)` covers live photos
+       (migration 20261021000001).
+     - The losing insert maps to `PHOTO_REUSED`.
+  5. **SA-19, refresh token on the web: fixed without changing the flows.**
+     - Web clients already used only the httpOnly `haven_rt` cookie (§16.4).
+     - The gap was that `X-Client: native` produced a body token for any caller. That
+       header is now ignored when the request carries an `Origin` header: browsers
+       always send it, native clients never do.
+     - Native (SecureStore) and web (cookie) flows are unchanged, and Playwright
+       passes.
+  6. **SA-23, dev-tooling advisories: accepted.** `braces`, `node-forge`, `sprintf-js`,
+     `decode-uri-component` and `uuid` come in only through Expo CLI, Metro and Jest
+     (build and test tooling). The two HIGH ones have no patched release. Nothing
+     reaches the API runtime or the shipped web bundle's request path. Revisit when
+     Expo updates them; until then CI's audit gate should use `pnpm audit --prod`.
+- **Tests:**
+  - `apps/api/test/security.integration.test.ts`: SA-15 (a handler without
+    `authorize()` fails closed and is reported; one with it answers), and SA-19.
+  - `apps/api/test/media.integration.test.ts`: SA-17.
+  - `apps/api/test/gate-routes.integration.test.ts`: SA-31.
+  - SA-17 and SA-19 were confirmed to fail with their fixes stashed. SA-31 to SA-33
+    were found by the enforcement itself: the full suite failed on them before the
+    fixes.
+- **SDD updated?** Not needed for 1–6: they implement or follow the SDD as written.
+
 Template for a new entry:
 
 ```markdown

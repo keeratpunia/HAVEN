@@ -421,14 +421,35 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
     for (let i = 0; i < 2; i++) {
       const retry = await supertest(app.server)
         .post(`/v1/scan-sessions/${sessionId}/location`)
+        .set('X-Scan-Nonce', 'n10')
         .send({ location: badLocation });
       expect(retry.status).toBe(200);
     }
     const fourth = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/location`)
+      .set('X-Scan-Nonce', 'n10')
       .send({ location: badLocation });
     expect(fourth.status).toBe(429);
     expect(fourth.body.error.code).toBe('LOCATION_RETRY_LIMIT');
+  });
+
+  it('location retry needs the session nonce (SDD §12.1; SECURITY-AUDIT SA-15)', async () => {
+    const hostelId = await makeHostel(db);
+    const { code, secret } = await makeGateWithSecret(hostelId);
+    const token = generateGateToken({ secret, gateCode: code, now: clock.now() });
+    const badLocation = { lat: GATE_LAT + 1, lng: GATE_LNG, accuracy: 10, fixAgeMs: 1000 };
+    const created = await supertest(app.server)
+      .post('/v1/scan-sessions')
+      .send({ token, clientNonce: 'n11', location: badLocation });
+    const url = `/v1/scan-sessions/${created.body.scanSessionId}/location`;
+    const missing = await supertest(app.server).post(url).send({ location: badLocation });
+    expect(missing.status).toBe(403);
+    expect(missing.body.error.code).toBe('SCAN_SESSION_FORBIDDEN');
+    const wrong = await supertest(app.server)
+      .post(url)
+      .set('X-Scan-Nonce', 'someone-else')
+      .send({ location: badLocation });
+    expect(wrong.status).toBe(403);
   });
 
   it('invalid scan session: a nonexistent session id is SCAN_SESSION_EXPIRED', async () => {

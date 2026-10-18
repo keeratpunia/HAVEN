@@ -192,6 +192,8 @@ async function storePhoto(params: StorePhotoParams): Promise<{ photoId: string }
   const mediaId = randomUUID();
   const path = params.path(mediaId, now);
 
+  // The unique index (migration 20261021000001) settles the race the check above can't:
+  // two parallel uploads of the same photo (SECURITY-AUDIT SA-17).
   const inserted = await params.db
     .insertInto('haven.media')
     .values({
@@ -205,7 +207,13 @@ async function storePhoto(params: StorePhotoParams): Promise<{ photoId: string }
       owner_visitor_id: params.ownerVisitorId ?? null,
     })
     .returning('id')
-    .executeTakeFirstOrThrow();
+    .executeTakeFirstOrThrow()
+    .catch((err: unknown) => {
+      if ((err as { code?: string }).code === '23505') {
+        throw new AppError('PHOTO_REUSED', 400, "This looks like a photo you've already used.");
+      }
+      throw err;
+    });
 
   await params.storage.put({ bucket: params.bucket, path }, processed);
 

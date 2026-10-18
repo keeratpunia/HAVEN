@@ -47,25 +47,28 @@ the end.
 | SA-09 | MEDIUM | No 64 KB JSON body limit (§16.4 Input); Fastify's default is 1 MB | Fixed `782a8cc` |
 | SA-10 | MEDIUM | Behind the hosting proxy every client shares the proxy's IP, so per-IP limits apply to everyone at once | Fixed `782a8cc` (config; set per environment) |
 | SA-11 | MEDIUM | Reading residents' ID-card and selfie photos (W-04/W-08) writes no `read.*` audit row (T15) | Fixed `782a8cc` |
-| SA-12 | MEDIUM | The web app has no CSP / `frame-ancestors` / HSTS headers configured anywhere (§16.4 Headers) | **Open — needs your decision** |
+| SA-12 | MEDIUM | The web app has no CSP / `frame-ancestors` / HSTS headers configured anywhere (§16.4 Headers) | Scheduled: deployment milestone (DEC-018) |
 | SA-13 | MEDIUM | Sentry is not wired (NFR-13, §9.7 "logged to Sentry") | Fixed `91b0218` (API + web; Android no-op) |
 | SA-14 | LOW | The console OTP line logs the full phone number (§16.4: phones masked only) | Fixed `782a8cc` |
-| SA-15 | LOW | Some handlers enforce access by principal type or scan-session binding, not `authorize()` (CLAUDE.md §3.10 consistency) | Open (recommendation) |
+| SA-15 | LOW | Some handlers enforce access by principal type or scan-session binding, not `authorize()` (CLAUDE.md §3.10 consistency) | Fixed (DEC-018): runtime enforcement; found SA-31..33 |
 | SA-16 | LOW | Access-token verification doesn't pin the HS256 algorithm | Fixed `782a8cc` |
-| SA-17 | LOW | PHOTO_REUSED is check-then-insert (a race lets two identical uploads through) | Open |
-| SA-18 | LOW | Registering a push token another user holds moves it to the caller | Open (by design) |
-| SA-19 | LOW | `X-Client: native` makes `/auth/refresh` return the refresh token in JSON on the web too, so XSS could read it | Open |
+| SA-17 | LOW | PHOTO_REUSED is check-then-insert (a race lets two identical uploads through) | Fixed (DEC-018): unique index |
+| SA-18 | LOW | Registering a push token another user holds moves it to the caller | Open (accepted by design) |
+| SA-19 | LOW | `X-Client: native` makes `/auth/refresh` return the refresh token in JSON on the web too, so XSS could read it | Fixed (DEC-018): Origin check |
 | SA-20 | LOW | CORS config accepts a `*` entry | Fixed `782a8cc` |
 | SA-21 | LOW | Phone-verifying a number another user owns returns 500, not 409 | Fixed `782a8cc` |
 | SA-22 | LOW | Warden search uses ILIKE without escaping `%` and `_` (wider matches only) | Not an issue: both searches already escape `\ % _` (false positive) |
-| SA-23 | LOW | Dev-tooling advisories (braces, node-forge, sprintf-js, decode-uri-component, uuid) via Expo/Metro/Jest; `pnpm audit` fails at high | Open |
-| SA-24 | INFO | The test OTP is enabled in staging by SDD design (§9.5 "non-production"); you asked it to be development-only | **Open — needs your decision** |
+| SA-23 | LOW | Dev-tooling advisories (braces, node-forge, sprintf-js, decode-uri-component, uuid) via Expo/Metro/Jest; `pnpm audit` fails at high | Accepted (DEC-018): dev tooling only, no patch |
+| SA-24 | INFO | The test OTP is enabled in staging by SDD design (§9.5 "non-production"); you asked it to be development-only | Decided (DEC-018): follow §9.5; never production |
 | SA-25 | INFO | The gate secret lives in the gate browser's localStorage (§9.2 design) | Accepted |
 | SA-26 | INFO | Mock location is client-reported (T4 accepted) | Accepted |
 | SA-27 | INFO | CSRF: bearer tokens everywhere except the refresh cookie (SameSite=Lax, POST) | OK |
 | SA-28 | INFO | SQL: Kysely and parameterised `pg` only; the one `format('%I')` iterates `pg_tables` | OK |
 | SA-29 | INFO | SSRF: no user-controlled outbound URL | OK |
 | SA-30 | INFO | The dev sign-in is refused at boot unless `NODE_ENV=development`, but no test proved it | Fixed (tests) `782a8cc` |
+| SA-31 | MEDIUM | `POST /scan-sessions/{id}/location` didn't check `X-Scan-Nonce` (§12.1). Found by the SA-15 enforcement | Fixed (DEC-018) |
+| SA-32 | LOW | Idempotent replays of ★ host actions returned the stored response without authorizing (the key is already scoped to the caller) | Fixed (DEC-018) |
+| SA-33 | LOW | `GET /me/hosted-visits`, `/me/quota`, `/me/charges` relied on self-scoped queries without `authorize()` | Fixed (DEC-018) |
 | SA-M1..M4 | MEDIUM/LOW | Media (found and fixed in the Part 1 media review): 3 MB+ upload gave 500; no pixel limit; no traversal guard; the media route skipped `authorize()` | Fixed in `0bc7c3f` |
 
 **Totals.** 3 HIGH, 10 MEDIUM, 10 LOW and 7 INFO, plus 4 media findings already
@@ -325,6 +328,22 @@ fixed.
 3. **SA-17, SA-19, SA-23.** Accept or schedule.
 
 ## Final status
+
+Updated after the team's decisions (DEC-018).
+
+| Severity | Found | Fixed | Open / decided |
+|---|---|---|---|
+| CRITICAL | 0 | 0 | — |
+| HIGH | 3 | 3 | — |
+| MEDIUM | 11 | 10 | SA-12 scheduled for the deployment milestone |
+| LOW | 12 | 8 (+1 false positive) | SA-18 accepted by design; SA-23 accepted |
+| INFO | 7 | 1 (tests) | SA-24 decided: follow §9.5 |
+| Media (Part 1) | 4 | 4 | — |
+
+The rest of the history (regression evidence, deployment checklist) is unchanged
+below.
+
+
 
 | Severity | Found | Fixed | Open | Open items |
 |---|---|---|---|---|

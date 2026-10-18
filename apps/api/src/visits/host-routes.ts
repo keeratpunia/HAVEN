@@ -228,6 +228,7 @@ export async function registerHostVisitRoutes(
     { schema: { querystring: HostedVisitsQuerySchema }, preHandler: requireAuth },
     async (request, reply) => {
       const principal = requireUser(request.principal);
+      authorize(principal, 'me.read', { ownerType: 'user', ownerId: principal.userId });
       const offset = decodeCursor(request.query.cursor);
       const limit = request.query.limit;
       let query = db.selectFrom('haven.visits').selectAll().where('host_id', '=', principal.userId);
@@ -375,6 +376,12 @@ export async function registerHostVisitRoutes(
     '/visits/:id/approve',
     { schema: { params: VISIT_ID_PARAMS, body: ApproveBodySchema }, preHandler: requireAuth },
     async (request, reply) => {
+      // A replayed response is still a read of this visit: check access first, so a
+      // replay never skips authorize() (SECURITY-AUDIT SA-15). Only people act here.
+      if (!request.principal || request.principal.type === 'device') {
+        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+      }
+      await visibleVisit(request.principal, request.params.id);
       await runIdempotent(db, request, reply, async () => {
         const visit = await visibleVisit(request.principal, request.params.id);
         const deps = await depsFor(visit.hostel_id);
@@ -415,6 +422,12 @@ export async function registerHostVisitRoutes(
     '/visits/:id/reject',
     { schema: { params: VISIT_ID_PARAMS, body: RejectBodySchema }, preHandler: requireAuth },
     async (request, reply) => {
+      // A replayed response is still a read of this visit: check access first, so a
+      // replay never skips authorize() (SECURITY-AUDIT SA-15). Only people act here.
+      if (!request.principal || request.principal.type === 'device') {
+        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+      }
+      await visibleVisit(request.principal, request.params.id);
       await runIdempotent(db, request, reply, async () => {
         const visit = await visibleVisit(request.principal, request.params.id);
         const deps = await depsFor(visit.hostel_id);
@@ -443,6 +456,12 @@ export async function registerHostVisitRoutes(
     '/visits/:id/confirm-arrival',
     { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
     async (request, reply) => {
+      // A replayed response is still a read of this visit: check access first, so a
+      // replay never skips authorize() (SECURITY-AUDIT SA-15). Only people act here.
+      if (!request.principal || request.principal.type === 'device') {
+        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+      }
+      await visibleVisit(request.principal, request.params.id);
       await runIdempotent(db, request, reply, async () => {
         const principal = requireUser(request.principal);
         const visit = await visibleVisit(principal, request.params.id);
@@ -462,6 +481,12 @@ export async function registerHostVisitRoutes(
     '/visits/:id/dispute',
     { schema: { params: VISIT_ID_PARAMS, body: DisputeBodySchema }, preHandler: requireAuth },
     async (request, reply) => {
+      // A replayed response is still a read of this visit: check access first, so a
+      // replay never skips authorize() (SECURITY-AUDIT SA-15). Only people act here.
+      if (!request.principal || request.principal.type === 'device') {
+        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+      }
+      await visibleVisit(request.principal, request.params.id);
       await runIdempotent(db, request, reply, async () => {
         const principal = requireUser(request.principal);
         const visit = await visibleVisit(principal, request.params.id);
@@ -482,6 +507,12 @@ export async function registerHostVisitRoutes(
     '/visits/:id/mark-left',
     { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
     async (request, reply) => {
+      // A replayed response is still a read of this visit: check access first, so a
+      // replay never skips authorize() (SECURITY-AUDIT SA-15). Only people act here.
+      if (!request.principal || request.principal.type === 'device') {
+        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+      }
+      await visibleVisit(request.principal, request.params.id);
       await runIdempotent(db, request, reply, async () => {
         const principal = requireUser(request.principal);
         const visit = await visibleVisit(principal, request.params.id);
@@ -521,6 +552,7 @@ export async function registerHostVisitRoutes(
     { schema: { querystring: QuotaQuerySchema }, preHandler: requireAuth },
     async (request, reply) => {
       const principal = requireUser(request.principal);
+      authorize(principal, 'me.read', { ownerType: 'user', ownerId: principal.userId });
       const resident = await residentOf(principal.userId);
       const deps = await depsFor(resident.hostel_id);
       const month =
@@ -536,6 +568,7 @@ export async function registerHostVisitRoutes(
     { schema: { querystring: ChargesQuerySchema }, preHandler: requireAuth },
     async (request, reply) => {
       const principal = requireUser(request.principal);
+      authorize(principal, 'me.read', { ownerType: 'user', ownerId: principal.userId });
       await residentOf(principal.userId);
       const offset = decodeCursor(request.query.cursor);
       const limit = request.query.limit;

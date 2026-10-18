@@ -163,7 +163,11 @@ export default function GateScan() {
     setPhase('locating');
     const { location, locationError } = await captureScanLocation();
     try {
-      const result = await api.retryScanSessionLocation(session.scanSessionId, location);
+      const result = await api.retryScanSessionLocation(
+        session.scanSessionId,
+        clientNonceRef.current,
+        location,
+      );
       setSession(result);
       if (result.gpsOk) {
         setPhase('resolving_actions');

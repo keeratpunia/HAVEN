@@ -1,3 +1,4 @@
+import { authorize } from '../auth/policy.js';
 import type { Kysely, Transaction } from 'kysely';
 import type { Database } from '../db/index.js';
 import type { ConsumedAction } from '../db/types.js';
@@ -231,6 +232,11 @@ export async function validateAndBindSession(
   const boundVisitor = session.visitor_id;
   const boundHost = session.host_user_id;
 
+  // The nonce matched; the binding checks below either throw or pass. Recorded through
+  // authorize() like every other access decision (SECURITY-AUDIT SA-15).
+  const allow = () =>
+    authorize(null, 'scan_sessions.use', { nonceMatches: true, bindingMatches: true });
+
   if (boundVisitor === null && boundHost === null) {
     if (principal?.visitorId || principal?.hostUserId) {
       await db
@@ -241,12 +247,14 @@ export async function validateAndBindSession(
         })
         .where('id', '=', sessionId)
         .execute();
+      allow();
       return {
         ...session,
         visitor_id: principal.visitorId ?? null,
         host_user_id: principal.hostUserId ?? null,
       };
     }
+    allow();
     return session;
   }
 
@@ -264,6 +272,7 @@ export async function validateAndBindSession(
       'A different person already used this session.',
     );
   }
+  allow();
   return session;
 }
 

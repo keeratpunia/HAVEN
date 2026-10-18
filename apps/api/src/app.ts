@@ -32,6 +32,7 @@ import { registerNotificationRoutes } from './notify/routes.js';
 import { registerAccountRoutes } from './account/routes.js';
 import { createBotVerifier, type BotVerifier } from './auth/bot-check.js';
 import { createErrorReporter, type ErrorReporter } from './lib/error-reporter.js';
+import { authorizationContext } from './auth/policy.js';
 import { MediaUrlSigner } from './media/signing.js';
 import { RulesProvider } from './rules/provider.js';
 import { registerAdminPolicies } from './admin/policy.js';
@@ -169,6 +170,37 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   configureZodValidation(app);
+
+  // Every /v1 handler must call authorize() (CLAUDE.md §3.10, SDD §3.4). Each request runs
+  // in its own context; a successful /v1 response whose request never reached
+  // authorize() is replaced with a 500 and reported, so a missing check fails closed
+  // (SECURITY-AUDIT SA-15). Preflight OPTIONS are CORS's, not a handler's.
+  app.addHook('onRequest', (_request, _reply, done) => {
+    authorizationContext.run({ authorized: false }, done);
+  });
+  app.addHook('onSend', async (request, reply, payload) => {
+    const ctx = authorizationContext.getStore();
+    if (!ctx || ctx.authorized) return payload;
+    if (
+      request.method === 'OPTIONS' ||
+      !request.url.startsWith('/v1/') ||
+      reply.statusCode >= 400
+    ) {
+      return payload;
+    }
+    const route = `${request.method} ${request.routeOptions.url ?? request.url.split('?')[0]}`;
+    request.log.error({ route }, 'handler finished without authorize()');
+    reporter.captureException(new Error(`handler finished without authorize(): ${route}`), {
+      requestId: request.id,
+    });
+    reply.code(500).header('content-type', 'application/json; charset=utf-8');
+    return JSON.stringify(
+      toErrorEnvelope(
+        new AppError('INTERNAL', 500, 'Something went wrong on our side.'),
+        request.id,
+      ),
+    );
+  });
 
   // Open event streams would keep the HTTP server from closing; end them first.
   app.addHook('preClose', async () => hub.close());
