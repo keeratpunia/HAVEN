@@ -14,8 +14,10 @@ pnpm demo
 ```
 
 This starts, in order: an embedded local Postgres with a fresh seed (GH-8 hostel, two
-verified residents, one gate), the real API (real clock, dev sign-in enabled), and the
-Expo web app. Wait for the banner:
+verified residents, one gate, a warden, an office user, a super admin, a resident
+waiting for verification, three guests inside, an overnight request and two charges),
+the real API (real clock, dev sign-in enabled, outbox worker and background jobs on),
+and the Expo web app. Wait for the banner:
 
 ```
 ========================================================================
@@ -23,6 +25,7 @@ HAVEN demo is up.
   Web:  http://localhost:8081
   API:  http://localhost:8080
   Resident dev sign-in: priya@haven.demo, fatima@haven.demo (any password-free email)
+  Staff dev sign-in: warden@haven.demo (warden), office@haven.demo (office), admin@haven.demo (super admin)
   Guest OTP: read "[otp:dev] ... purpose-code=" above, or use +91 9999900001/02 with code 123456
   Gate pairing code: printed above by [db] — regenerate anytime with:
     pnpm --filter @haven/api run demo:pair-code
@@ -208,6 +211,68 @@ their second visit on, it's one scan." Tip for a smooth demo: have Guest B sign 
 - **GPS failure:** turn off phone location (or walk out of the geofence radius) before
   scanning. After 3 failed attempts the app offers **Ask host to confirm** — proceeds
   to `awaiting_host_confirmation` instead of blocking the guest outright (FR-27).
+
+### H. Warden and office
+
+Open a separate browser window (or a private window) at the web URL and sign in with
+the dev sign-in. Wide windows (1024 px and up) show a sidebar; a phone-width window shows
+bottom tabs. Staff land on their own screens: wardens on **Dashboard** (W-01), office
+staff on **Charges** (O-01), the super admin on **Residents**.
+
+What the seed gives you, relative to the moment you started `pnpm demo`:
+
+| Who / what | Shows up on |
+|---|---|
+| Ananya Rao inside, guest of Priya (on time) | Dashboard "Inside now", Inside |
+| Kavya Menon inside past her window (overstay) | Dashboard "Overstaying" (amber), Inside |
+| Riya Das inside, Fatima said "Not my guest" | Dashboard "Disputed" (red), Search visits |
+| Sneha Pillai invited for later today | Dashboard "Expected today" |
+| Meghna Joshi, 2-night overnight request from Priya | Approvals → Overnight requests |
+| Neha Verma, room 103, waiting for verification | Approvals → Residents (ID card + selfie) |
+| ₹100 overnight charge (Fatima, pending), ₹400 fine (Priya, confirmed) | Office → Charges |
+
+**Warden walkthrough** (`warden@haven.demo`):
+
+22. **Dashboard:** point at the tiles, the gate status (offline until you pair the gate
+    laptop; then green) and the latest gate events. The **● Live** badge means the
+    screen is on the live stream (SDD §9.9). If it says "Updating every 15 s", the
+    stream dropped and the screen is polling while it reconnects.
+23. Keep the dashboard open on the projector and have a guest check in (step D). The new
+    entry and the Inside count appear **without reloading**. Point this out.
+24. **Approvals → Residents:** Neha Verma's ID card and selfie. **Verify Neha Verma**.
+    The confirmation says the ID card photo was deleted (FR-05: it's kept only until the
+    decision).
+25. **Approvals → Overnight requests:** Meghna Joshi, nights, the ₹ charge and Priya's
+    monthly quota. **Approve** creates the charge (BR-08).
+26. **Inside → Riya Das** (W-05): timeline, the GPS distance (never raw
+    coordinates), and the host's dispute. Show **Resolve dispute**. Then **Force
+    check-out** (reason required) and **Ban guest**. If Riya scans the gate again, she
+    gets "You can't enter this hostel". Every one of these lands in **Audit log**.
+27. **Rules:** change a value (for example the day cutoff) and publish. It saves as a
+    new version, and the very next gate scan uses it, with no deploy (SDD §4).
+28. **Gates:** pair a device, **Set location** (it averages 5 GPS readings, FR-56) and
+    **Revoke**. **Emergency roll call**, **Reports** (CSV export) and **Audit log** are
+    under **More**.
+
+**Office walkthrough** (`office@haven.demo`):
+
+29. **Charges:** the overnight charge you just approved is here. **Confirm**, then type
+    a receipt number and **Mark paid**. Point out what the office **doesn't** see: no
+    guest phone numbers and no photos (TC-SEC-03, stripped by the API, not hidden by
+    the screen).
+30. Back as the warden: **More → Charges** can **Waive** (reason required) or **Create
+    fine** (₹400 minimum, BR-18). The office can't do either.
+
+**Super admin** (`admin@haven.demo`): lands on **Residents** and can manage residents,
+bans, rules, gates and the audit log in any hostel, invite wardens and create hostels
+(**Staff**). The day-to-day screens (dashboard, approvals of stays, emergency list,
+reports, charges) are the warden's. This is deliberate (docs/DECISIONS.md DEC-014).
+
+**Staff sign-in without Google:** this demo has no Google OAuth credentials, so staff
+use the same dev sign-in as residents. It is refused outside `NODE_ENV=development`
+(DEC-011). Staff invites (W-10) create a real 48-hour link bound to an email, but
+accepting one needs Google sign-in, so you can show the invite being created, not
+accepted.
 
 ## 2. If something goes wrong on stage
 

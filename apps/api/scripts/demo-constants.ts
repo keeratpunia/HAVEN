@@ -47,6 +47,15 @@ export const DEMO_RESIDENT_2_EMAIL = 'fatima@haven.demo';
 export const DEMO_RESIDENT_2_NAME = 'Fatima Khan';
 export const DEMO_RESIDENT_2_ROOM = '102';
 
+/** Staff for the warden/office walkthrough (dev sign-in, DEC-011). The super admin's
+ * grant has no hostel (SDD §11.2 role_assignments check). */
+export const DEMO_WARDEN_EMAIL = 'warden@haven.demo';
+export const DEMO_WARDEN_NAME = 'Meera Iyer';
+export const DEMO_OFFICE_EMAIL = 'office@haven.demo';
+export const DEMO_OFFICE_NAME = 'Omar Siddiqui';
+export const DEMO_SUPER_ADMIN_EMAIL = 'admin@haven.demo';
+export const DEMO_SUPER_ADMIN_NAME = 'Dean of Students';
+
 /** Non-production OTP-bypass numbers reserved by SDD §9.5 — use these to sign in as a
  * guest without a real SMS provider; +919999900001..09 are all available. */
 export const DEMO_GUEST_PHONE_1 = '+919999900001';

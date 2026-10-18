@@ -58,6 +58,9 @@ async function main() {
     SMS_PROVIDER: 'console',
     DATA_ENCRYPTION_KEY: DEMO_DATA_ENCRYPTION_KEY,
     DEV_LOGIN_ENABLED: 'true',
+    // The one instance running the outbox worker and, with no pg_cron here, the §9.8
+    // jobs (overstay flags, gate offline alerts), so the warden dashboard stays live.
+    WORKER_ENABLED: 'true',
   });
   const logger = createLogger(env);
   const db = createDb(env);

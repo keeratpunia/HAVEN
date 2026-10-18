@@ -4,7 +4,9 @@
  * Starts one embedded-Postgres instance, applies the real schema migration, and
  * inserts a realistic demo seed: the GH-8 hostel, its real rules config, one gate at
  * configurable coordinates (DEMO_GATE_LAT/DEMO_GATE_LNG — set these to the actual
- * presentation room), two verified residents, and a fresh 10-minute gate pairing
+ * presentation room), two verified residents, a warden, an office user and a super
+ * admin, enough visits and charges to make the warden dashboard meaningful, and a
+ * fresh 10-minute gate pairing
  * code printed to the console so the presentation laptop/phone can pair into the
  * actual gate device via /gate/pair.
  *
@@ -13,10 +15,11 @@
  * demo-server.ts, not a frozen one — this is meant to be run live, not against a
  * fixed "now". Stays running in the foreground until killed.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
+import sharp from 'sharp';
 import { GH8_RULES_CONFIG_V1 } from '@haven/shared';
 import { encryptAesGcm, parseDataEncryptionKey, sha256 } from '../src/lib/crypto.js';
 import { generatePairingCode, formatPairingCodeForDisplay } from '../src/lib/ids.js';
@@ -35,6 +38,12 @@ import {
   DEMO_RESIDENT_2_EMAIL,
   DEMO_RESIDENT_2_NAME,
   DEMO_RESIDENT_2_ROOM,
+  DEMO_OFFICE_EMAIL,
+  DEMO_OFFICE_NAME,
+  DEMO_SUPER_ADMIN_EMAIL,
+  DEMO_SUPER_ADMIN_NAME,
+  DEMO_WARDEN_EMAIL,
+  DEMO_WARDEN_NAME,
   demoGateLat,
   demoGateLng,
   demoGateRadiusM,
@@ -139,7 +148,205 @@ async function main() {
     DEMO_RESIDENT_1_NAME,
     DEMO_RESIDENT_1_ROOM,
   );
-  await upsertVerifiedResident(DEMO_RESIDENT_2_EMAIL, DEMO_RESIDENT_2_NAME, DEMO_RESIDENT_2_ROOM);
+  const resident2Id = await upsertVerifiedResident(
+    DEMO_RESIDENT_2_EMAIL,
+    DEMO_RESIDENT_2_NAME,
+    DEMO_RESIDENT_2_ROOM,
+  );
+
+  // ---- Staff (W-01..W-12, O-01) ----
+  async function upsertStaff(
+    email: string,
+    name: string,
+    role: 'warden' | 'office' | 'super_admin',
+  ) {
+    const user = await client.query<{ id: string }>(
+      `insert into haven.users (google_sub, email, full_name, is_active) values ($1, $2, $3, true)
+       on conflict (google_sub) do update set full_name = excluded.full_name returning id`,
+      [`demo-${email}`, email, name],
+    );
+    await client.query(
+      `insert into haven.role_assignments (user_id, hostel_id, role) values ($1, $2, $3)
+       on conflict do nothing`,
+      [user.rows[0].id, role === 'super_admin' ? null : hostelId, role],
+    );
+    return user.rows[0].id;
+  }
+  const wardenId = await upsertStaff(DEMO_WARDEN_EMAIL, DEMO_WARDEN_NAME, 'warden');
+  await upsertStaff(DEMO_OFFICE_EMAIL, DEMO_OFFICE_NAME, 'office');
+  await upsertStaff(DEMO_SUPER_ADMIN_EMAIL, DEMO_SUPER_ADMIN_NAME, 'super_admin');
+
+  // A resident waiting for verification (W-04), with small generated ID card and selfie
+  // images so the warden sees real photos through signed URLs.
+  const mediaRoot = path.join(process.cwd(), '.demo-media');
+  const pending = await client.query<{ id: string }>(
+    `insert into haven.users (google_sub, email, full_name, phone, phone_verified_at, is_active)
+     values ('demo-neha@haven.demo', 'neha@haven.demo', 'Neha Verma', '+919999911103', now(), true)
+     on conflict (google_sub) do update set full_name = excluded.full_name returning id`,
+  );
+  const pendingId = pending.rows[0].id;
+  const docIds: string[] = [];
+  for (const [kind, shade] of [
+    ['resident_id_card', 120],
+    ['resident_selfie', 200],
+  ] as const) {
+    const bytes = await sharp({
+      create: { width: 320, height: 200, channels: 3, background: { r: shade, g: 110, b: 90 } },
+    })
+      .jpeg()
+      .toBuffer();
+    const mediaPath = `${pendingId}/${kind}.jpg`;
+    mkdirSync(path.dirname(path.join(mediaRoot, mediaPath)), { recursive: true });
+    writeFileSync(path.join(mediaRoot, mediaPath), bytes);
+    const m = await client.query<{ id: string }>(
+      `insert into haven.media (kind, bucket, path, sha256, bytes, owner_user_id)
+       values ($1, 'resident-docs', $2, $3, $4, $5)
+       on conflict (path) do update set deleted_at = null returning id`,
+      [kind, mediaPath, sha256(bytes), bytes.length, pendingId],
+    );
+    docIds.push(m.rows[0].id);
+  }
+  await client.query(
+    `insert into haven.residents (user_id, hostel_id, claimed_room, status, id_card_media_id, selfie_media_id, submitted_at)
+     values ($1, $2, '103', 'pending', $3, $4, now() - interval '3 hours')
+     on conflict (user_id) do update set status = 'pending'`,
+    [pendingId, hostelId, docIds[0], docIds[1]],
+  );
+
+  // ---- Visits for the dashboard, relative to the real "now" ----
+  const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+  async function guest(phone: string, name: string) {
+    const v = await client.query<{ id: string }>(
+      `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed)
+       values ($1, $2, 'female', true)
+       on conflict (phone) do update set full_name = excluded.full_name returning id`,
+      [phone, name],
+    );
+    return v.rows[0].id;
+  }
+  async function insideVisit(
+    code: string,
+    hostId: string,
+    visitorId: string,
+    window: [number, number],
+    entered: number,
+    extra: { overstaySince?: number; disputedAt?: number } = {},
+  ) {
+    const visit = await client.query<{ id: string }>(
+      `insert into haven.visits
+         (code, hostel_id, host_id, visitor_id, type, status, origin, zone, window_start, window_end,
+          rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at,
+          host_confirmed_at, overstay_since, host_disputed_at)
+       values ($1, $2, $3, $4, 'day', 'inside', 'invite', 'visitors_room', $5, $6, 1, 'user', $3, $7, $7,
+               $8, $9, $10)
+       returning id`,
+      [
+        code,
+        hostelId,
+        hostId,
+        visitorId,
+        at(window[0]),
+        at(window[1]),
+        at(entered),
+        extra.disputedAt === undefined ? at(entered + 1) : null,
+        extra.overstaySince === undefined ? null : at(extra.overstaySince),
+        extra.disputedAt === undefined ? null : at(extra.disputedAt),
+      ],
+    );
+    await client.query(
+      `insert into haven.gate_events
+         (visit_id, hostel_id, gate_id, kind, actor_type, actor_id, location_verified, distance_m, accuracy_m, at)
+       values ($1, $2, $3, 'entry', 'visitor', $4, true, 12, 9, $5)`,
+      [visit.rows[0].id, hostelId, gateId, visitorId, at(entered)],
+    );
+  }
+  // Inside, on time.
+  await insideVisit(
+    'VDEM001',
+    resident1Id,
+    await guest('+919876500001', 'Ananya Rao'),
+    [-60, 180],
+    -50,
+  );
+  // Inside past the window: the overstay job (SDD §9.8) has flagged it.
+  await insideVisit(
+    'VDEM002',
+    resident2Id,
+    await guest('+919876500002', 'Kavya Menon'),
+    [-300, -30],
+    -280,
+    {
+      overstaySince: -20,
+    },
+  );
+  // Inside, but the host said "Not my guest" (F9): waits for the warden.
+  await insideVisit(
+    'VDEM003',
+    resident2Id,
+    await guest('+919876500003', 'Riya Das'),
+    [-90, 120],
+    -15,
+    {
+      disputedAt: -10,
+    },
+  );
+  // Expected later today (an invite not yet claimed).
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, invited_name, invited_phone, invited_gender, type, status, origin, zone,
+        window_start, window_end, rules_version, created_by_type, created_by_id)
+     values ('VDEM004', $1, $2, 'Sneha Pillai', '+919876500004', 'female', 'day', 'approved', 'invite',
+             'visitors_room', $3, $4, 1, 'user', $2)`,
+    [hostelId, resident1Id, at(60), at(240)],
+  );
+  // An overnight stay waiting for the warden (F6 step 4).
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, invited_name, invited_phone, invited_gender, type, status, origin, zone,
+        window_start, window_end, nights, rules_version, created_by_type, created_by_id)
+     values ('VDEM005', $1, $2, 'Meghna Joshi', '+919876500005', 'female', 'overnight_room', 'pending_warden',
+             'overnight_request', 'room', $3, $4, 2, 1, 'user', $2)`,
+    [hostelId, resident1Id, at(24 * 60), at(72 * 60)],
+  );
+  // Yesterday's visit, checked out (shows in reports and search).
+  const earlier = await guest('+919876500006', 'Divya Nair');
+  const done = await client.query<{ id: string }>(
+    `insert into haven.visits
+       (code, hostel_id, host_id, visitor_id, type, status, origin, zone, window_start, window_end,
+        rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at, last_exit_at,
+        host_confirmed_at, closed_at, close_reason)
+     values ('VDEM006', $1, $2, $3, 'day', 'completed', 'invite', 'visitors_room', $4, $5, 1, 'user', $2,
+             $6, $6, $7, $6, $7, 'checked_out')
+     returning id`,
+    [hostelId, resident1Id, earlier, at(-26 * 60), at(-22 * 60), at(-25 * 60), at(-23 * 60)],
+  );
+  for (const [kind, minutes] of [
+    ['entry', -25 * 60],
+    ['exit', -23 * 60],
+  ] as const) {
+    await client.query(
+      `insert into haven.gate_events
+         (visit_id, hostel_id, gate_id, kind, actor_type, actor_id, location_verified, distance_m, accuracy_m, at)
+       values ($1, $2, $3, $4, 'visitor', $5, true, 15, 10, $6)`,
+      [done.rows[0].id, hostelId, gateId, kind, earlier, at(minutes)],
+    );
+  }
+
+  // ---- Charges for the office (O-01) ----
+  await client.query(
+    `insert into haven.charges
+       (hostel_id, resident_id, kind, units, unit_price_inr, amount_inr, description, status, created_by, created_at)
+     values ($1, $2, 'overnight_room', 2, 50, 100, 'Overnight room stay, 2 night(s).', 'pending', $3,
+             now() - interval '2 days')`,
+    [hostelId, resident2Id, wardenId],
+  );
+  await client.query(
+    `insert into haven.charges
+       (hostel_id, resident_id, kind, amount_inr, description, status, created_by, created_at, confirmed_by, confirmed_at)
+     values ($1, $2, 'fine', 400, 'Guest stayed past the 10 pm cutoff.', 'confirmed', $3, now() - interval '5 days',
+             $3, now() - interval '4 days')`,
+    [hostelId, resident1Id, wardenId],
+  );
 
   // Fresh pairing code at REAL "now" (unlike e2e, this script uses the live clock, so
   // the 10-minute TTL must be generated right before printing, not baked into a fixture).
@@ -158,6 +365,9 @@ async function main() {
   console.log(`DATABASE_URL=${DEMO_DATABASE_URL}`);
   console.log('');
   console.log(`Residents (dev sign-in): ${DEMO_RESIDENT_1_EMAIL}, ${DEMO_RESIDENT_2_EMAIL}`);
+  console.log(
+    `Staff (dev sign-in): warden ${DEMO_WARDEN_EMAIL}, office ${DEMO_OFFICE_EMAIL}, super admin ${DEMO_SUPER_ADMIN_EMAIL}`,
+  );
   console.log(`Gate coordinates: ${lat}, ${lng} (radius ${radiusM}m)`);
   console.log(
     `Gate pairing code: ${formatPairingCodeForDisplay(pairingCode)} (expires ${expiresAt.toLocaleTimeString()})`,

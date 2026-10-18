@@ -136,6 +136,9 @@ async function main() {
       '  Resident dev sign-in: priya@haven.demo, fatima@haven.demo (any password-free email)',
     );
     console.log(
+      '  Staff dev sign-in: warden@haven.demo (warden), office@haven.demo (office), admin@haven.demo (super admin)',
+    );
+    console.log(
       '  Guest OTP: read "[otp:dev] ... purpose-code=" above, or use +91 9999900001/02 with code 123456',
     );
     console.log('  Gate pairing code: printed above by [db] — regenerate anytime with:');
