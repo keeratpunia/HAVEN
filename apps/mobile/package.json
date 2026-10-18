@@ -19,6 +19,7 @@
     "@expo/metro-runtime": "~57.0.16",
     "@haven/shared": "workspace:*",
     "@haven/ui": "workspace:*",
+    "@microsoft/fetch-event-source": "^2.0.1",
     "@zxing/browser": "^0.1.5",
     "expo": "~57.0.26",
     "expo-camera": "~57.0.6",
@@ -37,6 +38,7 @@
     "react-native": "0.86.3",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.2",
+    "react-native-sse": "^1.2.1",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {

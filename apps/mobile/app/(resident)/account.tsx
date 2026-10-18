@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import { Button } from '../../components/Button.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { availableShells } from '../../lib/resident-route.js';
 import { getPushPermission, registerForPush, type PushPermission } from '../../lib/push.js';
 
 /**
@@ -53,6 +54,18 @@ export default function Account() {
           />
         ) : null}
       </View>
+      {user
+        ? availableShells(user)
+            .filter((sh) => sh.label !== 'Resident')
+            .map((sh) => (
+              <Button
+                key={sh.path}
+                label={`Switch to ${sh.label}`}
+                variant="secondary"
+                onPress={() => router.replace(sh.path as never)}
+              />
+            ))
+        : null}
       <Button
         label="Sign out"
         variant="secondary"

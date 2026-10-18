@@ -1,6 +1,6 @@
 import type { MeUserDTO, VisitDTO } from '@haven/shared';
 import { handleNotificationTap } from '../lib/notification-routing';
-import { routeForUser } from '../lib/resident-route';
+import { availableShells, routeForUser } from '../lib/resident-route';
 import { needsHost, screenForVisit } from '../lib/visit-screen';
 import { newActionKey } from '../lib/action-key';
 
@@ -127,5 +127,23 @@ describe('Idempotency-Key generation (SDD §9.12)', () => {
     const b = newActionKey();
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('staff routing and the role switcher (SDD §13.3)', () => {
+  it('sends wardens and super admins to the warden shell, office to O-01', () => {
+    expect(
+      routeForUser(me({ roles: [{ h: 'h1', r: 'warden' }], phoneVerified: false }, null)),
+    ).toBe('/warden');
+    expect(routeForUser(me({ roles: [{ h: '*', r: 'super_admin' }] }, null))).toBe('/warden');
+    expect(routeForUser(me({ roles: [{ h: 'h1', r: 'office' }] }, null))).toBe('/office/charges');
+  });
+
+  it('offers every shell a multi-role user can open', () => {
+    const both = me({ roles: [{ h: 'h1', r: 'office' }] }, { status: 'verified' });
+    expect(availableShells(both).map((s) => s.label)).toEqual(['Office', 'Resident']);
+    expect(availableShells(me({}, { status: 'verified' })).map((s) => s.label)).toEqual([
+      'Resident',
+    ]);
   });
 });

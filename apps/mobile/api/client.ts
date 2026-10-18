@@ -11,6 +11,20 @@ import {
   type VisitDetailDTO,
   type VisitDTO,
   type VisitPreview,
+  type AdminChargeDTO,
+  type AdminResidentDTO,
+  type AdminVisitDetailDTO,
+  type AdminVisitDTO,
+  type ApprovalDTO,
+  type AuditRowDTO,
+  type BanDTO,
+  type DashboardDTO,
+  type EmergencyRowDTO,
+  type GateDTO,
+  type ReportDTO,
+  type RulesConfig,
+  type RulesDTO,
+  type StaffDTO,
 } from '@haven/shared';
 import { readRefreshToken, usesBodyRefreshToken, writeRefreshToken } from '../lib/token-store.js';
 
@@ -49,7 +63,7 @@ export class ApiError extends Error {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT';
   body?: unknown;
   /** Raw form-data body (photo uploads) — sent as-is, no JSON Content-Type. */
   formData?: FormData;
@@ -301,13 +315,17 @@ export function cancelMyVisit(id: string) {
 
 // ---- Resident: onboarding, host visit actions, notifications (SDD §12.4-§12.6) ----
 
-export function googleSignIn(idToken: string) {
+export function googleSignIn(idToken: string, staffInviteToken?: string) {
   return request<{
     accessToken: string;
     expiresAt: string;
     refreshToken?: string;
     principal: { type: 'user'; id: string; residentStatus: string | null };
-  }>('/v1/auth/google', { method: 'POST', auth: false, body: { idToken } });
+  }>('/v1/auth/google', {
+    method: 'POST',
+    auth: false,
+    body: staffInviteToken ? { idToken, staffInviteToken } : { idToken },
+  });
 }
 
 export function saveResidentDraft(body: { hostelId: string; room: string }) {
@@ -596,4 +614,151 @@ export function gateDeviceHeartbeat(deviceToken: string, clientTime: string) {
     headers: { Authorization: `Device ${deviceToken}` },
     body: { clientTime },
   });
+}
+
+// ---- Warden and office (SDD §12.9: /v1/admin, header X-Hostel-Id) ----
+
+function admin<T>(hostelId: string, path: string, options: RequestOptions = {}) {
+  return request<T>(`/v1/admin${path}`, {
+    ...options,
+    headers: { ...options.headers, 'X-Hostel-Id': hostelId },
+  });
+}
+
+function qs(params: Record<string, string | number | null | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(params))
+    if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+export const staffApi = {
+  dashboard: (h: string) => admin<DashboardDTO>(h, '/dashboard'),
+  visits: (
+    h: string,
+    p: {
+      status?: string;
+      type?: string;
+      flag?: string;
+      q?: string;
+      from?: string;
+      to?: string;
+      expectedToday?: boolean;
+      cursor?: string | null;
+    } = {},
+  ) =>
+    admin<Paged<AdminVisitDTO>>(
+      h,
+      `/visits${qs({ ...p, expectedToday: p.expectedToday ? 'true' : undefined })}`,
+    ),
+  visit: (h: string, id: string) => admin<AdminVisitDetailDTO>(h, `/visits/${id}`),
+  forceCheckout: (h: string, id: string, key: string, reason: string) =>
+    admin<AdminVisitDTO>(h, `/visits/${id}/force-checkout`, {
+      method: 'POST',
+      body: { reason },
+      idempotencyKey: key,
+    }),
+  resolveDispute: (h: string, id: string, note?: string) =>
+    admin<AdminVisitDTO>(h, `/visits/${id}/resolve-dispute`, {
+      method: 'POST',
+      body: note ? { note } : {},
+    }),
+  emergency: (h: string) => admin<{ count: number; items: EmergencyRowDTO[] }>(h, '/emergency'),
+  approvals: (h: string) => admin<{ items: ApprovalDTO[] }>(h, '/approvals'),
+  residents: (h: string, p: { status?: string; q?: string; cursor?: string | null } = {}) =>
+    admin<Paged<AdminResidentDTO>>(h, `/residents${qs(p)}`),
+  verifyResident: (h: string, userId: string) =>
+    admin<AdminResidentDTO>(h, `/residents/${userId}/verify`, { method: 'POST' }),
+  rejectResident: (h: string, userId: string, reason: string) =>
+    admin<AdminResidentDTO>(h, `/residents/${userId}/reject`, { method: 'POST', body: { reason } }),
+  suspendResident: (h: string, userId: string, reason: string, until?: string) =>
+    admin<AdminResidentDTO>(h, `/residents/${userId}/suspend`, {
+      method: 'POST',
+      body: until ? { reason, until } : { reason },
+    }),
+  unsuspendResident: (h: string, userId: string) =>
+    admin<AdminResidentDTO>(h, `/residents/${userId}/unsuspend`, { method: 'POST' }),
+  markLeft: (h: string, userId: string) =>
+    admin<AdminResidentDTO>(h, `/residents/${userId}/mark-left`, { method: 'POST' }),
+  bans: (h: string) => admin<{ items: BanDTO[] }>(h, '/bans'),
+  ban: (
+    h: string,
+    body: { visitorId: string; allHostels: boolean; endsAt?: string; reason: string },
+  ) => admin<{ id: string }>(h, '/bans', { method: 'POST', body }),
+  liftBan: (h: string, id: string, reason: string) =>
+    admin<void>(h, `/bans/${id}/lift`, { method: 'POST', body: { reason } }),
+  rules: (h: string) => admin<RulesDTO>(h, '/rules'),
+  publishRules: (h: string, config: RulesConfig) =>
+    admin<RulesDTO>(h, '/rules', { method: 'POST', body: { config } }),
+  gates: (h: string) => admin<{ items: GateDTO[] }>(h, '/gates'),
+  setGateLocation: (
+    h: string,
+    id: string,
+    body: { lat: number; lng: number; radiusM: number; maxAccuracyM: number },
+  ) => admin<GateDTO>(h, `/gates/${id}/location`, { method: 'PUT', body }),
+  pairingCode: (h: string, gateId: string) =>
+    admin<{ code: string; expiresAt: string }>(h, `/gates/${gateId}/pairing-codes`, {
+      method: 'POST',
+    }),
+  revokeDevice: (h: string, id: string) =>
+    admin<void>(h, `/gate-devices/${id}/revoke`, { method: 'POST' }),
+  staff: (h: string) => admin<StaffDTO>(h, '/staff'),
+  inviteStaff: (h: string, email: string, role: 'office' | 'warden') =>
+    admin<{ id: string; inviteUrl: string; expiresAt: string }>(h, '/staff-invites', {
+      method: 'POST',
+      body: { email, role },
+    }),
+  deactivateStaff: (h: string, userId: string) =>
+    admin<void>(h, `/staff/${userId}/deactivate`, { method: 'POST' }),
+  createHostel: (
+    h: string,
+    body: { code: string; name: string; genderServed: 'female' | 'male' },
+  ) => admin<{ id: string; code: string; name: string }>(h, '/hostels', { method: 'POST', body }),
+  charges: (h: string, p: { status?: string; q?: string; cursor?: string | null } = {}) =>
+    admin<Paged<AdminChargeDTO>>(h, `/charges${qs(p)}`),
+  createFine: (
+    h: string,
+    body: { residentId: string; amountInr: number; description: string; visitId?: string },
+  ) => admin<AdminChargeDTO>(h, '/charges', { method: 'POST', body }),
+  confirmCharge: (h: string, id: string) =>
+    admin<AdminChargeDTO>(h, `/charges/${id}/confirm`, { method: 'POST' }),
+  markPaid: (h: string, id: string, receiptNo: string) =>
+    admin<AdminChargeDTO>(h, `/charges/${id}/mark-paid`, { method: 'POST', body: { receiptNo } }),
+  waiveCharge: (h: string, id: string, reason: string) =>
+    admin<AdminChargeDTO>(h, `/charges/${id}/waive`, { method: 'POST', body: { reason } }),
+  audit: (
+    h: string,
+    p: {
+      entity?: string;
+      actorId?: string;
+      from?: string;
+      to?: string;
+      cursor?: string | null;
+    } = {},
+  ) => admin<Paged<AuditRowDTO>>(h, `/audit${qs(p)}`),
+  report: (h: string, from: string, to: string) =>
+    admin<ReportDTO>(h, `/reports/visits${qs({ from, to })}`),
+};
+
+/**
+ * Downloads a CSV export (W-03, W-12) with the caller's credentials and hostel scope.
+ * Returns the text; the screen saves or shares it.
+ */
+export async function adminCsv(hostelId: string, path: string): Promise<string> {
+  const res = await fetch(`${API_URL}/v1/admin${path}`, {
+    headers: {
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      'X-Hostel-Id': hostelId,
+      ...(NATIVE ? { 'X-Client': 'native' } : {}),
+    },
+    credentials: 'include',
+  });
+  if (res.status === 401 && (await tryRefresh())) return adminCsv(hostelId, path);
+  if (!res.ok) throw new ApiError('INTERNAL', res.status, 'Could not download the file.');
+  return res.text();
+}
+
+export function streamUrl(hostelId: string): string {
+  return `${API_URL}/v1/stream?hostelId=${encodeURIComponent(hostelId)}`;
 }

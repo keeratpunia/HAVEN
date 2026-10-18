@@ -8,7 +8,7 @@ import { OfflineBanner } from '../../components/Banner.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { handleNotificationTap } from '../../lib/notification-routing.js';
 import { registerForPush, subscribeToNotificationTaps } from '../../lib/push.js';
-import { routeForUser } from '../../lib/resident-route.js';
+import { residentRoute } from '../../lib/resident-route.js';
 import { useOnline } from '../../lib/useOnline.js';
 
 /**
@@ -93,7 +93,7 @@ export default function ResidentLayout() {
     );
   }
   if (!user) return <Redirect href="/sign-in" />;
-  const target = routeForUser(user);
+  const target = residentRoute(user);
   if (target !== '/home') return <Redirect href={target as never} />;
 
   const onTab = TABS.some((t) => t.path === pathname);

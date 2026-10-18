@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import * as api from '../../api/client.js';
@@ -9,7 +9,9 @@ import { writeGateStorage } from '../../lib/gateStorage.js';
 /** D-01 Pair (SDD §13.4/F8 step 2): 8-character pairing code, entered on the device. */
 export default function GatePair() {
   const router = useRouter();
-  const [code, setCode] = useState('');
+  // W-09 shows a QR of /gate/pair?code=… so the code doesn't have to be typed.
+  const params = useLocalSearchParams<{ code?: string }>();
+  const [code, setCode] = useState(params.code ?? '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

@@ -5,7 +5,7 @@ import { formatDateShort } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import { Button } from '../../components/Button.js';
 import { useAuth } from '../../lib/auth-context.js';
-import { routeForUser } from '../../lib/resident-route.js';
+import { residentRoute } from '../../lib/resident-route.js';
 
 /**
  * R-04 Pending verification (SDD §13.4): "Status card, submitted details, 'Usually
@@ -19,7 +19,7 @@ export default function Pending() {
 
   if (!user) return <Redirect href="/sign-in" />;
   const resident = user.resident;
-  const target = routeForUser(user);
+  const target = residentRoute(user);
   if (target !== '/pending') return <Redirect href={target as never} />;
 
   async function reload() {
