@@ -511,6 +511,17 @@ export default function GateScan() {
                 <Button label="Go to My visits" onPress={() => router.replace('/visits')} />
               </View>
             </>
+          ) : walkInStatus === 'expired' ? (
+            // FR-70 / BR-12: no decision in 10 minutes — §13.6 "Walk-in expired".
+            <>
+              <Text style={styles.title}>
+                {fillCopy(copyFor('WALK_IN_EXPIRED'), { hostFirstName }).title}
+              </Text>
+              <Text style={styles.body}>{copyFor('WALK_IN_EXPIRED').body}</Text>
+              <View style={styles.action}>
+                <Button label="Go to My visits" onPress={() => router.replace('/visits')} />
+              </View>
+            </>
           ) : walkInStatus === 'cancelled' ? (
             <>
               <Text style={styles.title}>Request cancelled</Text>
