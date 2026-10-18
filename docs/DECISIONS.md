@@ -946,7 +946,7 @@ Source for all of Part 1: SDD §2.7.
   but untested without a client id, so DEC-011's dev sign-in remains the way in here);
   the R-06 contact picker; account deletion (FR-09, priority S, no API); the push
   receipts job; `Idempotency-Key` on the guest's own ★ routes; any warden screen.
-- **Known guest-web bug found (not fixed here):** after the sign-in detour the guest app
+- **Known guest-web behaviour found (since accepted as a deviation, DEC-013):** after the sign-in detour the guest app
   starts a new scan session and re-checks the stale 30-second QR token, so a first-time
   walk-in can see "That code has changed" — contrary to §9.3 ("lets slow steps ... happen
   after the 30 s token window without re-scanning"). An earlier DEMO.md note called this
@@ -957,6 +957,36 @@ Source for all of Part 1: SDD §2.7.
   N-CONFIRM-LOCATION for an unverified walk-in (rejected — two pushes for one decision).
 - **SDD updated?** No. Items 1, 2, 6–10 are interpretations of text the SDD already
   has, flagged here for review; nothing above contradicts an SDD requirement.
+
+### DEC-013 — Accepted deviation: a first-time guest who signs up mid-scan scans the gate QR once more
+
+- **Date:** 2026-10-18
+- **Context:** SDD §9.3 says the scan session exists so "slow steps (OTP, profile,
+  selfie) happen after the 30 s token window without re-scanning", and flow F2 has a
+  walk-in guest sign up and continue on one scan. The guest web app instead restarts the
+  scan after the sign-in/profile detour and re-checks the gate token, which is stale by
+  then, so a first-time walk-in has to scan again (found in the resident milestone,
+  DEC-012).
+- **Decision:** The team accepts this behaviour as a deviation and does not change the
+  scan flow. Reasons: it only affects a guest's *first* walk-in (once signed in, the
+  next scan is instant); nothing they entered is lost — phone, profile and selfie are
+  saved, they only scan again; and it is stricter, not weaker — every gate action is
+  still backed by a fresh, unexpired token, so it cannot widen the window for a
+  screenshotted code. It may be revisited later (e.g. by resuming the original scan
+  session after sign-in, as §9.3 describes).
+- **What changed:** only the message. When the gate page sends a signed-out guest to
+  sign in, the return path carries `resumed=1`; if that restarted scan fails with
+  `GATE_TOKEN_EXPIRED`, the guest sees a next-step screen instead of the refusal. Every
+  other expired token still shows "That code has changed".
+- **Proposed copy (not in SDD §13.6), key `GATE_RESCAN_AFTER_SIGN_IN`:** title "You're
+  signed in"; body "Scan the QR on the gate screen once more to continue. Your details
+  are saved."; button "Go to My visits". Shown with a green tick, not the red cross.
+- **Alternatives considered:** resuming the original scan session after sign-in
+  (rejected for now by the team — larger change to a security-sensitive flow); keeping
+  the generic expired error (rejected — it reads as a failure to someone who just
+  finished signing up).
+- **SDD updated?** No — recorded here as an accepted deviation and in TRACEABILITY
+  (FR-21, FR-25); to be reflected in the SDD (§9.3, F2, §13.6) when it is next revised.
 
 Template for a new entry:
 

@@ -93,7 +93,9 @@ function markSeenLocationExplainer(): void {
 }
 
 export default function GateScan() {
-  const { token } = useLocalSearchParams<{ token: string }>();
+  // `resumed=1`: this page sent the guest to sign in / set up their profile and they've
+  // just come back (DEC-013).
+  const { token, resumed } = useLocalSearchParams<{ token: string; resumed?: string }>();
   const router = useRouter();
   const online = useOnline();
   const { visitor, loading: authLoading } = useAuth();
@@ -138,10 +140,16 @@ export default function GateScan() {
         setPhase('location_problem');
       }
     } catch (err) {
-      setErrorCode(err instanceof api.ApiError ? err.code : 'INTERNAL_5XX_GATE');
+      const code = err instanceof api.ApiError ? err.code : 'INTERNAL_5XX_GATE';
+      // Accepted deviation from SDD §9.3/F2 (DEC-013): the code went stale while a
+      // first-time guest signed up, so ask for one more scan instead of "That code has
+      // changed". Every other expired token keeps the normal error.
+      setErrorCode(
+        code === 'GATE_TOKEN_EXPIRED' && resumed === '1' ? 'GATE_RESCAN_AFTER_SIGN_IN' : code,
+      );
       setPhase('error');
     }
-  }, [token]);
+  }, [token, resumed]);
 
   useEffect(() => {
     if (phase === 'locating' && !session) {
@@ -186,7 +194,7 @@ export default function GateScan() {
     if (phase !== 'resolving_actions' || !session) return;
     if (authLoading) return;
     if (!visitor) {
-      router.replace({ pathname: '/login', params: { returnTo: `/g/${token}` } });
+      router.replace({ pathname: '/login', params: { returnTo: `/g/${token}?resumed=1` } });
       return;
     }
     api
@@ -307,6 +315,16 @@ export default function GateScan() {
     }
   }
 
+  if (phase === 'error' && errorCode === 'GATE_RESCAN_AFTER_SIGN_IN') {
+    return (
+      <ErrorState
+        code={errorCode}
+        tone="info"
+        actionLabel="Go to My visits"
+        onAction={() => router.replace('/visits')}
+      />
+    );
+  }
   if (phase === 'error' && errorCode) {
     return <ErrorState code={errorCode} onAction={() => router.replace('/visits')} />;
   }

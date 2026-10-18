@@ -16,6 +16,12 @@ export const EN_COPY: Record<string, CopyEntry> = {
     title: 'That code has changed',
     body: 'Scan the QR on the gate screen again. It changes every 10 seconds.',
   },
+  // Not in SDD §13.6: proposed in docs/DECISIONS.md DEC-013 for the accepted deviation
+  // where a first-time guest who signs up mid-scan must scan the gate QR once more.
+  GATE_RESCAN_AFTER_SIGN_IN: {
+    title: "You're signed in",
+    body: 'Scan the QR on the gate screen once more to continue. Your details are saved.',
+  },
   GATE_TOKEN_INVALID: {
     title: "We can't read this code",
     body: "Make sure you're scanning the HAVEN screen at the hostel gate.",

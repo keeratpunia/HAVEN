@@ -174,21 +174,22 @@ Have two guest phones (or a phone + a desktop browser profile) ready: **Guest A*
 
 ### F. Walk-in: Guest B requests entry, resident approves, guest's screen turns green on its own
 
-**Known guest-web bug: a brand-new Guest B's first scan can expire.** SDD §9.3 says
-the scan session exists so "slow steps (OTP, profile, selfie) happen after the 30 s
-token window without re-scanning" — but the guest web app currently starts a fresh
-scan session after the sign-in detour, re-checking the (by then stale) 30-second QR
-token, so it shows "That code has changed". (An earlier version of this doc called
-this intended; it isn't — see docs/TRACEABILITY.md, FR-21.) Workaround on stage: have
-Guest B sign in first (open the app → **Sign in** → phone/OTP → profile), *then* scan.
-If it happens anyway, tap **Back to start** and scan once more — it's instant.
+**Expect a brand-new Guest B to scan twice — this is an accepted deviation
+(docs/DECISIONS.md DEC-013).** The QR code is only valid for 30 seconds, and a
+first-time guest's sign-up (location → phone/OTP → profile → selfie) takes longer. When
+they finish, the app says **"You're signed in — Scan the QR on the gate screen once
+more to continue. Your details are saved."** How to narrate it: "First-time guests scan
+once more after signing up. Nothing they typed is lost, and it means every gate action
+is backed by a code that's under 30 seconds old — a screenshot can't be reused. From
+their second visit on, it's one scan." Tip for a smooth demo: have Guest B sign in first
+(open the app → **Sign in**) and then scan, which avoids the second scan entirely.
 
 17. Guest B (no invite) scans the gate QR directly (`/gate` → camera).
 18. Location check → signs in with OTP (or the test-number shortcut) → profile + live
     selfie (first time) → **Find your host** → room `101` → **Priya Sharma** → visit
-    type → live selfie → **Waiting for host**. If the code expired partway through
-    (see note above), tap **Back to start** and scan the gate QR once more — it picks
-    up instantly since Guest B is already signed in.
+    type → live selfie → **Waiting for host**. If they see **"You're signed in"**
+    (see note above), they scan the gate QR once more — it picks up instantly, straight
+    to **Find your host**.
 19. On the resident's laptop (on **Home**): within ~10 seconds a **Guest at the gate**
     banner appears with the SDD §15 N-WALKIN text (on Android this is a push
     notification). Tap it — it opens the walk-in request (R-08) with Guest B's live

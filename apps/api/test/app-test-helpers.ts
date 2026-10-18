@@ -120,21 +120,19 @@ export async function issueToken(
   principal: { type: 'visitor' | 'user'; id: string },
   roles: RoleGrant[] = [],
 ): Promise<string> {
-  const session = await db
-    .transaction()
-    .execute((trx) =>
-      createSession(
-        trx,
-        {
-          principalType: principal.type,
-          principalId: principal.id,
-          client: 'web',
-          userAgent: null,
-          ip: null,
-        },
-        clock,
-      ),
-    );
+  const session = await db.transaction().execute((trx) =>
+    createSession(
+      trx,
+      {
+        principalType: principal.type,
+        principalId: principal.id,
+        client: 'web',
+        userAgent: null,
+        ip: null,
+      },
+      clock,
+    ),
+  );
   return signAccessToken(
     { sub: principal.id, typ: principal.type, sid: session.sessionId, roles },
     JWT_SECRET,

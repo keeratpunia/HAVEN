@@ -14,18 +14,27 @@ export function ErrorState({
   values,
   actionLabel = 'Back to start',
   onAction,
+  tone = 'error',
 }: {
   code: string;
   values?: Record<string, string>;
   actionLabel?: string;
   onAction: () => void;
+  /** `info` for a next-step screen that isn't a refusal (no red cross). */
+  tone?: 'error' | 'info';
 }) {
   const entry = fillCopy(copyFor(code), values ?? {});
   return (
     <View style={styles.container} accessibilityRole="alert">
-      <Text style={styles.glyph} accessibilityLabel="Not allowed">
-        ✕
-      </Text>
+      {tone === 'error' ? (
+        <Text style={styles.glyph} accessibilityLabel="Not allowed">
+          ✕
+        </Text>
+      ) : (
+        <Text style={[styles.glyph, styles.infoGlyph]} accessibilityElementsHidden>
+          ✓
+        </Text>
+      )}
       <Text style={styles.title}>{entry.title}</Text>
       <Text style={styles.body}>{entry.body}</Text>
       <View style={styles.action}>
@@ -43,6 +52,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.md,
   },
   glyph: { fontSize: 48, color: color.danger },
+  infoGlyph: { color: color.success },
   title: {
     fontSize: typeTokens.size.lg,
     fontWeight: typeTokens.weight.semibold,
