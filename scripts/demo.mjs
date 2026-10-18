@@ -113,7 +113,7 @@ async function main() {
       EXPO_PUBLIC_WEB_URL: webBaseUrl,
       // Mirrors demo-server.ts's own DEV_LOGIN_ENABLED=true — without this the
       // resident sign-in screen hides the dev-login form entirely (see
-      // apps/mobile/app/resident/login.tsx), since there's no real Google OAuth
+      // apps/mobile/app/(auth)/sign-in.tsx, R-01), since there's no real Google OAuth
       // configured for this environment and that's the only way in.
       EXPO_PUBLIC_DEV_LOGIN_ENABLED: 'true',
     },

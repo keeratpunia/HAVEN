@@ -84,6 +84,9 @@ test('walk-in: a guest with no existing visit finds a host, picks a visit type, 
   await page.getByRole('button', { name: 'Continue' }).click();
 
   await expect(page.getByRole('button', { name: 'Take photo' })).toBeEnabled({ timeout: 30_000 });
+  // Shift onto a different fake-camera frame than the profile selfie (see PHOTO_REUSED
+  // note in resident-app.spec.ts's takeLivePhoto).
+  await page.waitForTimeout(1_500);
   await page.getByRole('button', { name: 'Take photo' }).click();
   await page.getByRole('button', { name: 'Use photo' }).click();
 

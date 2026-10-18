@@ -1,14 +1,29 @@
-import { useRouter } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { Redirect, useRouter } from 'expo-router';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { color, space, type as typeTokens } from '@haven/ui';
 import { Button } from '../components/Button.js';
+import { useAuth } from '../lib/auth-context.js';
+import { routeForUser } from '../lib/resident-route.js';
 
 /**
- * App home. Most guests arrive via an invite link (`/i/[token]`) and never see this
- * screen; it exists for a returning guest who bookmarked the app directly.
+ * App home. SDD §13.3: "After sign-in the root layout routes by principal: visitor →
+ * (guest); ... resident → (resident) (or onboarding if not submitted, or R-04 if
+ * pending)." Signed-out people choose guest (phone OTP) or resident (Google) sign-in.
  */
 export default function Home() {
   const router = useRouter();
+  const { visitor, user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator accessibilityLabel="Loading" />
+      </View>
+    );
+  }
+  if (user) return <Redirect href={routeForUser(user) as never} />;
+  if (visitor) return <Redirect href="/visits" />;
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>HAVEN</Text>
@@ -20,7 +35,7 @@ export default function Home() {
         <Button
           label="Resident sign-in"
           variant="secondary"
-          onPress={() => router.push('/resident/login')}
+          onPress={() => router.push('/sign-in')}
         />
       </View>
     </View>

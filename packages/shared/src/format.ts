@@ -13,6 +13,13 @@ export function formatTime12h(instant: Date | string, timezone = HOSTEL_TIMEZONE
   return dt.toFormat('h:mm a').toLowerCase();
 }
 
+/** "16:42" — a 24-hour HH:MM value for time inputs (the field shows it in the user's format). */
+export function formatHhMm(instant: Date | string, timezone = HOSTEL_TIMEZONE): string {
+  return DateTime.fromJSDate(new Date(instant), { zone: 'utc' })
+    .setZone(timezone)
+    .toFormat('HH:mm');
+}
+
 /** "Sun, 12 Oct" — SDD §13.1. */
 export function formatDateShort(instant: Date | string, timezone = HOSTEL_TIMEZONE): string {
   const dt = DateTime.fromJSDate(new Date(instant), { zone: 'utc' }).setZone(timezone);
@@ -23,6 +30,16 @@ export function formatDateShort(instant: Date | string, timezone = HOSTEL_TIMEZO
 export function formatDateTime(instant: Date | string, timezone = HOSTEL_TIMEZONE): string {
   const dt = DateTime.fromJSDate(new Date(instant), { zone: 'utc' }).setZone(timezone);
   return `${dt.toFormat('d LLL')}, ${dt.toFormat('h:mm a').toLowerCase()}`;
+}
+
+/** A hostel-local YYYY-MM-DD date moved by `days`. */
+export function plusDays(isoDate: string, days: number, timezone = HOSTEL_TIMEZONE): string {
+  return DateTime.fromISO(isoDate, { zone: timezone }).plus({ days }).toISODate() ?? isoDate;
+}
+
+/** "2026-10" → "October". */
+export function formatMonth(month: string): string {
+  return DateTime.fromISO(`${month}-01`).toFormat('LLLL');
 }
 
 /** "Priya S." — SDD FR-25 / §12.3 `host.displayName`: first name + last initial. */
@@ -54,6 +71,38 @@ export const VISIT_TYPE_LABELS = {
   overnight_room: 'Overnight in my room',
   guest_room: 'Hostel guest room',
 } as const;
+
+/**
+ * SDD §15.4 messages the host shares (verbatim): T-INVITE for day / quick drop-off
+ * invites, T-INVITE-OVERNIGHT once the warden approves an overnight stay.
+ */
+export function inviteShareText(p: {
+  guestName: string;
+  hostelName: string;
+  windowStart: string | Date;
+  windowEnd: string | Date;
+  inviteUrl: string;
+}): string {
+  return (
+    `Hi ${p.guestName}, I've added you as my guest at ${p.hostelName} on ${formatDateShort(p.windowStart)}, ` +
+    `${formatTime12h(p.windowStart)}–${formatTime12h(p.windowEnd)}.\n` +
+    `Open this link to get set up, then scan the QR at the gate when you arrive:\n${p.inviteUrl}`
+  );
+}
+
+export function overnightInviteShareText(p: {
+  guestName: string;
+  hostelName: string;
+  windowStart: string | Date;
+  windowEnd: string | Date;
+  inviteUrl: string;
+}): string {
+  return (
+    `Hi ${p.guestName}, your stay at ${p.hostelName} from ${formatDateShort(p.windowStart)} to ` +
+    `${formatDateShort(p.windowEnd)} is approved.\n` +
+    `Open this link to get set up, then scan the QR at the gate when you arrive (before 10 pm):\n${p.inviteUrl}`
+  );
+}
 
 /** "+91•••••43210" — the masked form used wherever a guest phone is shown to a host. */
 export function maskPhone(phone: string): string {

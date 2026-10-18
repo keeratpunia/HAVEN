@@ -43,7 +43,17 @@ async function main() {
   const db = createDb(env);
   const clock = new FakeClock(E2E_FIXED_NOW);
   const mediaStorage = new LocalDiskMediaStorage(path.join(process.cwd(), '.e2e-media'));
-  const app = await buildApp({ env, logger, db, clock, mediaStorage });
+  // Every guest, resident and gate in the Playwright suite shares one IP, so SDD §12.11's
+  // global default (120/min per IP, sized for one person's phone) is raised here.
+  // Route-specific limits (scan sessions, OTP, pairing) still apply unchanged.
+  const app = await buildApp({
+    env,
+    logger,
+    db,
+    clock,
+    mediaStorage,
+    rateLimit: { max: 1_000, timeWindowMs: 60_000 },
+  });
 
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
   console.log(

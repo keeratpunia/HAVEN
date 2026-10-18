@@ -184,6 +184,34 @@ async function main() {
     [hostelId, hostId, retryVisitor.rows[0].id, windowStart.toISOString(), windowEnd.toISOString()],
   );
 
+  // Resident-app specs: a third pre-claimed guest (phone ...07) whose check-in drives
+  // the host's arrival card (R-09) and dispute, and a Google user who hasn't onboarded
+  // yet (no phone, no resident row) for the R-02 → R-03 → R-04 flow.
+  const arrivalVisitor = await client.query<{ id: string }>(
+    `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed)
+     values ('+919999900007', 'Arrival Tester', 'female', true)
+     on conflict (phone) do update set full_name = excluded.full_name returning id`,
+  );
+  await client.query(`delete from haven.visits where code = 'VE2E003'`);
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, visitor_id, type, status, origin, zone,
+        window_start, window_end, rules_version, created_by_type, created_by_id)
+     values ('VE2E003', $1, $2, $3, 'day', 'approved', 'invite', 'visitors_room', $4, $5, 1, 'user', $2)`,
+    [
+      hostelId,
+      hostId,
+      arrivalVisitor.rows[0].id,
+      windowStart.toISOString(),
+      windowEnd.toISOString(),
+    ],
+  );
+  await client.query(
+    `insert into haven.users (google_sub, email, full_name, is_active)
+     values ('e2e-newcomer', 'e2e-newcomer@haven.test', 'Neha Gill', true)
+     on conflict (google_sub) do nothing`,
+  );
+
   await client.end();
 
   console.log('E2E database ready.');

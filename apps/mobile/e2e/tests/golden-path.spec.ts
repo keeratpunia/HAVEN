@@ -60,6 +60,8 @@ test('guest can claim an invite, sign in, complete their profile, scan the gate,
   await page.getByRole('button', { name: 'Check in' }).click();
 
   await expect(page.getByRole('button', { name: 'Take photo' })).toBeEnabled({ timeout: 30_000 });
+  // Different fake-camera frame from the profile selfie (see the check-out note below).
+  await page.waitForTimeout(1_500);
   await page.getByRole('button', { name: 'Take photo' }).click();
   await page.getByRole('button', { name: 'Use photo' }).click();
 
@@ -78,6 +80,10 @@ test('guest can claim an invite, sign in, complete their profile, scan the gate,
   await page.getByRole('button', { name: 'Check out' }).click();
 
   await expect(page.getByRole('button', { name: 'Take photo' })).toBeEnabled({ timeout: 30_000 });
+  // Chrome's fake camera restarts its animation per stream, so photos taken at the same
+  // offset are byte-identical and correctly rejected as PHOTO_REUSED (per-visitor dedupe,
+  // SDD §9.4). Each capture in this test therefore lands at a different offset.
+  await page.waitForTimeout(3_000);
   await page.getByRole('button', { name: 'Take photo' }).click();
   await page.getByRole('button', { name: 'Use photo' }).click();
 

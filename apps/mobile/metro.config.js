@@ -31,4 +31,14 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform);
 };
 
+// Metro watches the whole monorepo. The API's local test/demo/e2e data directories are
+// created and deleted while the dev server runs; watching them crashes the watcher
+// (lstat on a just-deleted path), and nothing in them is ever bundled.
+const ignoredDataDirs =
+  /[\\/]apps[\\/]api[\\/]\.(e2e|demo)-(media|pgdata)([\\/]|$)|[\\/]apps[\\/]api[\\/]\.media-storage([\\/]|$)/;
+const existingBlockList = config.resolver.blockList;
+config.resolver.blockList = existingBlockList
+  ? [].concat(existingBlockList, ignoredDataDirs)
+  : ignoredDataDirs;
+
 module.exports = config;

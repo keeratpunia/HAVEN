@@ -7,19 +7,29 @@ import { Button } from './Button.js';
  * SDD §13.5 `LiveCamera` ("web and native implementations behind one interface; no
  * gallery"). This is the web implementation — `navigator.mediaDevices.getUserMedia`,
  * never a file input (SDD §9.4/D4, §13.4 G-05/G-10: "No gallery"). The native
- * (`expo-camera`) implementation is out of scope for this guest-*web* milestone.
+ * (`expo-camera`) implementation is `LiveCamera.native.tsx`.
  *
  * Announces "Camera open" for screen readers on mount (SDD §13.7).
  */
+const SHUTTER_DELAY_MS = 1_000;
+const CAPTURE_SIZE = 720;
+
 export type LiveCameraState = 'idle' | 'opening' | 'open' | 'denied' | 'captured';
 
 export interface LiveCameraProps {
   guideText: string;
   onCapture: (dataUrl: string) => void;
   onPermissionDenied: () => void;
+  /** `environment` (rear) for the hostel ID card photo (R-03); `user` for selfies. */
+  facing?: 'user' | 'environment';
 }
 
-export function LiveCamera({ guideText, onCapture, onPermissionDenied }: LiveCameraProps) {
+export function LiveCamera({
+  guideText,
+  onCapture,
+  onPermissionDenied,
+  facing = 'user',
+}: LiveCameraProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [state, setState] = useState<LiveCameraState>('idle');
@@ -30,20 +40,34 @@ export function LiveCamera({ guideText, onCapture, onPermissionDenied }: LiveCam
     streamRef.current = null;
   }, []);
 
+  // SDD §9.4: "shutter enabled only after the stream has produced frames for 1 s" — so
+  // a quick tap can never capture a blank frame.
+  const attach = useCallback((stream: MediaStream) => {
+    streamRef.current = stream;
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = stream;
+    const onPlaying = () => {
+      video.removeEventListener('playing', onPlaying);
+      setTimeout(() => {
+        if (streamRef.current === stream) setState('open');
+      }, SHUTTER_DELAY_MS);
+    };
+    video.addEventListener('playing', onPlaying);
+  }, []);
+
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     let cancelled = false;
     setState('opening');
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: 'user' }, audio: false })
+      .getUserMedia({ video: { facingMode: facing }, audio: false })
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
-        streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
-        setState('open');
+        attach(stream);
       })
       .catch(() => {
         if (!cancelled) {
@@ -60,12 +84,25 @@ export function LiveCamera({ guideText, onCapture, onPermissionDenied }: LiveCam
   function takePhoto() {
     const video = videoRef.current;
     if (!video || Platform.OS !== 'web') return;
+    // SDD §9.4: "Capture a centred square to a 720×720 canvas; canvas.toBlob(cb,
+    // 'image/jpeg', 0.8)".
+    const side = Math.min(video.videoWidth, video.videoHeight);
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = CAPTURE_SIZE;
+    canvas.height = CAPTURE_SIZE;
     const ctx = canvas.getContext('2d');
-    ctx?.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    ctx?.drawImage(
+      video,
+      (video.videoWidth - side) / 2,
+      (video.videoHeight - side) / 2,
+      side,
+      side,
+      0,
+      0,
+      CAPTURE_SIZE,
+      CAPTURE_SIZE,
+    );
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
     setCapturedUrl(dataUrl);
     setState('captured');
     stop();
@@ -75,12 +112,8 @@ export function LiveCamera({ guideText, onCapture, onPermissionDenied }: LiveCam
     setCapturedUrl(null);
     setState('opening');
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: 'user' }, audio: false })
-      .then((stream) => {
-        streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
-        setState('open');
-      })
+      .getUserMedia({ video: { facingMode: facing }, audio: false })
+      .then((stream) => attach(stream))
       .catch(() => {
         setState('denied');
         onPermissionDenied();
@@ -118,11 +151,13 @@ export function LiveCamera({ guideText, onCapture, onPermissionDenied }: LiveCam
               muted: true,
               style: styles.media,
             })}
-            <View
-              style={styles.ovalGuide}
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-            />
+            {facing === 'user' ? (
+              <View
+                style={styles.ovalGuide}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              />
+            ) : null}
           </>
         )}
       </View>
