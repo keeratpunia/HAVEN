@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { color, space, type as typeTokens } from '@haven/ui';
 import * as api from '../../api/client.js';
 import { Button } from '../../components/Button.js';
+import { TurnstileChallenge } from '../../components/TurnstileChallenge.js';
 import { Countdown } from '../../components/Countdown.js';
 import { OtpInput } from '../../components/OtpInput.js';
 import { PhoneInput } from '../../components/PhoneInput.js';
@@ -21,18 +22,25 @@ export default function VerifyPhone() {
   const [canResend, setCanResend] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The API's CAPTCHA prompt when it asks for one (SDD T10), else null. */
+  const [captcha, setCaptcha] = useState<string | null>(null);
 
   if (!user) return <Redirect href="/sign-in" />;
 
-  async function sendCode() {
+  async function sendCode(captchaToken?: string) {
     setError(null);
+    setCaptcha(null);
     setLoading(true);
     try {
-      const res = await api.requestOtp(phone, 'phone_verify');
+      const res = await api.requestOtp(phone, 'phone_verify', captchaToken);
       setResendAfterS(res.resendAfterS);
       setCanResend(false);
       setStep('otp');
     } catch (err) {
+      if (api.isCaptchaRequired(err)) {
+        setCaptcha(err.message);
+        return;
+      }
       setError(err instanceof api.ApiError ? err.message : 'Could not send the code. Try again.');
     } finally {
       setLoading(false);
@@ -73,7 +81,7 @@ export default function VerifyPhone() {
           <PhoneInput value={phone} onChange={setPhone} hint="We'll text you a 6-digit code." />
           <Button
             label="Send code"
-            onPress={sendCode}
+            onPress={() => void sendCode()}
             loading={loading}
             disabled={phone.length !== 10}
           />
@@ -84,7 +92,12 @@ export default function VerifyPhone() {
           <OtpInput value={code} onChange={setCode} />
           <Button label="Verify" onPress={verify} loading={loading} disabled={code.length !== 6} />
           {canResend ? (
-            <Button label="Resend code" variant="ghost" onPress={sendCode} fullWidth={false} />
+            <Button
+              label="Resend code"
+              variant="ghost"
+              onPress={() => void sendCode()}
+              fullWidth={false}
+            />
           ) : (
             <Countdown
               seconds={resendAfterS}
@@ -98,6 +111,9 @@ export default function VerifyPhone() {
         <Text style={styles.error} accessibilityRole="alert">
           {error}
         </Text>
+      ) : null}
+      {captcha ? (
+        <TurnstileChallenge message={captcha} onToken={(token) => void sendCode(token)} />
       ) : null}
     </View>
   );

@@ -179,12 +179,25 @@ export async function acceptSession(result: {
 
 // ---- Auth ----
 
-export function requestOtp(phone: string, purpose: 'guest_login' | 'phone_verify') {
+export function requestOtp(
+  phone: string,
+  purpose: 'guest_login' | 'phone_verify',
+  captchaToken?: string,
+) {
   return request<{ resendAfterS: number }>('/v1/auth/otp/request', {
     method: 'POST',
     auth: false,
-    body: { phone, purpose },
+    body: captchaToken ? { phone, purpose, captchaToken } : { phone, purpose },
   });
+}
+
+/** SDD T10: the API asks for a Turnstile token from the 4th OTP request per IP. */
+export function isCaptchaRequired(err: unknown): err is ApiError {
+  return (
+    err instanceof ApiError &&
+    err.code === 'RATE_LIMITED' &&
+    (err.details as { reason?: string } | undefined)?.reason === 'CAPTCHA_REQUIRED'
+  );
 }
 
 export interface VerifyOtpResult {
