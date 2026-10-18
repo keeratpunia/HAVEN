@@ -1,4 +1,4 @@
-import { formatDuration, formatTime12h, VISIT_TYPE_LABELS } from '@haven/shared';
+import { formatDateShort, formatDuration, formatTime12h, VISIT_TYPE_LABELS } from '@haven/shared';
 
 /**
  * SDD §15 notification text, transcribed verbatim (§15: "Every message HAVEN sends is
@@ -9,7 +9,8 @@ import { formatDuration, formatTime12h, VISIT_TYPE_LABELS } from '@haven/shared'
  */
 
 export interface PushText {
-  title: string;
+  /** Null for in-app-only messages that §15.2 gives only a body (N-CHARGE). */
+  title: string | null;
   body: string;
 }
 
@@ -103,6 +104,39 @@ export function overnightDecidedText(
 /** N-RES-SUBMITTED — "New resident to verify / {name}, room {room}." */
 export function residentSubmittedText(p: { name: string; room: string }): PushText {
   return { title: 'New resident to verify', body: `${p.name}, room ${p.room}.` };
+}
+
+/** N-RES-DECIDED — "You're verified / You can now invite guests." -- or -- "Verification not approved / {reason}". */
+export function residentDecidedText(
+  p: { decision: 'verified' } | { decision: 'rejected'; reason: string },
+): PushText {
+  if (p.decision === 'verified') {
+    return { title: "You're verified", body: 'You can now invite guests.' };
+  }
+  return { title: 'Verification not approved', body: p.reason };
+}
+
+/**
+ * N-HOST-SUSPENDED — "Guest privileges suspended / Until {date}. Your upcoming visits
+ * were cancelled." A suspension with no end date has no `{date}`; the proposed wording
+ * for that case is in docs/DECISIONS.md DEC-014.
+ */
+export function hostSuspendedText(p: { until: Date | null }): PushText {
+  return {
+    title: 'Guest privileges suspended',
+    body: p.until
+      ? `Until ${formatDateShort(p.until)}. Your upcoming visits were cancelled.`
+      : 'Until the warden lifts it. Your upcoming visits were cancelled.',
+  };
+}
+
+/** N-CHARGE (in-app) — "{amount} {description} -- {status}". */
+export function chargeText(p: {
+  amountInr: number;
+  description: string;
+  status: string;
+}): PushText {
+  return { title: null, body: `₹${p.amountInr} ${p.description} — ${p.status}` };
 }
 
 // ---------------------------------------------------------------------------

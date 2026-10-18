@@ -14,7 +14,11 @@ import { __resetAuthPoliciesForTests } from '../src/auth/policy-rules.js';
 const JWT_SECRET = Buffer.alloc(32, 1).toString('base64');
 const OTP_PEPPER = Buffer.alloc(32, 2).toString('base64');
 const DATA_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
-const fakeMediaStorage: MediaStorage = { put: async () => undefined, get: async () => null };
+const fakeMediaStorage: MediaStorage = {
+  put: async () => undefined,
+  get: async () => null,
+  delete: async () => undefined,
+};
 
 function testEnv() {
   __resetEnvCacheForTests();

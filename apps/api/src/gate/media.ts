@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
@@ -30,6 +30,8 @@ export interface MediaStorage {
   put(path: string, bytes: Buffer): Promise<void>;
   /** Null when the object doesn't exist (deleted by retention, or never stored). */
   get(path: string): Promise<Buffer | null>;
+  /** Removes the object; deleting one that's already gone is not an error. */
+  delete(path: string): Promise<void>;
 }
 
 export class LocalDiskMediaStorage implements MediaStorage {
@@ -47,6 +49,10 @@ export class LocalDiskMediaStorage implements MediaStorage {
     } catch {
       return null;
     }
+  }
+
+  async delete(path: string): Promise<void> {
+    await rm(join(this.rootDir, path), { force: true });
   }
 }
 
@@ -240,4 +246,28 @@ export async function storeVisitorProfilePhoto(
     .where('id', '=', params.visitorId)
     .execute();
   return result;
+}
+
+/**
+ * Deletes a stored photo now and marks its media row deleted (SDD §16.5: "Resident ID
+ * card: deleted at verification decision (synchronously, not by job)").
+ */
+export async function deleteMedia(params: {
+  db: Kysely<Database>;
+  storage: MediaStorage;
+  clock: Clock;
+  mediaId: string;
+}): Promise<void> {
+  const row = await params.db
+    .selectFrom('haven.media')
+    .select(['path', 'deleted_at'])
+    .where('id', '=', params.mediaId)
+    .executeTakeFirst();
+  if (!row || row.deleted_at) return;
+  await params.storage.delete(row.path);
+  await params.db
+    .updateTable('haven.media')
+    .set({ deleted_at: params.clock.now().toISOString() })
+    .where('id', '=', params.mediaId)
+    .execute();
 }

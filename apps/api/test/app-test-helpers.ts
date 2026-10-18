@@ -65,6 +65,9 @@ export class MemoryMediaStorage implements MediaStorage {
   async get(path: string): Promise<Buffer | null> {
     return this.objects.get(path) ?? null;
   }
+  async delete(path: string): Promise<void> {
+    this.objects.delete(path);
+  }
 }
 
 export class FakePushSender implements PushSender {

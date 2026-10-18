@@ -25,7 +25,11 @@ const JWT_SECRET = Buffer.alloc(32, 1).toString('base64');
 const OTP_PEPPER = Buffer.alloc(32, 2).toString('base64');
 const DATA_ENCRYPTION_KEY_B64 = Buffer.alloc(32, 9).toString('base64');
 const DATA_ENCRYPTION_KEY = parseDataEncryptionKey(DATA_ENCRYPTION_KEY_B64);
-const fakeMediaStorage: MediaStorage = { put: async () => undefined, get: async () => null };
+const fakeMediaStorage: MediaStorage = {
+  put: async () => undefined,
+  get: async () => null,
+  delete: async () => undefined,
+};
 
 const db = getTestDb();
 const NOW = new Date('2026-10-12T10:42:00.000Z');

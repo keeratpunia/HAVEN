@@ -108,7 +108,11 @@ export type VisitAction =
   | 'mark_left'
   | 'cancel'
   | 'edit'
-  | 'share_invite';
+  | 'share_invite'
+  // Warden (W-05), computed only for warden callers:
+  | 'force_checkout'
+  | 'resolve_dispute'
+  | 'ban';
 
 /** SDD §12.3 `VisitDTO`. */
 export interface VisitDTO {

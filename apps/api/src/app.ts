@@ -31,6 +31,11 @@ import { registerNotificationPolicies } from './notify/policy.js';
 import { registerNotificationRoutes } from './notify/routes.js';
 import { MediaUrlSigner } from './media/signing.js';
 import { RulesProvider } from './rules/provider.js';
+import { registerAdminPolicies } from './admin/policy.js';
+import { registerAdminVisitRoutes } from './admin/visit-routes.js';
+import { registerAdminPeopleRoutes } from './admin/people-routes.js';
+import { registerAdminConfigRoutes } from './admin/config-routes.js';
+import { registerAdminChargesRoutes } from './admin/charges-routes.js';
 import { registerMediaRoutes } from './media/routes.js';
 import { registerResidentPolicies, registerResidentRoutes } from './residents/routes.js';
 import {
@@ -301,6 +306,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerGatePolicies();
   registerNotificationPolicies();
   registerResidentPolicies();
+  registerAdminPolicies();
 
   await app.register(
     async (v1) => {
@@ -330,6 +336,30 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         webBaseUrl: env.WEB_BASE_URL,
         rules,
       });
+      // Warden and office (SDD §12.9, /v1/admin with X-Hostel-Id).
+      await registerAdminVisitRoutes(v1, {
+        db,
+        clock,
+        signer: mediaSigner,
+        rules,
+        webBaseUrl: env.WEB_BASE_URL,
+      });
+      await registerAdminPeopleRoutes(v1, {
+        db,
+        clock,
+        signer: mediaSigner,
+        storage: options.mediaStorage,
+        cache: revocationCache,
+      });
+      await registerAdminConfigRoutes(v1, {
+        db,
+        clock,
+        rules,
+        dataEncryptionKey,
+        webBaseUrl: env.WEB_BASE_URL,
+        cache: revocationCache,
+      });
+      await registerAdminChargesRoutes(v1, { db, clock, signer: mediaSigner, rules });
     },
     { prefix: '/v1' },
   );

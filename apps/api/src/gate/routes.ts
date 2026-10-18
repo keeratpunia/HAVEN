@@ -5,7 +5,6 @@ import type { ZodTypeProvider } from '../lib/validation.js';
 import type { Database } from '../db/index.js';
 import type { Clock } from '../lib/clock.js';
 import { AppError } from '../lib/errors.js';
-import { authorize } from '../auth/policy.js';
 import { visitDto } from '../visits/routes.js';
 import {
   checkIn,
@@ -17,7 +16,7 @@ import {
 import { requestHostLocationConfirmation } from '../visits/host-actions.js';
 import type { RulesProvider } from '../rules/provider.js';
 import { runIdempotent } from '../lib/idempotency.js';
-import { createPairingCode, pairDevice, recordHeartbeat, revokeDevice } from './devices.js';
+import { pairDevice, recordHeartbeat } from './devices.js';
 import { storeGatePhoto, type MediaStorage } from './media.js';
 import { consumeScanSession } from './repository.js';
 import {
@@ -99,8 +98,6 @@ const HostAssistedExitBody = z.object({ visitId: z.string().uuid() });
 
 const PairDeviceBody = z.object({ code: z.string().min(1), label: z.string().optional() });
 const HeartbeatBody = z.object({ clientTime: z.string() });
-const GATE_ID_PARAMS = z.object({ id: z.string().uuid() });
-const DEVICE_ID_PARAMS = z.object({ id: z.string().uuid() });
 
 function scanNonceFrom(request: FastifyRequest): string {
   const nonce = request.headers['x-scan-nonce'];
@@ -543,58 +540,6 @@ export async function registerGateRoutes(
       reply.send(result);
     },
   );
-
-  // POST /v1/admin/gates/:id/pairing-codes — warden (SDD §12.9).
-  api.post(
-    '/admin/gates/:id/pairing-codes',
-    { schema: { params: GATE_ID_PARAMS } },
-    async (request, reply) => {
-      if (!request.principal || request.principal.type !== 'user') {
-        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
-      }
-      const gate = await db
-        .selectFrom('haven.gates')
-        .select(['id', 'hostel_id'])
-        .where('id', '=', request.params.id)
-        .executeTakeFirst();
-      if (!gate) throw new AppError('NOT_FOUND', 404, 'Gate not found.');
-      authorize(request.principal, 'gate.create_pairing_code', { hostelId: gate.hostel_id });
-
-      const result = await createPairingCode({
-        db,
-        clock,
-        gateId: gate.id,
-        createdByUserId: request.principal.userId,
-      });
-      reply.send({ code: result.displayCode, expiresAt: result.expiresAt.toISOString() });
-    },
-  );
-
-  // POST /v1/admin/gate-devices/:id/revoke — warden (SDD §12.9: "Rotates gate secret").
-  api.post(
-    '/admin/gate-devices/:id/revoke',
-    { schema: { params: DEVICE_ID_PARAMS } },
-    async (request, reply) => {
-      if (!request.principal || request.principal.type !== 'user') {
-        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
-      }
-      const device = await db
-        .selectFrom('haven.gate_devices')
-        .innerJoin('haven.gates', 'haven.gates.id', 'haven.gate_devices.gate_id')
-        .select(['haven.gate_devices.id', 'haven.gates.hostel_id'])
-        .where('haven.gate_devices.id', '=', request.params.id)
-        .executeTakeFirst();
-      if (!device) throw new AppError('NOT_FOUND', 404, 'Device not found.');
-      authorize(request.principal, 'gate.revoke_device', { hostelId: device.hostel_id });
-
-      await revokeDevice({
-        db,
-        clock,
-        dataEncryptionKey,
-        deviceId: device.id,
-        revokedByUserId: request.principal.userId,
-      });
-      reply.status(204).send();
-    },
-  );
+  // Warden pairing-code and device-revoke routes live in admin/config-routes.ts
+  // (they need the X-Hostel-Id scope like every other /v1/admin route).
 }
