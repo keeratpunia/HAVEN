@@ -559,6 +559,51 @@ push receipts job; `Idempotency-Key` on the guest's own ★ routes; warden/offic
 screens. A guest-web behaviour was found: after the sign-in detour the guest app re-checks the
 stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 
+## 0k. Warden and office milestone (2026-10-18)
+
+The warden and office experiences (SDD §13.4 W-01..W-12, O-01) on the web target, the
+`/v1/admin` API (§12.9) and live updates (§9.9). Decisions and interpretations:
+docs/DECISIONS.md DEC-014. The accepted guest re-scan deviation is DEC-013.
+
+**What this builds:**
+- **Authorization** (`apps/api/src/admin/policy.ts`, `scope.ts`): one `authorize()`
+  policy per §3.3 capability; hostel scope only from live `role_assignments` checked
+  against `X-Hostel-Id`. Records in another hostel are `NOT_FOUND`. Super admin grants
+  are `h: '*'`. Role changes clear the revocation cache at once and drop open streams.
+- **API** (`apps/api/src/admin/`): dashboard, visit search/detail (audited read),
+  force check-out, resolve dispute, emergency roll call (JSON/CSV, audited), approvals,
+  reports (JSON + CSV, audited), residents (verify/reject with ID card deletion,
+  suspend/unsuspend, mark left), bans, rules (versioned publish), gates (location,
+  pairing codes, revoke), staff (invites, deactivate), hostels, audit log, charges
+  (list, fine, confirm, mark paid, waive) with the office serializer stripping phone and
+  photo fields.
+- **Live updates** (`apps/api/src/stream/`): `pg_notify` triggers → one `LISTEN`
+  connection → in-memory fan-out by hostel and role; `GET /v1/stream` with 25 s pings and
+  a session/role re-check per ping. Client: `apps/mobile/lib/live.ts` (web) /
+  `live.native.ts`, with backoff reconnect and 15 s polling fallback.
+- **Jobs** (`apps/api/src/jobs/runner.ts`): the §9.8 SQL jobs run in-process where
+  `pg_cron` isn't installed. Migration `20261018000002` fixes `job_flag_overstays`, which
+  had never run. Migration `20261018000001` adds gate-device events.
+- **App** (`apps/mobile/app/warden/`, `app/office/`, `components/staff/`): W-01..W-12
+  and O-01, the hostel picker, the role switcher, the staff invite landing page, and
+  push registration for staff.
+- **Demo** (`pnpm demo`): warden, office user and super admin with seeded visits and
+  charges (docs/DEMO.md §H).
+
+**Tests added:** `apps/api/test/staff-permissions.integration.test.ts` (188: every §3.3
+staff capability × guest, resident, warden, office, super admin, gate device, plus the
+stream and scope edge cases, asserting exact error codes); `staff-behaviour.integration.test.ts`
+(22: cross-hostel isolation incl. SSE, TC-SEC-03, FR-07 session end, SSE check-in,
+verify/reject, suspend, force check-out + ban, rules versions, fines and charges, roll
+call, invites, an audit row for every privileged action); `jobs-runner.integration.test.ts`
+(runner cadence, TC-JOB-01); `apps/mobile/e2e/tests/warden-office.spec.ts` (4 Playwright
+flows); staff routing in `apps/mobile/test/resident-logic.test.ts`.
+
+**What this does NOT do:** Google sign-in for staff is untested (no OAuth client here;
+staff use the DEC-011 dev sign-in, so a staff invite can be created but not accepted in
+dev); Android was never run; W-09 has no map preview (DEC-014 item 18); the FR-60 daily
+digest (priority C) isn't built; account deletion (FR-09) isn't built.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -569,9 +614,9 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 | FR-02 | M | First-time guest profile: name, gender, 18+, consent, profile selfie | `apps/mobile/app/(guest)/profile.tsx`, `PATCH /me` (`isAdultConfirmed`, `src/auth/routes.ts`) | `apps/mobile/e2e/tests/golden-path.spec.ts` | WIP — name/gender/18+ confirmation genuinely implemented and tested end to end; the profile photo is captured live (no gallery) but never uploaded/persisted — no media endpoint exists yet |
 | FR-03 | M | Residents and staff sign in with Google | `src/auth/google-service.ts`, `src/auth/google.ts`; R-01 `apps/mobile/app/(auth)/sign-in.tsx` + `components/GoogleSignInButton.tsx` (web Google Identity Services) | `test/google-service.integration.test.ts`, `test/auth-routes.integration.test.ts` | WIP — server side done; the web button is wired but untested without a Google client id, and native (`@react-native-google-signin`) is not built (DEC-012). The DEC-011 dev sign-in is what the e2e suite and demo use |
 | FR-04 | M | Resident phone OTP, room number, ID card photo, selfie, awaits verification | `phone_verify` OTP; `POST /residents/me`, `/residents/me/documents`, `/residents/me/submit` (`apps/api/src/residents/`); R-02/R-03/R-04 (`apps/mobile/app/(auth)/phone.tsx`, `onboarding.tsx`, `pending.tsx`) | `apps/api/test/resident-onboarding-visits.integration.test.ts` (flow, missing-phone refusal, one resubmission, guest refused), `apps/mobile/e2e/tests/resident-app.spec.ts` (R-01 → R-04) | Done — the warden's side of verification is FR-05 |
-| FR-05 | M | Warden sees pending residents, approves/rejects in one tap; ID card deleted on decision | — | — | — |
-| FR-06 | S | Warden invites office by email; super admin invites wardens; 48h expiry bound to email | `src/auth/google-service.ts` (acceptance only) | `test/google-service.integration.test.ts` | WIP — invite acceptance only; invite creation not built |
-| FR-07 | M | Warden deactivates staff / marks resident left; sessions end immediately | `src/auth/principal-loader.ts` (`RevocationCache`), `src/auth/authenticate.ts` | `test/sessions.integration.test.ts`, `test/auth-routes.integration.test.ts` | WIP — session-end-within-30s consequence only; the deactivate/mark-left action itself not built |
+| FR-05 | M | Warden sees pending residents, approves/rejects in one tap; ID card deleted on decision | `POST /admin/residents/{id}/verify` / `reject` (`apps/api/src/admin/people-routes.ts`, ID card file + record deleted, N-RES-DECIDED); W-04 `apps/mobile/app/warden/approvals.tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (verify, reject), `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (warden verifies a resident) | Done |
+| FR-06 | S | Warden invites office by email; super admin invites wardens; 48h expiry bound to email | `POST /admin/staff-invites` (`apps/api/src/admin/config-routes.ts`; warden → office, super admin → warden), `POST /admin/hostels`; acceptance in `src/auth/google-service.ts`; W-10 `apps/mobile/app/warden/staff.tsx`, `app/(auth)/staff-invite/[token].tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (W-10 48 h, email-bound), `apps/api/test/staff-permissions.integration.test.ts`, `test/google-service.integration.test.ts` | WIP — creation and API acceptance tested; accepting in the app needs Google sign-in, untested without OAuth credentials (DEC-014) |
+| FR-07 | M | Warden deactivates staff / marks resident left; sessions end immediately | `POST /admin/residents/{id}/mark-left`, `POST /admin/staff/{id}/deactivate` → `endAllSessions` (`apps/api/src/admin/effects.ts`: sessions revoked, push tokens disabled, cache cleared, streams closed); W-08, W-10 | `apps/api/test/staff-behaviour.integration.test.ts` (FR-07 block), `apps/api/test/staff-permissions.integration.test.ts`, `test/sessions.integration.test.ts` | Done |
 | FR-08 | S | Guest/resident edit name, retake profile photo | — | — | — |
 | FR-09 | S | Guest/resident request account deletion | — | — | — (R-15 has no delete button until `POST /me/deletion-request` exists) |
 
@@ -584,7 +629,7 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 | FR-12 | M | Opening invite link requires OTP to invited number; other numbers refused | `apps/api/src/auth/invites.ts`'s `claimInvite` + `POST /invites/:token/claim` (`src/auth/routes.ts`, §0e) + the new public `GET /v1/invites/:token` landing route (`apps/api/src/visits/routes.ts`) + guest web UI (`apps/mobile/app/(guest)/i/[token].tsx`, `login.tsx`) | `apps/api/test/invites.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` (happy path only) | Done — the full "open link → sign in → claim" flow (SDD F1) now has a real UI and real routes at both ends, proven end to end; the `INVITE_PHONE_MISMATCH` rejection path is implemented (`login.tsx` surfaces it as a user-facing error, not swallowed) but has no dedicated automated test — TC-FLOW-07 stays unmarked |
 | FR-13 | M | Host edits window / cancels visit until guest checks in | `PATCH /visits/{id}` (`editVisitWindow`, rules re-checked), `POST /visits/{id}/cancel`; R-10 Edit time / Cancel visit | `apps/api/test/resident-onboarding-visits.integration.test.ts` (edit incl. WINDOW_INVALID; cancel, second cancel 409) | Done |
 | FR-14 | M | Host requests overnight/guest-room with quota + charge preview | `POST /visits/preview` + `POST /visits` kind overnight, `GET /me/quota`; R-11 `apps/mobile/app/(resident)/overnight.tsx` | `apps/api/test/resident-onboarding-visits.integration.test.ts` (preview numbers, N-OVERNIGHT-REQ text, QUOTA_EXCEEDED counting completed stays, TYPE_NOT_ALLOWED_FOR_GENDER), `apps/mobile/e2e/tests/resident-app.spec.ts` (R-11) | Done |
-| FR-15 | M | Warden approves/rejects overnight/guest-room requests; approval creates pending charge | `approveOvernight`, `rejectOvernight` via `POST /visits/{id}/approve`/`reject` (warden branch; reason required) | `visits-service.integration.test.ts`, `apps/api/test/resident-onboarding-visits.integration.test.ts` (pending charge on R-14, N-OVERNIGHT-DECIDED both ways) | WIP — API works for a warden; no warden screen (W-04) |
+| FR-15 | M | Warden approves/rejects overnight/guest-room requests; approval creates pending charge | `approveOvernight`, `rejectOvernight` via `POST /visits/{id}/approve`/`reject` (warden branch; reason required); W-04 approvals queue `GET /admin/approvals` | `visits-service.integration.test.ts`, `apps/api/test/resident-onboarding-visits.integration.test.ts`, `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (approve → office sees the charge) | Done |
 | FR-16 | M | Host sees all visits: upcoming, inside, history, status, charges | `GET /me/hosted-visits?bucket=` (paged VisitDTO), `GET /visits/{id}` (+ timeline), `GET /me/charges`; R-05, R-13, R-10, R-14 | `apps/api/test/resident-onboarding-visits.integration.test.ts` (buckets + paging, audited detail read, TC-SEC-01/02), `apps/mobile/e2e/tests/resident-app.spec.ts` | Done |
 
 ### 5.3 Gate
@@ -600,7 +645,7 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 | FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `apps/mobile/app/(guest)/g/[token].tsx`'s `waiting_for_host` phase (3s poll of `GET /v1/visits/{id}`, `Cancel request` via `POST /v1/me/visits/{id}/cancel`) | `apps/mobile/e2e/tests/resident-app.spec.ts` (approval turns the guest screen green without reload; reject) | Done |
 | FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | `apps/mobile/app/(guest)/g/[token].tsx` (3-attempt retry, then "Ask host to confirm"), gate check-in route's `awaiting_host_confirmation` short-circuit | `apps/api/test/gate-routes.integration.test.ts` ("awaiting_host_confirmation"), `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
 | FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `POST /v1/scan-sessions/:id/host-assisted-entry`/`-exit` ★ (now runs `evaluateEntry`, records real GPS facts); R-12 `apps/mobile/app/(resident)/assist.tsx` (web QR via `@zxing/browser`, native via expo-camera; native GPS refuses mock location) | `apps/api/test/gate-routes.integration.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts` (GPS facts, no N-LEFT to self, AFTER_ENTRY_CUTOFF) | WIP — API fully tested; the R-12 screen has no e2e test (the fake camera can't show a QR) and the native path hasn't run |
-| FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | `POST /v1/gate-devices/heartbeat` (`gate/devices.ts`), `gate_devices.last_seen_at`/`offline_alerted_at` columns | `apps/api/test/gate-routes.integration.test.ts` | WIP — heartbeat itself (and secret refresh on rotation) is implemented and tested; `job_gate_offline()` already exists at the DB layer (§0b) but no warden-facing UI reads gate status or shows the alert |
+| FR-29 | S | Gate device heartbeat every 60s; warden alerted after 5 min offline | `POST /v1/gate-devices/heartbeat`; `job_gate_offline()` run by `JobRunner` where pg_cron is absent; online/offline/revoked events on `/v1/stream` (migration `20261018000001`); W-01 gate status, W-09 `apps/mobile/app/warden/gates.tsx` | `apps/api/test/gate-routes.integration.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (gate events), `apps/api/test/jobs-runner.integration.test.ts` | Done |
 | FR-30 | M | Gate device keeps screen awake; recovers automatically after network loss | `apps/mobile/app/gate/index.tsx` (`navigator.wakeLock`, heartbeat backoff 5s/15s/60s, offline badge) | Manually verified live — no automated test (Wake Lock API and real network-loss simulation aren't practical in this test setup) | WIP — genuinely implemented; not proven by an automated test |
 
 ### 5.4 Host actions
@@ -610,35 +655,35 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 | FR-40 | M | Host push for every walk-in with both photos; approve (adjust end time) or reject | N-WALKIN / N-CONFIRM-LOCATION (§15 text) via `apps/api/src/notify/`; R-08 `apps/mobile/app/(resident)/walk-in/[id].tsx` (live photo large + profile photo, editable end time, approve right / reject left) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (text, fallback, adjusted end + approvals row, idempotent replay, 409 on new key, expired, BR-11, authorization), `apps/mobile/e2e/tests/resident-app.spec.ts` (banner tap → R-08 → approve; reject) | Done on the web target — Android push is implemented but unexecuted here (DEC-012) |
 | FR-41 | S | SMS fallback if walk-in push unopened in 60s | outbox producer `cancel_if_opened` + worker (`apps/api/src/notify/`) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (cancelled when opened; sent after 60 s; released at once with no push token; stale after approval) | Done (console SMS — MSG91 per DEC-007) |
 | FR-42 | M | Host push for every check-in with photo compare; Yes/Not my guest (30 min window) | N-ARRIVED; `POST /visits/{id}/confirm-arrival` ★; R-09 `apps/mobile/app/(resident)/arrival/[id].tsx` | `apps/api/test/resident-approvals-notifications.integration.test.ts` (N-ARRIVED text, confirm once, 30-min expiry, TC-FLOW-04 host confirm, expired session 410), `apps/mobile/e2e/tests/resident-app.spec.ts` (Notifications → R-09) | Done |
-| FR-43 | M | "Not my guest" disputes the visit; alerts warden immediately (push + SMS) | `POST /visits/{id}/dispute` ★ (`disputeArrival`), N-DISPUTE push + immediate SMS | `apps/api/test/resident-approvals-notifications.integration.test.ts` (TC-FLOW-06, duplicate 409, window expiry, not for walk-ins), `apps/mobile/e2e/tests/resident-app.spec.ts` | Done (warden W-05 not built) |
-| FR-44 | M | Host push on guest check-out and on guest overstay | N-LEFT (§15 + F5 unverified sentence) from `checkOut`; N-OVERSTAY-HOST from `job_flag_overstays()` (text fixed by migration 20261017000001) | `apps/api/src/notify/templates.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts` | WIP — produced and delivered by the worker; the job has no scheduler outside Supabase pg_cron |
-| FR-45 | M | Host can mark "My guest has left"; logged and flagged to warden | `POST /visits/{id}/mark-left` ★ (`hostMarksGuestLeft`, `close_reason = host_marked_left`); R-10 | `apps/api/test/resident-approvals-notifications.integration.test.ts` (completed + identical replay) | WIP — host side done; the warden's flag view isn't built |
+| FR-43 | M | "Not my guest" disputes the visit; alerts warden immediately (push + SMS) | `POST /visits/{id}/dispute` ★ (`disputeArrival`), N-DISPUTE push + immediate SMS; warden side: W-01 Disputed tile, W-05 Resolve dispute (`POST /admin/visits/{id}/resolve-dispute`) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (TC-FLOW-06, duplicate 409, window expiry, not for walk-ins), `apps/mobile/e2e/tests/resident-app.spec.ts`, `apps/api/test/staff-permissions.integration.test.ts` | Done |
+| FR-44 | M | Host push on guest check-out and on guest overstay | N-LEFT (§15 + F5 unverified sentence) from `checkOut`; N-OVERSTAY-HOST from `job_flag_overstays()` (fixed by migration 20261018000002; scheduled by `JobRunner` where pg_cron is absent) | `apps/api/src/notify/templates.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts`, `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01) | Done |
+| FR-45 | M | Host can mark "My guest has left"; logged and flagged to warden | `POST /visits/{id}/mark-left` ★ (`hostMarksGuestLeft`, `close_reason = host_marked_left`); R-10; warden sees the flag in W-02/W-05 and search (`flag=host_marked_left`) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (completed + identical replay) | Done — the warden-side filter has no dedicated test |
 
 ### 5.5 Warden and office
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-50 | M | Dashboard: live counts/lists, updates within 5s | — | — | — |
-| FR-51 | M | Emergency roll call: everyone inside, printable/exportable | — | — | — |
-| FR-52 | M | Visit detail: full timeline with photos, GPS distance, notifications, flags | — | — | — |
-| FR-53 | M | Warden force check-out with reason | `wardenForcesCheckout` (`apps/api/src/visits/service.ts`) | `apps/api/test/visits-service.integration.test.ts` (incl. "reason required" and the non-warden authorization boundary) | WIP — the transition (`inside -> completed`, `close_reason = forced`, reason required) is implemented and tested; no HTTP route |
-| FR-54 | M | Warden bans guest (hostel/all, timed/permanent); suspends resident hosting | — | — | — |
-| FR-55 | S | Warden edits rules config via form; each save is a new version | — | — | — |
-| FR-56 | M | Warden pairs/revokes gate devices; sets gate location by 5-reading average | — | — | — |
-| FR-57 | S | Warden searches visits (name/phone/host/room/date/status); CSV export | — | — | — |
-| FR-58 | S | Warden views audit log filtered by actor/entity/date | — | — | — |
-| FR-59 | M | Office sees charges; confirms, marks paid. **Waiving and manual fines are warden-only** (not office — see permission matrix §3.3 and `POST /admin/charges/{id}/waive`, caller: Warden) | — | — | — |
+| FR-50 | M | Dashboard: live counts/lists, updates within 5s | `GET /admin/dashboard`; SSE `GET /v1/stream` (`apps/api/src/stream/`); W-01 `apps/mobile/app/warden/index.tsx`, W-02 `inside.tsx`, `lib/live.ts` | `apps/api/test/staff-behaviour.integration.test.ts` (SSE check-in), `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (check-in appears on Inside without reload) | Done |
+| FR-51 | M | Emergency roll call: everyone inside, printable/exportable | `GET /admin/emergency` (JSON/CSV, audited `read.emergency`); W-03 `apps/mobile/app/warden/emergency.tsx` (print, CSV, share) | `apps/api/test/staff-behaviour.integration.test.ts` (W-03 JSON + CSV, audit), `apps/api/test/staff-permissions.integration.test.ts` | Done |
+| FR-52 | M | Visit detail: full timeline with photos, GPS distance, notifications, flags | `GET /admin/visits/{id}` (events, notifications, signed photo URLs, distance only; audited `read.visit`); W-05 `apps/mobile/app/warden/visits/[id].tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (audit), `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (detail shows phone) | Done |
+| FR-53 | M | Warden force check-out with reason | `POST /admin/visits/{id}/force-checkout` ★ → `wardenForcesCheckout`; W-05 | `visits-service.integration.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts`, `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` | Done |
+| FR-54 | M | Warden bans guest (hostel/all, timed/permanent); suspends resident hosting | `POST /admin/bans`, `POST /admin/bans/{id}/lift`, `POST /admin/residents/{id}/suspend`/`unsuspend` (`people-routes.ts`; BR-10 side effects); W-05, W-07, W-08 | `apps/api/test/staff-behaviour.integration.test.ts` (ban → refused at gate; suspend), `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (ban → refused at the gate) | Done |
+| FR-55 | S | Warden edits rules config via form; each save is a new version | `GET`/`PUT /admin/rules` (new `hostel_rules` version, cache invalidated), `apps/api/src/rules/provider.ts`; W-06 `apps/mobile/app/warden/rules.tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (FR-55, E-13), `apps/api/test/staff-permissions.integration.test.ts` | Done |
+| FR-56 | M | Warden pairs/revokes gate devices; sets gate location by 5-reading average | `PUT /admin/gates/{id}/location`, `POST /admin/gates/{id}/pairing-codes`, `POST /admin/gate-devices/{id}/revoke`; W-09 averages 5 GPS readings client-side | `apps/api/test/staff-permissions.integration.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (pairing/offline events) | WIP — the 5-reading averaging on W-09 has no automated test (needs a GPS sequence), and the native path hasn't run |
+| FR-57 | S | Warden searches visits (name/phone/host/room/date/status); CSV export | `GET /admin/visits` (status, type, flag, q, from, to, expectedToday, cursor), `GET /admin/reports/visits(.csv)` (audited `read.export`); W-12 `apps/mobile/app/warden/reports.tsx`, search `visits/index.tsx` | `apps/api/test/staff-permissions.integration.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (audit of export) | Done |
+| FR-58 | S | Warden views audit log filtered by actor/entity/date | `GET /admin/audit` (entity, entityId, actorId, from, to); W-11 `apps/mobile/app/warden/audit.tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (entity filter), `apps/api/test/staff-permissions.integration.test.ts` | Done |
+| FR-59 | M | Office sees charges; confirms, marks paid. **Waiving and manual fines are warden-only** (not office — see permission matrix §3.3 and `POST /admin/charges/{id}/waive`, caller: Warden) | `apps/api/src/admin/charges-routes.ts` (list, fine, confirm, mark-paid with receipt, waive with reason; office serializer); O-01 `apps/mobile/app/office/charges.tsx`, warden `app/warden/charges.tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (BR-18/FR-59, TC-SEC-03), `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (office marks paid) | Done |
 | FR-60 | C | Daily 08:00 digest to warden | — | — | — |
 
 ### 5.6 System
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-70 | M | Walk-in requests expire after 10 min; both parties told | `haven.job_expire_walkins()` (N-WALKIN-EXPIRED text fixed); the guest page sees the expiry through its poll | `apps/api/test/resident-approvals-notifications.integration.test.ts` (job expires it, host told by name, later approve 409), `visits-concurrency.integration.test.ts` | WIP — no scheduler runs the job outside Supabase pg_cron |
-| FR-71 | M | Approved-never-entered visits expire at window_end | `expireApprovedVisit` (`apps/api/src/visits/service.ts`) | `visits-service.integration.test.ts` | WIP — the transition and charge-waiving side effect are implemented and tested; no scheduled job calls it yet |
-| FR-72 | M | Overstay detection every 5 min; alerts host/guest; escalates to warden after 30 min | — | — | — |
-| FR-73 | M | Night sweep at 22:00 lists day/quick guests still inside to the warden | — | — | — |
-| FR-74 | M | Every state change and admin action written to append-only audit log | `supabase/migrations/20261001000001_init.sql` — `audit_row()` + 9 `t_audit_*` triggers on every table SDD §11.6 lists (visits, residents, role_assignments, bans, charges, gates, gate_devices, hostel_rules, staff_invites), plus `forbid_mutation()` making `gate_events`/`audit_log`/`approvals`/`hostel_rules` append-only. **Every `haven.visits` state change now sets real actor context** — every `visits/service.ts` mutation runs inside `lib/tx.ts`'s `withTx`, which sets `haven.actor_type`/`haven.actor_id`/`haven.request_id` from the real `Principal` (or `system` for job-triggered transitions) before the UPDATE/INSERT, so `audit_row()` attributes correctly for visits specifically | `supabase/tests/002_constraints_and_triggers.sql`, `supabase/tests/003_audit_pii_stripping.sql` | WIP — the mechanism is correct and exercised for every visits transition; other SDD §11.6 tables (residents, bans, charges, gate devices, ...) still have no API caller setting actor context yet, so this remains incomplete hostel-wide |
+| FR-70 | M | Walk-in requests expire after 10 min; both parties told | `haven.job_expire_walkins()` (N-WALKIN-EXPIRED text fixed), run every minute by pg_cron or `JobRunner`; the guest page sees the expiry through its poll | `apps/api/test/resident-approvals-notifications.integration.test.ts` (job expires it, host told by name, later approve 409), `visits-concurrency.integration.test.ts`, `apps/api/test/jobs-runner.integration.test.ts` (cadence) | Done |
+| FR-71 | M | Approved-never-entered visits expire at window_end | `expireApprovedVisit` (`apps/api/src/visits/service.ts`); `haven.job_expire_approved()` every 5 min via pg_cron or `JobRunner` | `visits-service.integration.test.ts`, `apps/api/test/jobs-runner.integration.test.ts` (cadence) | WIP — the job is scheduled; its effect on a real row has no dedicated test |
+| FR-72 | M | Overstay detection every 5 min; alerts host/guest; escalates to warden after 30 min | `haven.job_flag_overstays()` (fixed by migration 20261018000002), every 5 min via pg_cron or `JobRunner`; W-01 Overstaying tile | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01) | WIP — flagging and host/guest alerts tested; the 30-minute warden escalation has no dedicated test |
+| FR-73 | M | Night sweep at 22:00 lists day/quick guests still inside to the warden | `haven.job_night_sweep()` scheduled by `JobRunner` (22:00 IST) | `apps/api/test/jobs-runner.integration.test.ts` (schedule only) | WIP — TC-JOB-02 not written |
+| FR-74 | M | Every state change and admin action written to append-only audit log | `supabase/migrations/20261001000001_init.sql` — `audit_row()` + 9 `t_audit_*` triggers on every table SDD §11.6 lists (visits, residents, role_assignments, bans, charges, gates, gate_devices, hostel_rules, staff_invites), plus `forbid_mutation()` making `gate_events`/`audit_log`/`approvals`/`hostel_rules` append-only. **Every `haven.visits` state change now sets real actor context** — every `visits/service.ts` mutation runs inside `lib/tx.ts`'s `withTx`, which sets `haven.actor_type`/`haven.actor_id`/`haven.request_id` from the real `Principal` (or `system` for job-triggered transitions) before the UPDATE/INSERT, so `audit_row()` attributes correctly for visits specifically | `supabase/tests/002_constraints_and_triggers.sql`, `supabase/tests/003_audit_pii_stripping.sql` | WIP — the mechanism is correct and exercised for every visits transition; other SDD §11.6 tables (residents, bans, charges, gate devices, ...) still have no API caller setting actor context yet, so this remains incomplete hostel-wide. **Warden/office milestone (§0k):** every `/v1/admin` action writes a named `audit_log` row (`apps/api/src/admin/audit.ts`), and reads of visit detail, the emergency list and CSV exports write `read.*` rows; tested in `apps/api/test/staff-behaviour.integration.test.ts` ("every privileged action writes an audit entry") |
 | FR-75 | S | Personal data purged per retention schedule (§16.5) | — | — | — |
 
 ## 2. Non-functional requirements (NFR-xx) — SDD §17.1
@@ -671,17 +716,17 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 | BR-05 | Overnight in room: max 3 nights/host/calendar month (IST) | Create | `evaluateCreate` — `QUOTA_EXCEEDED`, using `nightsBetween`/`quotaUsed`, fed real existing-booking data by `visits/repository.ts`'s `findActiveOvernightBookings` | `evaluate-create.test.ts` (worked examples incl. Oct/Nov boundary), `nights.test.ts`, `visits-service.integration.test.ts` ("QUOTA_EXCEEDED") | WIP — same as BR-01 |
 | BR-06 | Overnight in room: at most one overnight guest per host at a time | Create | `evaluateCreate` — `OVERNIGHT_OVERLAP` | `evaluate-create.test.ts` (TC-RULE-15 + boundary tests) | WIP — now called by `createOvernightRequest`; no HTTP route |
 | BR-07 | Opposite/undisclosed gender → visitors_room zone, no overnight/guest_room | Create + display | `evaluateCreate` — `TYPE_NOT_ALLOWED_FOR_GENDER` + `computeZone`, result persisted as `visits.zone` by `visits/repository.ts`'s `insertVisit` | `zone.test.ts`, `evaluate-create.test.ts` | WIP — same as BR-01 |
-| BR-08 | Overnight ₹50/night, guest room ₹150/night; pending charge on warden approval. **₹150 is an SDD working default awaiting warden confirmation, not yet a final decision** — see `docs/DECISIONS.md` Q8 note | Approval | `apps/api/src/visits/sideEffects.ts` (`createPendingCharge`/`waiveChargeForVisit`/`confirmChargeForVisit`), called by `visits/service.ts`'s `approveOvernight`/`cancelApprovedVisit`/`checkOut`/etc. | `visits-service.integration.test.ts` ("pending charge created", "charge is waived", "charge confirmed") | WIP — charge *lifecycle* (create pending / waive / confirm) now exists and is tested end to end at the service layer; this is still not one of SDD §4.4's 5 rules-engine functions, it's plain service code, and there is no warden-facing route yet |
+| BR-08 | Overnight ₹50/night, guest room ₹150/night; pending charge on warden approval. **₹150 is an SDD working default awaiting warden confirmation, not yet a final decision** — see `docs/DECISIONS.md` Q8 note | Approval | `apps/api/src/visits/sideEffects.ts` (`createPendingCharge`/`waiveChargeForVisit`/`confirmChargeForVisit`), called by `visits/service.ts`'s `approveOvernight`/`cancelApprovedVisit`/`checkOut`/etc.; office/warden charge routes (`apps/api/src/admin/charges-routes.ts`) | `visits-service.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (approval → charge appears for office) | Done |
 | BR-09 | Banned guests cannot be invited, request entry, or check in | Create + entry | `evaluateCreate`/`evaluateEntry` — `VISITOR_BANNED`, fed by `visits/context.ts`'s `isVisitorBanned` against `haven.bans` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — same as BR-01 |
-| BR-10 | Suspended hosts cannot create/approve; future visits cancelled on suspension start | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_SUSPENDED` check, fed by `visits/context.ts`'s `loadHostState` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — the suspension *check* is wired to real DB data now; "future visits cancelled" is a separate side effect no code implements yet |
+| BR-10 | Suspended hosts cannot create/approve; future visits cancelled on suspension start | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_SUSPENDED`; `cancelFutureVisits` (`apps/api/src/admin/effects.ts`) on suspend, ban and mark left (DEC-014 item 13) | `evaluate-create.test.ts`, `evaluate-entry.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (BR-10) | Done |
 | BR-11 | Host max `max_active_day_guests` (default 3) day/quick guests inside at once | Create + approval | `evaluateCreate` — `HOST_DAY_LIMIT` (deny, today only); `evaluateEntry` — `HOST_DAY_LIMIT` (flag); counted for real by `visits/repository.ts`'s `countHostActiveDayGuests` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — same as BR-01 |
 | BR-12 | Walk-in expires if host doesn't decide within 10 min | Job | The *transition itself* (`pending_host -> expired`, trigger `walk_in_timeout`) exists as `apps/api/src/visits/service.ts`'s `expireWalkIn` | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts` ("host approval vs. 10-minute timeout") | WIP — the state transition a job would call is implemented and tested, including its race against approval; no scheduled job calls it yet |
-| BR-13 | Overstay when inside past `window_end + 15 min` | Job | — | — | — (the *job* that flags overstay is unrelated to this milestone; `evaluateExit`'s `LATE_EXIT` flag is a distinct, SDD-explicit check at the moment of exit — see TC-RULE-16 below) |
-| BR-14 | At 22:00, every inside day/quick guest listed to warden | Job | — | — | — |
+| BR-13 | Overstay when inside past `window_end + 15 min` | Job | `haven.job_flag_overstays()` (fixed by migration 20261018000002), scheduled by pg_cron or `JobRunner` | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01) | WIP — the 15-minute boundary itself has no dedicated test |
+| BR-14 | At 22:00, every inside day/quick guest listed to warden | Job | `haven.job_night_sweep()` scheduled by `JobRunner` | — (TC-JOB-02 not written) | WIP |
 | BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | `supabase/migrations/20261001000001_init.sql` (`visits_one_inside_per_visitor`) **and** `evaluateEntry`'s `ALREADY_INSIDE` check, **both now wired into** `apps/api/src/visits/repository.ts` (catches the constraint violation, maps to `409 ALREADY_INSIDE`) and `visits/service.ts`'s `checkIn`/`approveWalkIn` | `supabase/tests/002_constraints_and_triggers.sql`, `evaluate-entry.test.ts`, `visits-concurrency.integration.test.ts` ("two visits attempting to make the same visitor inside at once") — the last one races two real concurrent `checkIn` calls against the real constraint, not a mock | Done — both layers are now wired into the real check-in path and proven under an actual concurrent-request race, not just unit-tested in isolation |
 | BR-16 | Pre-invites ≤7 days ahead; overnight requests ≤30 days ahead | Create | `evaluateCreate` — `TOO_FAR_AHEAD` | `evaluate-create.test.ts` (exact day-count boundaries for both limits) | WIP — now called by the visits service; no HTTP route |
 | BR-17 | Check-out never refused for rule reasons; failed GPS on exit allowed but flagged | Exit | `evaluateExit` — never returns `deny`; `LOCATION_UNVERIFIED` flag, called by `visits/service.ts`'s `checkOut` | `evaluate-exit.test.ts`, `visits-service.integration.test.ts` | WIP — same as BR-01 |
-| BR-18 | Warden manual fine, minimum ₹400 for unregistered guest | Warden action | — | — | — |
+| BR-18 | Warden manual fine, minimum ₹400 for unregistered guest | Warden action | `POST /admin/charges` (kind fine, min from `min_manual_fine_inr`), warden only | `apps/api/test/staff-behaviour.integration.test.ts` (BR-18), `apps/api/test/staff-permissions.integration.test.ts` | Done |
 | BR-19 | Overnight window: visiting_start on arrival date to 22:00; checkout by overnight_checkout_time | Create + entry | `evaluateEntry`'s `AFTER_HARD_CUTOFF`/`TOO_EARLY`/`WINDOW_ENDED` correctly gate an overnight visit *given* a correctly-derived `windowStart`/`windowEnd` | `evaluate-entry.test.ts` (overnight worked examples), `visits-service.integration.test.ts` (overnight check-in/out) | WIP — the engine honours the window given one; `createOvernightRequest`'s caller still supplies `windowStart`/`windowEnd` directly rather than deriving them from `arrivalDate`/`departureDate` per this BR's formula (SDD §12.6) — that derivation is still API-layer/route work, not yet built |
 | BR-20 | Guest may arrive up to 30 min before window_start | Entry | `evaluateEntry` — `TOO_EARLY`, called by `visits/service.ts`'s `checkIn` | `evaluate-entry.test.ts`, `visits-service.integration.test.ts` ("TOO_EARLY check-in") | WIP — see `docs/DECISIONS.md` DEC-006 for a documented SDD contradiction between this BR's "30 min" and the §4.6 worked example's literal clock digits, resolved in favour of the 30-minute rule |
 
@@ -689,7 +734,7 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 
 | ID | Situation (summary) | Required behaviour | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| E-01 | Gate device offline when guest scans | QR still valid (local gen); warden alerted after 5 min | `apps/mobile/app/gate/index.tsx` (local token generation, offline badge) | Manually verified — no automated test | WIP — the QR-still-valid-offline half is implemented; the warden-alert half has no UI (same gap as FR-29) |
+| E-01 | Gate device offline when guest scans | QR still valid (local gen); warden alerted after 5 min | `apps/mobile/app/gate/index.tsx` (local token generation, offline badge); `job_gate_offline()` + W-01/W-09 offline status | `apps/api/test/staff-behaviour.integration.test.ts` (offline gate event) | WIP — the offline QR itself is only manually verified |
 | E-02 | Guest's phone clock is wrong | Irrelevant — server time decides token age | — | — | — |
 | E-03 | Guest opens link in in-app browser (WhatsApp/IG/FB) | Detect via UA; show "Open in Chrome/Safari" | — | — | — |
 | E-04 | Three friends arrive together | Each needs own visit; same token works for all within 30s | — | — | — |
@@ -699,18 +744,18 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 | E-08 | Host has no internet when guest arrives | Walk-in can't be approved, expires in 10 min; pre-invites still check in | — | — | — |
 | E-09 | Host isn't in the hostel but approves | Allowed; host accountable; visible in timeline | — | — | — |
 | E-10 | Double tap Check in / network drop after commit | Idempotency-Key replays; one gate event only | — | — | — |
-| E-11 | Host suspended while guest inside | Guest stays inside; no new entries; future visits cancelled | — | — | — |
-| E-12 | Guest banned while inside | Warden force-checks out; ban blocks re-entry | — | — | — |
-| E-13 | Rules changed during the day | New entries use new rules; existing visits keep their `rules_version` | — | — | — |
-| E-14 | Gate location not set | `GATE_NOT_CONFIGURED`; red dashboard banner | `apps/api/src/gate/geofence.ts`/`scanSessions.ts` (`GATE_NOT_CONFIGURED` 503) | — (no fixture exercises a gate with no location set) | WIP — the error code is implemented; no dedicated test, and no warden dashboard banner |
+| E-11 | Host suspended while guest inside | Guest stays inside; no new entries; future visits cancelled | `POST /admin/residents/{id}/suspend` + `cancelFutureVisits` | `apps/api/test/staff-behaviour.integration.test.ts` (BR-10: guest inside stays) | Done |
+| E-12 | Guest banned while inside | Warden force-checks out; ban blocks re-entry | force-checkout + `POST /admin/bans`; `VISITOR_BANNED` at the gate | `apps/api/test/staff-behaviour.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` | Done |
+| E-13 | Rules changed during the day | New entries use new rules; existing visits keep their `rules_version` | `RulesProvider` (latest version, cleared on publish); `visits.rules_version` | `apps/api/test/staff-behaviour.integration.test.ts` (FR-55, E-13) | Done |
+| E-14 | Gate location not set | `GATE_NOT_CONFIGURED`; red dashboard banner | `apps/api/src/gate/geofence.ts`/`scanSessions.ts` (`GATE_NOT_CONFIGURED` 503); `gates[].configured` on the dashboard and the red banner in W-01/W-09 | — (no automated test of the banner; the API code has no dedicated test) | WIP |
 | E-15 | Guest has no mobile data at the gate | Host-assisted entry (F4) fallback | — | — | — |
 | E-16 | GPS inside geofence but guest actually in a nearby room | Mitigated by calibration + live photo; documented limitation | — | — | — |
 | E-17 | Guest denies camera permission | G-16 enable instructions; no check-in without photo | `apps/mobile/components/LiveCamera.tsx`'s `onPermissionDenied`, handled by `profile.tsx` and `visits/[id].tsx` | — (manually verified; no automated permission-denial test) | WIP — both the profile and gate screens show "Allow camera access..." instructions instead of a dead end; no check-in/profile-completion is possible without a captured photo. The gate screen's handling was a real bug found while writing this milestone's own traceability entry (it originally reused the geolocation-denied message and left the Take-photo button disabled with no explanation) — fixed, see `docs/DECISIONS.md` DEC-009 |
-| E-18 | Resident moves out with future visits | Marked `left`; future visits cancelled | — | — | — |
+| E-18 | Resident moves out with future visits | Marked `left`; future visits cancelled | `POST /admin/residents/{id}/mark-left` | `apps/api/test/staff-behaviour.integration.test.ts` (FR-07 mark left) | Done |
 | E-19 | Overnight stay spans two months | Nights split by month for quota | `packages/shared/src/rules/nights.ts` (`monthsTouched`) + `evaluate-create.ts`'s per-month `QUOTA_EXCEEDED` loop | `nights.test.ts`, `evaluate-create.test.ts` (31 Oct → 2 Nov / 30 Oct → 1 Nov worked examples) | Done — the month-splitting logic itself is fully implemented and tested; no API/DB layer needed for this specific edge case, it's pure date arithmetic |
 | E-20 | Two residents claim the same room | Allowed (roommates) | — | — | — |
-| E-21 | Host disputes by mistake | Warden resolves after talking to host; visit stays as is | — | — | — |
-| E-22 | Guest never checks out, host doesn't respond | Overstay → warden escalation → night sweep → force check-out | — | — | — |
+| E-21 | Host disputes by mistake | Warden resolves after talking to host; visit stays as is | `POST /admin/visits/{id}/resolve-dispute` (flag cleared, note in audit) | `apps/api/test/staff-permissions.integration.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (audit) | Done |
+| E-22 | Guest never checks out, host doesn't respond | Overstay → warden escalation → night sweep → force check-out | overstay job, night sweep (`JobRunner`), W-05 force check-out | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01), `apps/api/test/staff-behaviour.integration.test.ts` (force check-out) | WIP — escalation and night sweep have no dedicated test |
 | E-23 | Two gate devices paired to one gate | Both show valid QRs (same secret); either works | `apps/api/src/gate/devices.ts`'s `pairDevice` (secret is per-gate, every paired device gets the same one) | — (true by construction; no dedicated two-device test) | WIP |
 | E-24 | Approved guest arrives at a different hostel's gate | No matching visit there; only Request entry offered | `apps/api/src/gate/routes.ts`'s `GET /scan-sessions/:id` (approved-visit query scoped to the scanned gate's own `hostel_id`) | — (correctly implemented; no dedicated cross-hostel test case) | WIP |
 
@@ -768,17 +813,17 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 
 | ID | Case | Expected | Test file | Status |
 |---|---|---|---|---|
-| TC-JOB-01 | Overstay job twice in a row | one host push, one guest SMS (dedupe) | — | — |
+| TC-JOB-01 | Overstay job twice in a row | one host push, one guest SMS (dedupe) | `apps/api/test/jobs-runner.integration.test.ts` | Done |
 | TC-JOB-02 | Night sweep: 2 day guests + 1 overnight guest inside | warden notified of 2 only | — | — |
 
 ### Security (TC-SEC)
 
 | ID | Case | Expected | Test file | Status |
 |---|---|---|---|---|
-| TC-SEC-01 | Resident A requests resident B's visit | 404 | — | — |
-| TC-SEC-02 | Guest requests a visit they aren't on | 404 | — | — |
-| TC-SEC-03 | Office lists charges | no phone or photo fields in JSON | — | — |
-| TC-SEC-04 | Warden of hostel X uses `X-Hostel-Id` of hostel Y | 403 | — | — |
+| TC-SEC-01 | Resident A requests resident B's visit | 404 | `apps/api/test/resident-onboarding-visits.integration.test.ts` (TC-SEC-01/02) | Done |
+| TC-SEC-02 | Guest requests a visit they aren't on | 404 | `apps/api/test/resident-onboarding-visits.integration.test.ts` (TC-SEC-01/02) | Done |
+| TC-SEC-03 | Office lists charges | no phone or photo fields in JSON | `apps/api/test/staff-behaviour.integration.test.ts` (TC-SEC-03 block), `apps/mobile/e2e/tests/warden-office.spec.ts` (no +91 on the office screen) | Done |
+| TC-SEC-04 | Warden of hostel X uses `X-Hostel-Id` of hostel Y | 403 | `apps/api/test/staff-behaviour.integration.test.ts` (cross-hostel isolation incl. SSE), `apps/api/test/staff-permissions.integration.test.ts` | Done |
 | TC-SEC-05 | Deactivated user's access token after 30s | `SESSION_REVOKED` | `test/sessions.integration.test.ts`, `test/auth-routes.integration.test.ts` | Done |
 | TC-SEC-06 | Reused refresh token | 401 and whole session revoked | `test/sessions.integration.test.ts` | Done |
 | TC-SEC-07 | `UPDATE haven.gate_events` as `haven_api` | permission error | `supabase/tests/004_api_role_and_rls.sql` | Done |
@@ -791,11 +836,11 @@ stale gate token — since accepted as a deviation (DEC-013, FR-21 row).
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
-| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 11 (FR-01, FR-03, FR-10, FR-12, FR-20, FR-21, FR-23, FR-24, FR-25, FR-26, FR-27) | 17 (FR-02, FR-04, FR-06, FR-07, FR-11, FR-13, FR-14, FR-15, FR-28, FR-29, FR-30, FR-40, FR-45, FR-53, FR-70, FR-71, FR-74) | 22 | 0 |
+| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 34 (FR-01, FR-04, FR-05, FR-07, FR-10..16, FR-21, FR-23..27, FR-29, FR-40..45, FR-50..55, FR-57..59, FR-70) | 11 (FR-02, FR-03, FR-06, FR-20, FR-28, FR-30, FR-56, FR-71, FR-72, FR-73, FR-74) | 5 (FR-08, FR-09, FR-22, FR-60, FR-75) | 0 |
 | NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
-| BR | 20 | 1 (BR-15) | 16 (BR-01..12, 16, 17, 19, 20) | 3 (BR-13, 14, 18) | 0 |
-| E | 24 | 1 (E-19) | 5 (E-01, E-14, E-17, E-23, E-24) | 18 | 0 |
-| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 34 (TC-RULE ×16, TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09, TC-SEC-05, TC-SEC-06, TC-SEC-07, TC-SEC-08, TC-SEC-09) | 1 (TC-FLOW-04) | 16 | 0 |
+| BR | 20 | 4 (BR-08, BR-10, BR-15, BR-18) | 16 (BR-01..07, 09, 11..14, 16, 17, 19, 20) | 0 | 0 |
+| E | 24 | 6 (E-11, E-12, E-13, E-18, E-19, E-21) | 6 (E-01, E-14, E-17, E-22, E-23, E-24) | 12 | 0 |
+| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 39 (TC-RULE ×16, TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09, TC-JOB-01, TC-SEC-01..09) | 1 (TC-FLOW-04) | 11 | 0 |
 
 Corrected during the rules-engine milestone: this table had silently gone stale after
 the API-foundation milestone set NFR-13 to WIP without updating the summary row —
@@ -821,6 +866,11 @@ not-started → WIP. Again a direct re-tally, no SDD ID range changed.
 Updated 2026-10-04 for the demo milestone (§0i): FR-10 and FR-26 moved WIP → Done;
 FR-11 and FR-40 moved not-started → WIP. Again a direct re-tally, no SDD ID range
 changed.
+
+Updated 2026-10-18 for the warden and office milestone (§0k), recounted directly from
+the rows above (they had drifted: the resident milestone's FR-04, FR-11, FR-13, FR-14,
+FR-16, FR-41, FR-42, FR-43 and TC-SEC-01/02 changes never reached this table). No SDD ID
+range changed.
 
 ## 6a. Database-level guarantees implemented but not mapped to a single ID
 

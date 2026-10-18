@@ -988,6 +988,94 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** No — recorded here as an accepted deviation and in TRACEABILITY
   (FR-21, FR-25); to be reflected in the SDD (§9.3, F2, §13.6) when it is next revised.
 
+### DEC-014 — Warden and office milestone: permission boundaries, SDD gaps, and test-infrastructure fixes
+
+- **Date:** 2026-10-18
+- **Context:** Building W-01..W-12, O-01, `/v1/admin` and `/v1/stream` (SDD §3.3, §3.4,
+  §5.1, §5.5, §9.9, §12.9, §13.4). §3.3 (the permission matrix) and §12.9 (the
+  endpoint table's "Role" column) don't always agree, and several screens need
+  behaviour the SDD doesn't spell out. CLAUDE.md §1.4 says to choose the more
+  restrictive reading and record it. Each item below is one such choice.
+- **Decision — where roles come from:**
+  1. Staff roles are read from `role_assignments` (`revoked_at is null`) on every request,
+     through the 30-second revocation cache. A role change made through the API clears
+     the cache for that user immediately (`forgetUser`), which also drops their open
+     live streams. A super admin grant (`hostel_id` null) is carried as `h: '*'`. Before
+     this milestone `loadUserRoles` dropped super admin grants entirely; that's fixed.
+  2. Accepting a staff invite for a role the user already holds in that hostel doesn't
+     create a second grant. `granted_by` is copied from the invite.
+- **Decision — narrower permissions where §3.3 and §12.9 differ:**
+  3. Dashboard, emergency roll call, the approvals queue and reports are **warden
+     only**. §3.3 gives the super admin "See visits: All", which is implemented as
+     `GET /admin/visits` and visit detail in any hostel, not the warden's day-to-day
+     screens. In the app the super admin lands on Residents.
+  4. Approving or rejecting an overnight stay and force check-out are warden only (the
+     matrix shows "—" for super admin).
+  5. Mark left is warden only (FR-07; no matrix row grants it to anyone else).
+  6. Deactivate (§12.9 "Office staff management"): a warden can deactivate only office
+     staff of their own hostel, and not themselves. It revokes the role in that hostel
+     and ends all sessions and push tokens. `users.is_active` becomes false only if no
+     roles are left and the user isn't a resident.
+  7. A warden may place an all-hostels ban (FR-54), but only its creator or a super
+     admin can lift it. A ban requires the guest to have had a visit in this hostel, so
+     a warden can't ban an arbitrary phone number seen nowhere in their hostel.
+  8. Office: charge responses omit the `guestPhone` and `guestPhoto` keys entirely
+     (TC-SEC-03, done in the serializer). On `/v1/stream` the office gets pings only,
+     with no visit or gate events.
+- **Decision — behaviour the SDD doesn't spell out:**
+  9. Endpoints not listed in §12.9, both under `/v1/admin` with `X-Hostel-Id`:
+     `POST /admin/hostels` (super admin; creates rules v1 from the GH-8 defaults with the
+     new hostel's gender, plus one unconfigured gate) and `POST /admin/staff-invites`
+     with `role=warden` (super admin only; FR-06). There is also
+     `GET /admin/reports/visits` (JSON counts for W-12; §12.9 lists only the CSV). The
+     CSV leaves out the guest phone ("collect the least", §16).
+  10. The staff invite link is `<WEB_BASE_URL>/staff-invite/<token>`, valid 48 h and bound
+      to the invited email.
+  11. The dashboard response adds `latestEvents` (W-01 "latest events") and
+      `gates[].configured` (E-14 banner). A gate device counts as online if it was seen in
+      the last 5 minutes, the same threshold `job_gate_offline` uses (FR-29).
+  12. Publishing rules refuses changes to `hostel_gender` and `timezone`. Those are facts
+      about the hostel, not rules. Each save is a new version. Gate entries are judged
+      against the latest version (E-13); the cache is cleared on publish. A hostel with
+      no rules row falls back to GH-8 v1.
+  13. Ban, suspend hosting and mark left cancel the host's or guest's **approved,
+      never-entered** visits. That's the only cancel transition §7.1 defines, so BR-10
+      is applied through it, and their pending charges are waived. `pending_warden`
+      requests stay for the warden to decide. Guests already inside stay inside
+      (E-11/E-12); the warden force-checks them out if needed.
+  14. Proposed copy for N-HOST-SUSPENDED with no end date (§15 has only the dated form):
+      "Until the warden lifts it. Your upcoming visits were cancelled."
+  15. The resolve-dispute note is stored only in the audit row; `visits` has no column
+      for it.
+  16. The warden's visit detail shows the full guest phone (§3.3 "See guest phone:
+      Hostel") and the GPS distance only, never coordinates (§16.2).
+  17. App routes: the staff shells are `/warden/*` and `/office/*` (plain folders, not
+      route groups) so office `/charges` can't collide with the resident's `/charges`.
+      Wardens also get push registration and notification-tap routing in their shell.
+  18. W-09 shows the averaged gate coordinates and accuracy as text. There is no map
+      preview, because the stack in §8.4 has no map library.
+- **Decision — infrastructure fixed along the way:**
+  19. Embedded Postgres for tests, e2e and the demo now runs `initdb --encoding=UTF8
+      --locale=C`. On Windows the default was WIN1252, which rejected "₹" and any
+      non-Latin guest name with a 500. Supabase is UTF-8, so this matches production.
+  20. `job_flag_overstays` had never run: it mixed text and enum in a `UNION ALL`. Fixed by
+      a new migration (`20261018000002`), not an edit, and covered by TC-JOB-01. A new
+      `gate_devices` trigger (`20261018000001`) emits online, offline and revoked events
+      for the live stream.
+  21. Where `pg_cron` isn't installed (embedded Postgres in tests, e2e and the demo), the
+      instance with `WORKER_ENABLED=true` runs the §9.8 SQL jobs on their schedules
+      (`JobRunner`). Where `pg_cron` exists it does nothing.
+  22. The e2e API raises the global rate limit to 1,000 requests per minute: the
+      Playwright suite runs many sign-ins from one IP. The per-phone OTP limits are
+      unchanged.
+- **Alternatives considered:** Following §12.9's wider "Role" column, which would let
+  the super admin into every warden screen (rejected — CLAUDE.md §1.4, more
+  restrictive). Sending office staff anonymised visit events on the stream (rejected —
+  O-01 needs nothing but charges).
+- **SDD updated?** No. Items 3–8 choose the narrower of two SDD readings. Items 9–18
+  fill gaps and are flagged here for review. Item 14 is proposed copy to add to §15
+  when the SDD is next revised. Nothing here widens a permission the SDD grants.
+
 Template for a new entry:
 
 ```markdown
