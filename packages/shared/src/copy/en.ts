@@ -90,6 +90,34 @@ export const EN_COPY: Record<string, CopyEntry> = {
     title: 'Something went wrong on our side',
     body: "It's not you — try again in a moment.",
   },
+
+  // ---- Account deletion (FR-09, SDD §16.6) ----
+  // The SDD names only the button, "Delete my account" (§16.6). Everything below is
+  // PROPOSED copy, not in §13.6 — docs/DECISIONS.md DEC-015, awaiting the team's approval.
+  ACCOUNT_DELETE_CONFIRM_GUEST: {
+    title: 'Delete your account?',
+    body: "You'll be signed out everywhere. Within 7 days we delete your photos and remove your name and phone number. Your hosts keep a record of past visits, without your details.",
+  },
+  ACCOUNT_DELETE_CONFIRM_RESIDENT: {
+    title: 'Delete your account?',
+    body: "You'll be signed out everywhere. Within 7 days we delete your photos and remove your name, email and phone number, and cancel guest visits that haven't started. Records of past visits stay, without your details.",
+  },
+  ACCOUNT_DELETION_REQUESTED: {
+    title: 'Deletion requested',
+    body: "You've been signed out. Your account will be deleted within 7 days.",
+  },
+  ACCOUNT_DELETION_WAITS_INSIDE: {
+    title: 'Deletion requested',
+    body: "You're checked in right now, so we'll delete your account after this visit ends. You've been signed out — sign in again only to check out at the gate.",
+  },
+  ACCOUNT_DELETION_WAITS_UPCOMING: {
+    title: 'Deletion requested',
+    body: "You have a visit in the next 24 hours, so we'll delete your account after it ends. You've been signed out.",
+  },
+  ACCOUNT_DELETION_UNPAID: {
+    title: 'Clear your charges first',
+    body: "You owe ₹{amount}. You can delete your account once the warden's office marks it paid.",
+  },
 };
 
 /** Fills `{placeholder}` tokens in a copy entry's title/body (SDD §15: "{placeholders} are filled from the visit"). */

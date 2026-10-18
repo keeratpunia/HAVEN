@@ -311,6 +311,61 @@ async function main() {
     [hostelId, hostId, liveGuest.rows[0].id, windowStart.toISOString(), windowEnd.toISOString()],
   );
 
+  // ---- Account deletion (apps/mobile/e2e/tests/account-deletion.spec.ts, FR-09) ----
+  // A guest with a finished visit, signing in as ...06 (otherwise only used as a
+  // resident's phone in R-02, so this second OTP request stays inside the limit).
+  const leavingGuest = await client.query<{ id: string }>(
+    `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed, consent_version, consent_at)
+     values ('+919999900006', 'Delete Tester', 'female', true, 'v1', now())
+     on conflict (phone) do update set full_name = excluded.full_name returning id`,
+  );
+  await client.query(`delete from haven.visits where code = 'VE2E007'`);
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, visitor_id, type, status, origin, zone, window_start, window_end,
+        rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at, last_exit_at,
+        closed_at, close_reason)
+     values ('VE2E007', $1, $2, $3, 'day', 'completed', 'invite', 'visitors_room', $4, $5, 1, 'user', $2,
+             $4, $4, $5, $5, 'checked_out')`,
+    [
+      hostelId,
+      hostId,
+      leavingGuest.rows[0].id,
+      new Date(E2E_FIXED_NOW.getTime() - 26 * 3_600_000).toISOString(),
+      new Date(E2E_FIXED_NOW.getTime() - 24 * 3_600_000).toISOString(),
+    ],
+  );
+  // Two residents: one who owes a fine (blocked, §16.6 step 4) and one who doesn't.
+  for (const [sub, email, name, room, phone, owes] of [
+    ['e2e-owes', 'e2e-owes@haven.test', 'Owes Fine', '103', '+919999911103', true],
+    ['e2e-leaving', 'e2e-leaving@haven.test', 'Leaving Resident', '104', '+919999911104', false],
+  ] as const) {
+    const roomRow = await client.query<{ id: string }>(
+      `insert into haven.rooms (hostel_id, number) values ($1, $2)
+       on conflict (hostel_id, number) do update set number = excluded.number returning id`,
+      [hostelId, room],
+    );
+    const u = await client.query<{ id: string }>(
+      `insert into haven.users (google_sub, email, full_name, phone, phone_verified_at, is_active)
+       values ($1, $2, $3, $4, now(), true)
+       on conflict (google_sub) do update set full_name = excluded.full_name returning id`,
+      [sub, email, name, phone],
+    );
+    await client.query(
+      `insert into haven.residents (user_id, hostel_id, claimed_room, room_id, status, submitted_at, decided_at)
+       values ($1, $2, $3, $4, 'verified', now() - interval '2 days', now() - interval '1 day')
+       on conflict (user_id) do update set status = 'verified'`,
+      [u.rows[0].id, hostelId, room, roomRow.rows[0].id],
+    );
+    if (owes) {
+      await client.query(
+        `insert into haven.charges (hostel_id, resident_id, kind, amount_inr, description, status)
+         values ($1, $2, 'fine', 400, 'Guest stayed past the 10 pm cutoff.', 'confirmed')`,
+        [hostelId, u.rows[0].id],
+      );
+    }
+  }
+
   await client.end();
 
   console.log('E2E database ready.');

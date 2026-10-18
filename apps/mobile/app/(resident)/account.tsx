@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import { Button } from '../../components/Button.js';
+import { DeleteAccount } from '../../components/DeleteAccount.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { availableShells } from '../../lib/resident-route.js';
 import { getPushPermission, registerForPush, type PushPermission } from '../../lib/push.js';
 
 /**
  * R-15 Profile (SDD §13.4): "Name, room, phone, notifications on/off check, sign out,
- * delete account". Account deletion (FR-09, priority S) has no API yet, so there is no
- * button for it here rather than one that does nothing (docs/TRACEABILITY.md).
+ * delete account". Deletion follows §16.6 (FR-09).
  */
 const PUSH_TEXT: Record<PushPermission, string> = {
   granted: '✓ Notifications are on.',
@@ -29,8 +29,9 @@ export default function Account() {
     void getPushPermission().then(setPush);
   }, []);
 
+  // Scrolls so every action stays reachable above the tab bar, at any text size (§13.7).
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title} accessibilityRole="header">
         Profile
       </Text>
@@ -74,7 +75,14 @@ export default function Account() {
           router.replace('/sign-in');
         }}
       />
-    </View>
+      <DeleteAccount
+        kind="resident"
+        onSignedOut={async () => {
+          await signOut();
+          router.replace('/sign-in');
+        }}
+      />
+    </ScrollView>
   );
 }
 
@@ -88,7 +96,7 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: space.md, gap: space.md },
+  container: { flexGrow: 1, padding: space.md, gap: space.md },
   title: {
     fontSize: typeTokens.size.lg,
     fontWeight: typeTokens.weight.semibold,

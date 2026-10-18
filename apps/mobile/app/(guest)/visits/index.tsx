@@ -6,10 +6,27 @@ import * as api from '../../../api/client.js';
 import { EmptyState } from '../../../components/EmptyState.js';
 import { StatusChip } from '../../../components/StatusChip.js';
 import { formatDateIst, formatTimeIst } from '../../../lib/formatTime.js';
+import { DeleteAccount } from '../../../components/DeleteAccount.js';
+import { useAuth } from '../../../lib/auth-context.js';
 
-/** G-17 "My visits": Today, upcoming, history cards with status chips (SDD §13.4). */
+/**
+ * G-17 "My visits": Today, upcoming, history cards with status chips (SDD §13.4). Its
+ * menu holds "Delete my account" (§16.6, FR-09) below the list.
+ */
 export default function MyVisits() {
   const router = useRouter();
+  const { signOut } = useAuth();
+  const menu = (
+    <View style={styles.menu}>
+      <DeleteAccount
+        kind="guest"
+        onSignedOut={async () => {
+          await signOut();
+          router.replace('/');
+        }}
+      />
+    </View>
+  );
   const [visits, setVisits] = useState<api.VisitDto[] | null>(null);
   const [error, setError] = useState(false);
 
@@ -29,6 +46,7 @@ export default function MyVisits() {
         <Text style={styles.body}>
           Couldn't load your visits. Pull to refresh or try again later.
         </Text>
+        {menu}
       </View>
     );
   }
@@ -45,6 +63,7 @@ export default function MyVisits() {
     return (
       <View style={styles.container}>
         <EmptyState message="No visits yet. Open an invite link from your host to get started." />
+        {menu}
       </View>
     );
   }
@@ -54,6 +73,7 @@ export default function MyVisits() {
       style={styles.container}
       data={visits}
       keyExtractor={(v) => v.id}
+      ListFooterComponent={menu}
       renderItem={({ item }) => (
         <Pressable
           onPress={() => router.push(`/visits/${item.id}`)}
@@ -94,4 +114,5 @@ const styles = StyleSheet.create({
     color: color.text,
   },
   cardSub: { fontSize: typeTokens.size.sm, color: color.textMuted },
+  menu: { marginTop: space.lg, width: '100%' },
 });

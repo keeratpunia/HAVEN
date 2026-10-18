@@ -2,6 +2,8 @@ import { Platform } from 'react-native';
 import {
   IDEMPOTENCY_HEADER,
   type ChargeDTO,
+  type DeletionRequestDTO,
+  type DeletionWaitingFor,
   type CreateVisitBody,
   type HostedVisitBucket,
   type MeUserDTO,
@@ -236,12 +238,21 @@ export interface MeVisitor {
   phone: string | null;
   gender: 'male' | 'female' | 'undisclosed';
   isAdultConfirmed: boolean;
+  deletionRequest?: { status: 'pending'; waitingFor: DeletionWaitingFor | null } | null;
 }
 
 export type MeUser = MeUserDTO;
 
 export function getMe() {
   return request<MeVisitor | MeUser>('/v1/me');
+}
+
+/** FR-09, SDD §16.6: `POST /me/deletion-request` → 202. 409 CONFLICT if charges are unpaid. */
+export function requestAccountDeletion(reason?: string) {
+  return request<DeletionRequestDTO>('/v1/me/deletion-request', {
+    method: 'POST',
+    body: reason ? { reason } : {},
+  });
 }
 
 export function patchMe(patch: {

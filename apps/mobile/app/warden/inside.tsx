@@ -10,13 +10,18 @@ import { AdminVisitCard } from '../../components/staff/AdminVisitCard.js';
 import { Chips, ErrorText, Muted, StaffScreen } from '../../components/staff/StaffUi.js';
 
 /** W-02 Inside now: photo, guest, host + room, zone, since, flags; filter chips. */
-type Filter = 'all' | 'overstay' | 'disputed' | 'location_unverified';
+type Filter = 'all' | 'sweep' | 'overstay' | 'disputed' | 'location_unverified';
 
 export default function Inside() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ flag?: string }>();
+  // `ids` comes from the 10 pm night-sweep push (SDD §11.8: "the app opens W-02
+  // filtered to them").
+  const params = useLocalSearchParams<{ flag?: string; ids?: string }>();
+  const sweepIds = params.ids ? new Set(params.ids.split(',')) : null;
   const { hostel, can } = useStaff();
-  const [filter, setFilter] = useState<Filter>((params.flag as Filter) ?? 'all');
+  const [filter, setFilter] = useState<Filter>(
+    sweepIds ? 'sweep' : ((params.flag as Filter | undefined) ?? 'all'),
+  );
   const [items, setItems] = useState<AdminVisitDTO[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const hostelId = hostel?.id ?? null;
@@ -26,14 +31,17 @@ export default function Inside() {
     try {
       const page = await staffApi.visits(hostelId, {
         status: 'inside',
-        flag: filter === 'all' ? undefined : filter,
+        flag: filter === 'all' || filter === 'sweep' ? undefined : filter,
       });
-      setItems(page.items);
+      setItems(
+        filter === 'sweep' && sweepIds ? page.items.filter((v) => sweepIds.has(v.id)) : page.items,
+      );
       setError(null);
     } catch {
       setError("Couldn't load. Retrying.");
     }
-  }, [hostelId, filter]);
+    // sweepIds comes from the URL and only changes with it.
+  }, [hostelId, filter, params.ids]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -59,6 +67,7 @@ export default function Inside() {
         value={filter}
         onChange={setFilter}
         options={[
+          ...(sweepIds ? [{ value: 'sweep' as const, label: 'Night sweep' }] : []),
           { value: 'all', label: 'All' },
           { value: 'overstay', label: 'Overstaying' },
           { value: 'disputed', label: 'Disputed' },
