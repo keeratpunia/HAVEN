@@ -34,7 +34,8 @@ import { z } from 'zod';
 import { encryptAesGcm, parseDataEncryptionKey, randomSecret, sha256 } from '../src/lib/crypto.js';
 
 const SeedEnvSchema = z.object({
-  APP_ENV: z.enum(['local', 'staging', 'production']).default('local'),
+  // Required (SECURITY-AUDIT SA-02): an unset APP_ENV must never seed fake people.
+  APP_ENV: z.enum(['local', 'staging', 'production']),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   DATA_ENCRYPTION_KEY: z.string().min(1, 'DATA_ENCRYPTION_KEY is required'),
   SEED_SUPER_ADMIN_EMAIL: z.string().email('SEED_SUPER_ADMIN_EMAIL must be a valid email'),

@@ -67,7 +67,11 @@ export async function verifyAccessToken(
 ): Promise<VerifiedAccessToken> {
   const key = getSigningKey(jwtSecretBase64);
   try {
-    const { payload } = await jwtVerify(token, key, { issuer: ISSUER, audience: AUDIENCE });
+    const { payload } = await jwtVerify(token, key, {
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      algorithms: ['HS256'], // SECURITY-AUDIT SA-16
+    });
     return parseClaims(payload);
   } catch (err) {
     if (

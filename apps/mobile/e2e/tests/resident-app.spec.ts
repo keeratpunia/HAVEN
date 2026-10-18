@@ -76,7 +76,7 @@ async function submitWalkIn(page: Page, phone: string, guestName: string) {
   await expect(page.getByText('Find your host')).toBeVisible({ timeout: 30_000 });
   await page.getByLabel('Room number').fill('101');
   await page.getByRole('button', { name: 'Search' }).click();
-  await page.getByRole('button', { name: 'Select Priya Sharma' }).click();
+  await page.getByRole('button', { name: 'Select Priya S.' }).click();
   await expect(page.getByText('Visit type')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await takeLivePhoto(page, 1_500);

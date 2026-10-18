@@ -21,6 +21,7 @@ import { __resetResidentPoliciesForTests } from '../src/residents/routes.js';
 import { __resetAdminPoliciesForTests } from '../src/admin/policy.js';
 import { assertMediaObject, type MediaObject, type MediaStorage } from '../src/gate/media.js';
 import { __resetMediaPoliciesForTests } from '../src/media/routes.js';
+import type { BotVerifier } from '../src/auth/bot-check.js';
 import type {
   PushMessage,
   PushReceipt,
@@ -52,6 +53,7 @@ export const db = getTestDb();
 export function testEnv(overrides: Record<string, string> = {}) {
   __resetEnvCacheForTests();
   return loadEnv({
+    APP_ENV: 'local',
     DATABASE_URL: TEST_DATABASE_URL,
     DATABASE_DIRECT_URL: TEST_DATABASE_URL,
     JWT_SECRET,
@@ -132,7 +134,15 @@ export class FakeSmsSender implements SmsProvider {
 
 export async function buildTestApp(
   clock: FakeClock,
-  opts: { env?: Record<string, string>; mediaStorage?: MediaStorage; streamPingMs?: number } = {},
+  opts: {
+    env?: Record<string, string>;
+    mediaStorage?: MediaStorage;
+    streamPingMs?: number;
+    botVerifier?: BotVerifier;
+    rateLimit?: { max: number; timeWindowMs: number; otpVerifyMaxPer10Min?: number };
+    /** Capture the API's log lines (security tests). */
+    logStream?: NodeJS.WritableStream;
+  } = {},
 ): Promise<FastifyInstance> {
   __resetPolicyRegistryForTests();
   __resetVisitPoliciesForTests();
@@ -147,13 +157,15 @@ export async function buildTestApp(
   const env = testEnv(opts.env);
   const app = await buildApp({
     env,
-    logger: createLogger(env),
+    logger: createLogger(env, opts.logStream),
     db,
     clock,
     googleVerifier: new FakeGoogleIdTokenVerifier(new Map()),
     mediaStorage: opts.mediaStorage ?? new MemoryMediaStorage(),
     checkDb: async () => true,
     streamPingMs: opts.streamPingMs,
+    botVerifier: opts.botVerifier,
+    rateLimit: opts.rateLimit,
   });
   await app.ready();
   return app;

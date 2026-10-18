@@ -25,7 +25,12 @@ import { z } from 'zod';
  * encrypts/decrypts gate secrets with it (`gate/secret.ts`).
  */
 const EnvSchema = z.object({
-  APP_ENV: z.enum(['local', 'staging', 'production']).default('local'),
+  // Required, no default (docs/SECURITY-AUDIT.md SA-02): the test-OTP bypass, console
+  // SMS and the non-Secure local cookie are all keyed on APP_ENV, so a deploy that
+  // forgets it must fail to boot rather than quietly run as 'local'.
+  APP_ENV: z.enum(['local', 'staging', 'production'], {
+    message: "APP_ENV is required: 'local', 'staging' or 'production'",
+  }),
   PORT: z.coerce.number().int().positive().default(8080),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
@@ -39,10 +44,22 @@ const EnvSchema = z.object({
 
   API_BASE_URL: z.string().url().default('http://localhost:8080'),
   WEB_BASE_URL: z.string().url().default('http://localhost:8081'),
+  // Exact origins only — never a wildcard (CLAUDE.md §4, SDD §16.4; SECURITY-AUDIT SA-20).
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:8081')
-    .transform((value) => value.split(',').map((origin) => origin.trim())),
+    .transform((value) => value.split(',').map((origin) => origin.trim()))
+    .refine((origins) => origins.every((o) => /^https?:\/\/[A-Za-z0-9.-]+(:\d+)?$/.test(o)), {
+      message: 'CORS_ORIGINS must be exact http(s) origins (no "*", no paths)',
+    }),
+  // How many reverse proxies sit in front of the API (Render/Vercel edge = 1). 0 trusts
+  // no X-Forwarded-For at all. Per-IP rate limits key on the resulting client IP
+  // (SECURITY-AUDIT SA-10).
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
+  // Cloudflare Turnstile secret for the OTP CAPTCHA (SDD T10, §20.3). Unset only in local.
+  TURNSTILE_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
+  // Error reporting (SDD §8.4, NFR-13). Unset = Sentry is a no-op.
+  SENTRY_DSN: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   COOKIE_DOMAIN: z.string().default('localhost'),
 
   // HS256 access/refresh JWT signing key (SDD §9.5). 32+ random bytes, base64 — same

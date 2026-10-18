@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getTestDb, resetAllHavenTables, freshOtpPepperBase64 } from './db-test-helper.js';
+import { DevBypassBotVerifier } from '../src/auth/bot-check.js';
 import { requestOtp, verifyOtp } from '../src/auth/otp-service.js';
 import { FakeClock } from '../src/lib/clock.js';
 import { hashOtpCode } from '../src/auth/otp.js';
@@ -20,6 +21,8 @@ async function readLatestCode(
   return row;
 }
 
+const bot = new DevBypassBotVerifier();
+
 describe('OTP request/verify (SDD §9.5)', () => {
   beforeEach(async () => {
     await resetAllHavenTables();
@@ -33,10 +36,11 @@ describe('OTP request/verify (SDD §9.5)', () => {
     // it back the same way a developer would is the only way to exercise the real,
     // public `requestOtp` → `verifyOtp` round trip (the code is never returned).
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    await requestOtp(db, { phone, purpose: 'guest_login', ip: '1.2.3.4' }, env, clock);
+    await requestOtp(db, { phone, purpose: 'guest_login', ip: '1.2.3.4' }, env, clock, bot);
     const printed = logSpy.mock.calls
       .map((args) => String(args[0]))
-      .find((line) => line.includes(phone));
+      // The line shows the phone masked (SECURITY-AUDIT SA-14): match its last 5 digits.
+      .find((line) => line.startsWith('[otp:dev]') && line.includes(phone.slice(-5)));
     logSpy.mockRestore();
     expect(printed).toBeDefined();
     const match = printed?.match(/purpose-code=(\d{6})/);
@@ -58,6 +62,7 @@ describe('OTP request/verify (SDD §9.5)', () => {
       { phone: '+919876500002', purpose: 'guest_login', ip: '1.2.3.4' },
       env,
       clock,
+      bot,
     );
 
     await expect(
@@ -82,6 +87,7 @@ describe('OTP request/verify (SDD §9.5)', () => {
       { phone: '+919876500003', purpose: 'guest_login', ip: '1.2.3.4' },
       env,
       clock,
+      bot,
     );
     clock.advance(5 * 60 * 1000 + 1000);
 
@@ -97,6 +103,7 @@ describe('OTP request/verify (SDD §9.5)', () => {
       { phone: '+919876500004', purpose: 'guest_login', ip: '1.2.3.4' },
       env,
       clock,
+      bot,
     );
 
     for (let i = 0; i < 5; i++) {
@@ -172,15 +179,15 @@ describe('OTP request/verify (SDD §9.5)', () => {
   it('rate limiting: the 4th request for the same phone within 10 minutes is RATE_LIMITED', async () => {
     const clock = new FakeClock(new Date('2026-10-01T10:00:00Z'));
     const phone = '+919876500006';
-    await requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.1' }, env, clock);
+    await requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.1' }, env, clock, bot);
     clock.advance(31_000);
-    await requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.2' }, env, clock);
+    await requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.2' }, env, clock, bot);
     clock.advance(31_000);
-    await requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.3' }, env, clock);
+    await requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.3' }, env, clock, bot);
     clock.advance(31_000);
 
     await expect(
-      requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.4' }, env, clock),
+      requestOtp(db, { phone, purpose: 'guest_login', ip: '9.9.9.4' }, env, clock, bot),
     ).rejects.toMatchObject({
       code: 'RATE_LIMITED',
       httpStatus: 429,
@@ -196,11 +203,12 @@ describe('OTP request/verify (SDD §9.5)', () => {
         { phone: `+9198765001${String(i).padStart(2, '0')}`, purpose: 'guest_login', ip },
         env,
         clock,
+        bot,
       );
       clock.advance(1000);
     }
     await expect(
-      requestOtp(db, { phone: '+919876500199', purpose: 'guest_login', ip }, env, clock),
+      requestOtp(db, { phone: '+919876500199', purpose: 'guest_login', ip }, env, clock, bot),
     ).rejects.toMatchObject({
       code: 'RATE_LIMITED',
       httpStatus: 429,
@@ -210,10 +218,10 @@ describe('OTP request/verify (SDD §9.5)', () => {
   it('resend cooldown: requesting again inside 30s is RATE_LIMITED', async () => {
     const clock = new FakeClock(new Date('2026-10-01T10:00:00Z'));
     const phone = '+919876500007';
-    await requestOtp(db, { phone, purpose: 'guest_login', ip: '1.1.1.1' }, env, clock);
+    await requestOtp(db, { phone, purpose: 'guest_login', ip: '1.1.1.1' }, env, clock, bot);
     clock.advance(10_000);
     await expect(
-      requestOtp(db, { phone, purpose: 'guest_login', ip: '1.1.1.1' }, env, clock),
+      requestOtp(db, { phone, purpose: 'guest_login', ip: '1.1.1.1' }, env, clock, bot),
     ).rejects.toMatchObject({
       code: 'RATE_LIMITED',
     });
@@ -222,13 +230,14 @@ describe('OTP request/verify (SDD §9.5)', () => {
   it('resend is allowed after 30s', async () => {
     const clock = new FakeClock(new Date('2026-10-01T10:00:00Z'));
     const phone = '+919876500008';
-    await requestOtp(db, { phone, purpose: 'guest_login', ip: '1.1.1.2' }, env, clock);
+    await requestOtp(db, { phone, purpose: 'guest_login', ip: '1.1.1.2' }, env, clock, bot);
     clock.advance(31_000);
     const result = await requestOtp(
       db,
       { phone, purpose: 'guest_login', ip: '1.1.1.2' },
       env,
       clock,
+      bot,
     );
     expect(result.resendAfterS).toBe(30);
   });
@@ -241,6 +250,7 @@ describe('OTP request/verify (SDD §9.5)', () => {
         { phone: '+919876500009', purpose: 'guest_login', ip: '1.1.1.3' },
         { ...env, APP_ENV: 'production' },
         clock,
+        bot,
       ),
     ).rejects.toThrow(/production/);
   });

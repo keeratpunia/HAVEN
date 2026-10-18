@@ -10,6 +10,7 @@ describe('loadEnv', () => {
   const VALID_OTP_PEPPER = Buffer.alloc(32, 3).toString('base64');
   const VALID_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('base64');
   const REQUIRED = {
+    APP_ENV: 'local',
     DATABASE_URL: 'postgres://user:pass@localhost:6543/postgres',
     DATABASE_DIRECT_URL: 'postgres://user:pass@localhost:5432/postgres',
     JWT_SECRET: VALID_JWT_SECRET,
@@ -42,6 +43,31 @@ describe('loadEnv', () => {
   it('throws (stops boot) when DATABASE_URL is missing', () => {
     const { DATABASE_URL: _omit, ...rest } = REQUIRED;
     expect(() => loadEnv(rest)).toThrow(/DATABASE_URL/);
+  });
+
+  it('refuses to load without APP_ENV (fail closed, SECURITY-AUDIT SA-02)', () => {
+    const { APP_ENV: _omit, ...rest } = REQUIRED;
+    void _omit;
+    expect(() => loadEnv(rest)).toThrow(/APP_ENV is required/);
+  });
+
+  it('rejects a wildcard or path in CORS_ORIGINS (SA-20)', () => {
+    for (const bad of ['*', 'https://app.example.com,*', 'https://app.example.com/path', 'null']) {
+      __resetEnvCacheForTests();
+      expect(() => loadEnv({ ...REQUIRED, CORS_ORIGINS: bad })).toThrow(/CORS_ORIGINS/);
+    }
+  });
+
+  it('trusts no proxy unless told how many hops (SA-10)', () => {
+    expect(loadEnv(REQUIRED).TRUST_PROXY_HOPS).toBe(0);
+    __resetEnvCacheForTests();
+    expect(loadEnv({ ...REQUIRED, TRUST_PROXY_HOPS: '1' }).TRUST_PROXY_HOPS).toBe(1);
+  });
+
+  it('treats empty TURNSTILE_SECRET / SENTRY_DSN (as in .env.example) as unset', () => {
+    const env = loadEnv({ ...REQUIRED, TURNSTILE_SECRET: '', SENTRY_DSN: '' });
+    expect(env.TURNSTILE_SECRET).toBeUndefined();
+    expect(env.SENTRY_DSN).toBeUndefined();
   });
 
   it('rejects an invalid APP_ENV value', () => {

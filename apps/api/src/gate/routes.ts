@@ -19,6 +19,8 @@ import { runIdempotent } from '../lib/idempotency.js';
 import { pairDevice, recordHeartbeat } from './devices.js';
 import { storeGatePhoto, type MediaStorage } from './media.js';
 import { consumeScanSession } from './repository.js';
+import { authorize } from '../auth/policy.js';
+import { displayName } from '@haven/shared';
 import {
   consumeSession,
   createScanSession,
@@ -61,6 +63,10 @@ const CreateScanSessionBody = z.object({
 const LocationRetryBody = z.object({ location: LocationSchema, mocked: z.boolean().optional() });
 
 const SESSION_ID_PARAMS = z.object({ id: z.string().uuid() });
+const RoomResidentsParams = z.object({
+  id: z.string().uuid(),
+  number: z.string().regex(/^[A-Za-z0-9-]{1,8}$/),
+});
 
 const CheckInOutBody = z.object({ visitId: z.string().uuid(), photoId: z.string().uuid() });
 
@@ -192,6 +198,55 @@ export async function registerGateRoutes(
   );
 
   // GET /v1/scan-sessions/:id — visitor or resident (SDD §12.8).
+  // GET /v1/hostels/:id/rooms/:number/residents — G-08 "find your host" (SDD §12.7):
+  // "Visitor with live scan session, header X-Scan-Session ... [{ residentId,
+  // displayName }] — verified residents only; rate-limited 10/min". The session must be
+  // the caller's (its X-Scan-Nonce, bound to them) and at a gate of this hostel
+  // (SECURITY-AUDIT SA-01: this replaced a public endpoint returning full names).
+  api.get(
+    '/hostels/:id/rooms/:number/residents',
+    {
+      schema: { params: RoomResidentsParams },
+      config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    },
+    async (request, reply) => {
+      if (!request.principal || request.principal.type !== 'visitor') {
+        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+      }
+      const sessionId = request.headers['x-scan-session'];
+      if (typeof sessionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(sessionId)) {
+        throw new AppError('SCAN_SESSION_FORBIDDEN', 403, 'Missing X-Scan-Session header.');
+      }
+      const session = await validateAndBindSession(
+        db,
+        clock,
+        sessionId,
+        scanNonceFrom(request),
+        principalBinding(request),
+      );
+      const gate = await db
+        .selectFrom('haven.gates')
+        .select(['hostel_id'])
+        .where('id', '=', session.gate_id)
+        .executeTakeFirstOrThrow();
+      authorize(request.principal, 'gate.search_residents', {
+        sessionVisitorId: session.visitor_id,
+        sessionHostelId: gate.hostel_id,
+        hostelId: request.params.id,
+      });
+
+      const rows = await db
+        .selectFrom('haven.residents')
+        .innerJoin('haven.users', 'haven.users.id', 'haven.residents.user_id')
+        .select(['haven.users.id', 'haven.users.full_name'])
+        .where('haven.residents.hostel_id', '=', request.params.id)
+        .where('haven.residents.claimed_room', '=', request.params.number.toUpperCase())
+        .where('haven.residents.status', '=', 'verified')
+        .execute();
+      reply.send(rows.map((r) => ({ residentId: r.id, displayName: displayName(r.full_name) })));
+    },
+  );
+
   api.get(
     '/scan-sessions/:id',
     { schema: { params: SESSION_ID_PARAMS } },

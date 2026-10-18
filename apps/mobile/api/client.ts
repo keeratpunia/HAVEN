@@ -486,9 +486,16 @@ export function getHostels() {
   return request<{ id: string; code: string; name: string }[]>('/v1/hostels', { auth: false });
 }
 
-export function searchRooms(hostelId: string, number: string) {
-  return request<{ userId: string; fullName: string }[]>(
-    `/v1/rooms/search?hostelId=${encodeURIComponent(hostelId)}&number=${encodeURIComponent(number)}`,
+/** G-08 (SDD §12.7): residents of a room, for the caller's own live scan session. */
+export function searchRooms(params: {
+  hostelId: string;
+  number: string;
+  scanSessionId: string;
+  nonce: string;
+}) {
+  return request<{ residentId: string; displayName: string }[]>(
+    `/v1/hostels/${encodeURIComponent(params.hostelId)}/rooms/${encodeURIComponent(params.number)}/residents`,
+    { headers: { 'X-Scan-Session': params.scanSessionId, 'X-Scan-Nonce': params.nonce } },
   );
 }
 

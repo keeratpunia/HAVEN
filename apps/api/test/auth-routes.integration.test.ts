@@ -23,6 +23,7 @@ const fakeMediaStorage: MediaStorage = {
 function testEnv() {
   __resetEnvCacheForTests();
   return loadEnv({
+    APP_ENV: 'local',
     DATABASE_URL: TEST_DATABASE_URL,
     DATABASE_DIRECT_URL: TEST_DATABASE_URL,
     JWT_SECRET,
@@ -40,7 +41,8 @@ async function readPrintedOtp(phone: string, run: () => Promise<void>): Promise<
   await run();
   const printed = logSpy.mock.calls
     .map((args) => String(args[0]))
-    .find((line) => line.includes(phone));
+    // The line shows the phone masked (SECURITY-AUDIT SA-14): match its last 5 digits.
+    .find((line) => line.startsWith('[otp:dev]') && line.includes(phone.slice(-5)));
   logSpy.mockRestore();
   const match = printed?.match(/purpose-code=(\d{6})/);
   if (!match) throw new Error('expected a printed dev OTP code');

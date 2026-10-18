@@ -111,8 +111,9 @@ export default function GateScan() {
   const [hostFirstName, setHostFirstName] = useState<string>('your host');
   const [visitType, setVisitType] = useState<'quick_drop' | 'day'>('day');
   const [room, setRoom] = useState('');
-  const [residents, setResidents] = useState<{ userId: string; fullName: string }[] | null>(null);
-  const [hostelId, setHostelId] = useState<string | null>(null);
+  const [residents, setResidents] = useState<{ residentId: string; displayName: string }[] | null>(
+    null,
+  );
   const [resultKind, setResultKind] = useState<'check_in' | 'check_out' | 'walk_in'>('check_in');
   const [resultStatus, setResultStatus] = useState<string | null>(null);
   const [walkInVisitId, setWalkInVisitId] = useState<string | null>(null);
@@ -215,18 +216,14 @@ export default function GateScan() {
       });
   }, [phase, session, authLoading, visitor, router, token]);
 
-  useEffect(() => {
-    if (phase === 'find_host' && !hostelId) {
-      api
-        .getHostels()
-        .then((hostels) => setHostelId(hostels[0]?.id ?? null))
-        .catch(() => undefined);
-    }
-  }, [phase, hostelId]);
-
   async function searchHostRoom() {
-    if (!hostelId || !room.trim()) return;
-    const found = await api.searchRooms(hostelId, room.trim());
+    if (!session || !room.trim()) return;
+    const found = await api.searchRooms({
+      hostelId: session.hostel.id,
+      number: room.trim(),
+      scanSessionId: session.scanSessionId,
+      nonce: clientNonceRef.current,
+    });
     setResidents(found);
   }
 
@@ -430,18 +427,18 @@ export default function GateScan() {
               <View style={styles.list}>
                 {residents.map((r) => (
                   <Pressable
-                    key={r.userId}
+                    key={r.residentId}
                     onPress={() => {
-                      setHostId(r.userId);
-                      setHostFirstName(r.fullName.split(' ')[0] ?? 'your host');
+                      setHostId(r.residentId);
+                      setHostFirstName(r.displayName.split(' ')[0] ?? 'your host');
                       setResultKind('walk_in');
                       setPhase('visit_type');
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel={`Select ${r.fullName}`}
+                    accessibilityLabel={`Select ${r.displayName}`}
                     style={styles.residentRow}
                   >
-                    <Text style={styles.body}>{r.fullName}</Text>
+                    <Text style={styles.body}>{r.displayName}</Text>
                   </Pressable>
                 ))}
               </View>

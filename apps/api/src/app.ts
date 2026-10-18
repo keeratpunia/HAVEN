@@ -30,6 +30,7 @@ import { NotificationWorker } from './notify/worker.js';
 import { registerNotificationPolicies } from './notify/policy.js';
 import { registerNotificationRoutes } from './notify/routes.js';
 import { registerAccountRoutes } from './account/routes.js';
+import { createBotVerifier, type BotVerifier } from './auth/bot-check.js';
 import { MediaUrlSigner } from './media/signing.js';
 import { RulesProvider } from './rules/provider.js';
 import { registerAdminPolicies } from './admin/policy.js';
@@ -60,7 +61,9 @@ export interface BuildAppOptions {
    * global default, "120 requests/min", is impractical to actually hit in a fast
    * test). Real callers never pass this — `server.ts` always uses the SDD default.
    */
-  rateLimit?: { max: number; timeWindowMs: number };
+  rateLimit?: { max: number; timeWindowMs: number; otpVerifyMaxPer10Min?: number };
+  /** SDD T10 OTP CAPTCHA; tests inject a fake. Default: Turnstile, or the local bypass. */
+  botVerifier?: BotVerifier;
   /** Overridable so tests can use a `FakeClock`; real callers never pass this. */
   clock?: Clock;
   /**
@@ -134,7 +137,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
 
   const checkDb = options.checkDb ?? pingDb;
-  const rateLimitConfig = options.rateLimit ?? DEFAULT_RATE_LIMIT;
+  const rateLimitConfig: NonNullable<BuildAppOptions['rateLimit']> =
+    options.rateLimit ?? DEFAULT_RATE_LIMIT;
   const clock = options.clock ?? new SystemClock();
   const googleVerifier =
     options.googleVerifier ?? new RealGoogleIdTokenVerifier(env.GOOGLE_CLIENT_IDS);
@@ -151,6 +155,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     // separately-declared logger types (e.g. `msgPrefix`). Safe, well-known pattern.
     loggerInstance: logger as unknown as FastifyBaseLogger,
     genReqId: () => generateRequestId(),
+    // SDD §16.4 Input: "max body 3 MB (uploads), 64 KB otherwise". Multipart uploads
+    // stream through @fastify/multipart's own 3 MB file limit (SECURITY-AUDIT SA-09).
+    bodyLimit: 64 * 1024,
+    // Number of trusted proxy hops: behind N proxies the client IP is read N entries
+    // back in X-Forwarded-For; 0 ignores the header entirely (SECURITY-AUDIT SA-10).
+    // proxy-addr calls this per address, hop 0 being the TCP peer.
+    trustProxy: (_address: string, hop: number) => hop < env.TRUST_PROXY_HOPS,
   });
 
   configureZodValidation(app);
@@ -360,6 +371,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         clock,
         googleVerifier,
         mediaStorage: options.mediaStorage,
+        botVerifier: options.botVerifier ?? createBotVerifier(env),
+        otpVerifyMaxPer10Min: rateLimitConfig.otpVerifyMaxPer10Min ?? 10,
       });
       await registerVisitRoutes(v1, { db, clock });
       await registerHostVisitRoutes(v1, {

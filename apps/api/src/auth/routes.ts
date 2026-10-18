@@ -22,6 +22,7 @@ import { claimInvite } from './invites.js';
 import { requireAuth } from './authenticate.js';
 import { authorize } from './policy.js';
 import { registerAuthPolicies } from './policy-rules.js';
+import type { BotVerifier } from './bot-check.js';
 import { storeVisitorProfilePhoto, type MediaStorage } from '../gate/media.js';
 import { loadResidentProfile } from '../residents/service.js';
 import { openDeletionRequest } from '../account/deletion.js';
@@ -32,12 +33,21 @@ export interface AuthRoutesOptions {
   clock: Clock;
   googleVerifier: GoogleIdTokenVerifier;
   mediaStorage: MediaStorage;
+  /** SDD T10 CAPTCHA on OTP requests (SECURITY-AUDIT SA-07). */
+  botVerifier: BotVerifier;
+  /** SDD §12.11: `POST /auth/otp/verify` 10 per IP per 10 min (SA-06). */
+  otpVerifyMaxPer10Min: number;
 }
 
 const PhoneSchema = z.string().min(1);
 const OtpPurposeSchema = z.enum(['guest_login', 'phone_verify']);
 
-const OtpRequestBody = z.object({ phone: PhoneSchema, purpose: OtpPurposeSchema });
+const OtpRequestBody = z.object({
+  phone: PhoneSchema,
+  purpose: OtpPurposeSchema,
+  /** Cloudflare Turnstile token, required from the 4th request per IP (SDD T10). */
+  captchaToken: z.string().min(1).max(2048).optional(),
+});
 const OtpVerifyBody = z.object({
   phone: PhoneSchema,
   code: z.string().length(6),
@@ -99,59 +109,81 @@ export async function registerAuthRoutes(
     const phone = normalizePhone(request.body.phone);
     const result = await requestOtp(
       db,
-      { phone, purpose: request.body.purpose, ip: requestIp(request) },
+      {
+        phone,
+        purpose: request.body.purpose,
+        ip: requestIp(request),
+        captchaToken: request.body.captchaToken,
+      },
       env,
       clock,
+      opts.botVerifier,
     );
     reply.status(202).send(result);
   });
 
-  api.post('/auth/otp/verify', { schema: { body: OtpVerifyBody } }, async (request, reply) => {
-    const phone = normalizePhone(request.body.phone);
-    const { purpose, code } = request.body;
+  api.post(
+    '/auth/otp/verify',
+    {
+      schema: { body: OtpVerifyBody },
+      config: { rateLimit: { max: opts.otpVerifyMaxPer10Min, timeWindow: '10 minutes' } },
+    },
+    async (request, reply) => {
+      const phone = normalizePhone(request.body.phone);
+      const { purpose, code } = request.body;
 
-    if (purpose === 'phone_verify') {
-      if (!request.principal || request.principal.type !== 'user') {
-        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+      if (purpose === 'phone_verify') {
+        if (!request.principal || request.principal.type !== 'user') {
+          throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
+        }
+        const userId = request.principal.userId;
+        await verifyOtp(db, { phone, code, purpose }, env, clock);
+        try {
+          await withTx(db, { principal: request.principal, requestId: request.id }, async (trx) => {
+            await trx
+              .updateTable('haven.users')
+              .set({ phone, phone_verified_at: clock.now().toISOString() })
+              .where('id', '=', userId)
+              .execute();
+          });
+        } catch (err) {
+          // users.phone is unique: another account already verified this number
+          // (SECURITY-AUDIT SA-21: this was a 500).
+          if ((err as { code?: string }).code === '23505') {
+            throw new AppError('CONFLICT', 409, 'This number is already used by another account.');
+          }
+          throw err;
+        }
+        reply.status(200).send({ phoneVerified: true });
+        return;
       }
-      const userId = request.principal.userId;
+
       await verifyOtp(db, { phone, code, purpose }, env, clock);
-      await withTx(db, { principal: request.principal, requestId: request.id }, async (trx) => {
-        await trx
-          .updateTable('haven.users')
-          .set({ phone, phone_verified_at: clock.now().toISOString() })
-          .where('id', '=', userId)
-          .execute();
+      const tokens = await withTx(db, { principal: null, requestId: request.id }, async (trx) => {
+        const visitor = await findOrCreateVisitorByPhone(trx, phone, clock);
+        const issued = await issueTokensForVisitor(
+          trx,
+          {
+            visitorId: visitor.visitorId,
+            client: clientFromHeader(request),
+            userAgent: request.headers['user-agent'] ?? null,
+            ip: requestIp(request),
+          },
+          env.JWT_SECRET,
+          clock,
+        );
+        return { issued, visitor };
       });
-      reply.status(200).send({ phoneVerified: true });
-      return;
-    }
 
-    await verifyOtp(db, { phone, code, purpose }, env, clock);
-    const tokens = await withTx(db, { principal: null, requestId: request.id }, async (trx) => {
-      const visitor = await findOrCreateVisitorByPhone(trx, phone, clock);
-      const issued = await issueTokensForVisitor(
-        trx,
-        {
-          visitorId: visitor.visitorId,
-          client: clientFromHeader(request),
-          userAgent: request.headers['user-agent'] ?? null,
-          ip: requestIp(request),
+      sendTokens(request, reply, env, tokens.issued, {
+        principal: {
+          type: 'visitor',
+          id: tokens.visitor.visitorId,
+          profileComplete: tokens.visitor.profileComplete,
         },
-        env.JWT_SECRET,
-        clock,
-      );
-      return { issued, visitor };
-    });
-
-    sendTokens(request, reply, env, tokens.issued, {
-      principal: {
-        type: 'visitor',
-        id: tokens.visitor.visitorId,
-        profileComplete: tokens.visitor.profileComplete,
-      },
-    });
-  });
+      });
+    },
+  );
 
   api.post('/auth/google', { schema: { body: GoogleSignInBody } }, async (request, reply) => {
     const result = await withTx(db, { principal: null, requestId: request.id }, async (trx) => {

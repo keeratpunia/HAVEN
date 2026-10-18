@@ -87,7 +87,7 @@ test('walk-in: a guest with no existing visit finds a host, picks a visit type, 
   expect(page.url()).toContain('resumed=1');
   await page.getByLabel('Room number').fill('101');
   await page.getByRole('button', { name: 'Search' }).click();
-  await page.getByRole('button', { name: 'Select Priya Sharma' }).click();
+  await page.getByRole('button', { name: 'Select Priya S.' }).click();
 
   await expect(page.getByText('Visit type')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();

@@ -21,6 +21,7 @@ const fakeMediaStorage: MediaStorage = {
 function testEnv(overrides: Record<string, string> = {}) {
   __resetEnvCacheForTests();
   return loadEnv({
+    APP_ENV: 'local',
     DATABASE_URL: 'postgres://user:pass@localhost:6543/postgres',
     DATABASE_DIRECT_URL: 'postgres://user:pass@localhost:5432/postgres',
     JWT_SECRET: VALID_JWT_SECRET,

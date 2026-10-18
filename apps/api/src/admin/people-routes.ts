@@ -124,7 +124,7 @@ export async function registerAdminPeopleRoutes(
     request: FastifyRequest,
     action: string,
     entity: string,
-    entityId: string,
+    entityId: string | null,
     detail?: Record<string, unknown>,
   ) {
     return writeAudit(trx, {
@@ -178,10 +178,16 @@ export async function registerAdminPeopleRoutes(
         .limit(request.query.limit + 1)
         .execute();
       const page = pageOf(rows, offset, request.query.limit);
-      reply.send({
-        items: await residentDto(page.items.map((r) => r.user_id)),
-        nextCursor: page.nextCursor,
-      });
+      const items = await residentDto(page.items.map((r) => r.user_id));
+      // T15 "all reads of photos ... are audited": ID-card and selfie URLs handed out
+      // here are reads of identity documents (SECURITY-AUDIT SA-11).
+      const withDocs = items.filter((r) => r.idCardPhoto || r.selfie).map((r) => r.userId);
+      if (withDocs.length > 0) {
+        await audit(db, request, 'read.resident_documents', 'residents', null, {
+          residentIds: withDocs,
+        });
+      }
+      reply.send({ items, nextCursor: page.nextCursor });
     },
   );
 

@@ -52,7 +52,7 @@ async function main() {
     db,
     clock,
     mediaStorage,
-    rateLimit: { max: 1_000, timeWindowMs: 60_000 },
+    rateLimit: { max: 1_000, timeWindowMs: 60_000, otpVerifyMaxPer10Min: 1_000 },
   });
 
   await app.listen({ port: env.PORT, host: '0.0.0.0' });

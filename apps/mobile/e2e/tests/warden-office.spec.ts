@@ -156,7 +156,7 @@ test('FR-53/FR-54, E-12: the warden force-checks-out and bans a guest, who is th
   await expect(page.getByText('Find your host')).toBeVisible({ timeout: 30_000 });
   await page.getByLabel('Room number').fill('101');
   await page.getByRole('button', { name: 'Search' }).click();
-  await page.getByRole('button', { name: 'Select Priya Sharma' }).click();
+  await page.getByRole('button', { name: 'Select Priya S.' }).click();
   await expect(page.getByText('Visit type')).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
   await takePhoto(page);

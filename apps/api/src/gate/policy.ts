@@ -20,6 +20,21 @@ function isWarden(principal: Principal | null, resource: GateActorResource): boo
   return hasHostelRole(principal, resource.hostelId, ['warden', 'super_admin']);
 }
 
+/** §12.7 room search: only for the caller's own live scan session, at that hostel's gate. */
+export interface ResidentSearchResource {
+  sessionVisitorId: string | null;
+  sessionHostelId: string;
+  hostelId: string;
+}
+
+function canSearchResidents(principal: Principal | null, r: ResidentSearchResource): boolean {
+  return (
+    principal?.type === 'visitor' &&
+    r.sessionVisitorId === principal.visitorId &&
+    r.sessionHostelId === r.hostelId
+  );
+}
+
 let registered = false;
 
 /** Idempotent — safe to call from both app boot and tests. */
@@ -29,6 +44,7 @@ export function registerGatePolicies(): void {
 
   definePolicy<GateActorResource>('gate.create_pairing_code', isWarden);
   definePolicy<GateActorResource>('gate.revoke_device', isWarden);
+  definePolicy<ResidentSearchResource>('gate.search_residents', canSearchResidents);
 }
 
 /** Test-only: lets a test file force a clean registration against a reset registry. */

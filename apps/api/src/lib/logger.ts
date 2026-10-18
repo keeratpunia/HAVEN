@@ -41,6 +41,39 @@ export const REDACT_PATHS = [
   '*.photoPath',
 ] as const;
 
+/**
+ * Request URLs carry credentials and personal data: invite tokens in the path
+ * (`/v1/invites/<token>`), signed-URL signatures and phone or room searches in query
+ * strings. The logged URL keeps the path only, with token segments masked
+ * (SECURITY-AUDIT SA-08).
+ */
+export function redactUrl(url: string | undefined): string | undefined {
+  if (!url) return url;
+  const q = url.indexOf('?');
+  const path = q === -1 ? url : url.slice(0, q);
+  const masked = path.replace(/\/invites\/[^/]+/g, '/invites/[redacted]');
+  return q === -1 ? masked : `${masked}?[redacted]`;
+}
+
+interface LoggedRequest {
+  method?: string;
+  url?: string;
+  hostname?: string;
+  host?: string;
+  ip?: string;
+  socket?: { remoteAddress?: string; remotePort?: number };
+}
+
+/** Fastify's default request fields, with the URL redacted. */
+export function serializeRequest(req: LoggedRequest) {
+  return {
+    method: req.method,
+    url: redactUrl(req.url),
+    host: req.host ?? req.hostname,
+    remoteAddress: req.ip ?? req.socket?.remoteAddress,
+  };
+}
+
 export function createLogger(
   env: Pick<Env, 'LOG_LEVEL' | 'APP_ENV'>,
   /** Test-only: capture output on a custom stream instead of stdout/pino-pretty. */
@@ -53,6 +86,7 @@ export function createLogger(
         paths: [...REDACT_PATHS],
         censor: '[redacted]',
       },
+      serializers: { req: serializeRequest },
       transport:
         !destination && env.APP_ENV === 'local'
           ? { target: 'pino-pretty', options: { colorize: true, translateTime: 'HH:MM:ss' } }

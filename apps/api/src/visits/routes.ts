@@ -20,7 +20,6 @@ import { requireAuth } from '../auth/authenticate.js';
  */
 
 const WINDOW_TOKEN_PARAMS = z.object({ token: z.string().min(1) });
-const RoomSearchQuery = z.object({ hostelId: z.string().uuid(), number: z.string().min(1) });
 
 /** `+919876543210` -> `+91•••••43210` — SDD G-01: "invited phone shown as hint" / masked. */
 function maskPhone(phone: string): string {
@@ -155,16 +154,6 @@ export async function registerVisitRoutes(
     reply.send(rows);
   });
 
-  // GET /v1/rooms/search — G-08 "find your host".
-  api.get('/rooms/search', { schema: { querystring: RoomSearchQuery } }, async (request, reply) => {
-    const rows = await db
-      .selectFrom('haven.residents')
-      .innerJoin('haven.users', 'haven.users.id', 'haven.residents.user_id')
-      .select(['haven.users.id', 'haven.users.full_name'])
-      .where('haven.residents.hostel_id', '=', request.query.hostelId)
-      .where('haven.residents.claimed_room', '=', request.query.number)
-      .where('haven.residents.status', '=', 'verified')
-      .execute();
-    reply.send(rows.map((r) => ({ userId: r.id, fullName: r.full_name })));
-  });
+  // The G-08 room search is GET /v1/hostels/:id/rooms/:number/residents (gate/routes.ts):
+  // it needs a live scan session (SDD §12.7; SECURITY-AUDIT SA-01).
 }

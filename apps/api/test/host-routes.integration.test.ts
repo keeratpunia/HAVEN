@@ -39,6 +39,7 @@ const GATE_LNG = 77.5946;
 function testEnv(overrides: Record<string, string> = {}) {
   __resetEnvCacheForTests();
   return loadEnv({
+    APP_ENV: 'local',
     DATABASE_URL: TEST_DATABASE_URL,
     DATABASE_DIRECT_URL: TEST_DATABASE_URL,
     JWT_SECRET,

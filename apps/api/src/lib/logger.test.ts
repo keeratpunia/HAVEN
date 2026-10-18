@@ -27,8 +27,9 @@ describe('PII log redaction (CLAUDE.md §4, SDD §16.4)', () => {
   it('redacts the OTP verify request body field (SDD §9.5 POST /v1/auth/otp/verify)', () => {
     const { logger, lines } = captureLogger();
     logger.info({ req: { body: { phone: '+919876543210', code: '123456' } } }, 'otp verify');
-    const entry = JSON.parse(lines[0] ?? '{}');
-    expect(entry.req.body.code).toBe('[redacted]');
+    // The request serializer (SECURITY-AUDIT SA-08) never logs bodies at all.
+    expect(lines[0]).not.toContain('123456');
+    expect(lines[0]).not.toContain('9876543210');
   });
 
   it('redacts a whole OTP object logged under a named wrapper key', () => {
@@ -57,15 +58,13 @@ describe('PII log redaction (CLAUDE.md §4, SDD §16.4)', () => {
   it('redacts the Authorization header', () => {
     const { logger, lines } = captureLogger();
     logger.info({ req: { headers: { authorization: 'Bearer eyJhbGciOi...' } } }, 'request');
-    const entry = JSON.parse(lines[0] ?? '{}');
-    expect(entry.req.headers.authorization).toBe('[redacted]');
+    expect(lines[0]).not.toContain('eyJhbGciOi');
   });
 
   it('redacts the Cookie header', () => {
     const { logger, lines } = captureLogger();
     logger.info({ req: { headers: { cookie: 'haven_rt=supersecret' } } }, 'request');
-    const entry = JSON.parse(lines[0] ?? '{}');
-    expect(entry.req.headers.cookie).toBe('[redacted]');
+    expect(lines[0]).not.toContain('supersecret');
   });
 
   it('redacts tokens and secrets', () => {
@@ -96,5 +95,15 @@ describe('PII log redaction (CLAUDE.md §4, SDD §16.4)', () => {
     const entry = JSON.parse(lines[0] ?? '{}');
     expect(entry.visit.status).toBe('inside');
     expect(entry.visit.hostelId).toBe('h1');
+  });
+
+  it('logs request URLs without query strings, with invite tokens masked (SA-08)', () => {
+    const { logger, lines } = captureLogger();
+    logger.info(
+      { req: { method: 'GET', url: '/v1/invites/abc123SECRET?x=+919876543210' } },
+      'incoming request',
+    );
+    const entry = JSON.parse(lines[0] ?? '{}');
+    expect(entry.req.url).toBe('/v1/invites/[redacted]?[redacted]');
   });
 });
