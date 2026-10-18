@@ -31,6 +31,7 @@ import { registerNotificationPolicies } from './notify/policy.js';
 import { registerNotificationRoutes } from './notify/routes.js';
 import { registerAccountRoutes } from './account/routes.js';
 import { createBotVerifier, type BotVerifier } from './auth/bot-check.js';
+import { createErrorReporter, type ErrorReporter } from './lib/error-reporter.js';
 import { MediaUrlSigner } from './media/signing.js';
 import { RulesProvider } from './rules/provider.js';
 import { registerAdminPolicies } from './admin/policy.js';
@@ -64,6 +65,8 @@ export interface BuildAppOptions {
   rateLimit?: { max: number; timeWindowMs: number; otpVerifyMaxPer10Min?: number };
   /** SDD T10 OTP CAPTCHA; tests inject a fake. Default: Turnstile, or the local bypass. */
   botVerifier?: BotVerifier;
+  /** SDD §8.4 Sentry; tests inject a fake. Default: Sentry if SENTRY_DSN is set, else a no-op. */
+  errorReporter?: ErrorReporter;
   /** Overridable so tests can use a `FakeClock`; real callers never pass this. */
   clock?: Clock;
   /**
@@ -137,6 +140,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
 
   const checkDb = options.checkDb ?? pingDb;
+  const reporter = options.errorReporter ?? createErrorReporter(env);
   const rateLimitConfig: NonNullable<BuildAppOptions['rateLimit']> =
     options.rateLimit ?? DEFAULT_RATE_LIMIT;
   const clock = options.clock ?? new SystemClock();
@@ -284,6 +288,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     // no stack traces in responses") — including in non-production environments
     // reachable over a network. The full error still goes to the log.
     request.log.error({ err }, 'unhandled error');
+    reporter.captureException(err, { requestId: request.id });
     const internal = new AppError('INTERNAL', 500, 'Something went wrong on our side.');
     reply.status(500).send(toErrorEnvelope(internal, request.id));
   });
@@ -309,6 +314,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         push: pushSender,
         sms: options.smsSender ?? new ConsoleSmsProvider(env.APP_ENV),
         logger,
+        reporter,
       })
     : null;
   if (worker) {
@@ -322,6 +328,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       logger,
       push: pushSender,
       mediaStorage: options.mediaStorage,
+      reporter,
     });
     app.addHook('onReady', async () => {
       await jobs.start();

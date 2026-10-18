@@ -9,6 +9,13 @@ import { createLogger } from '../src/lib/logger.js';
 import { requestOtp, verifyOtp } from '../src/auth/otp-service.js';
 import { hashOtpCode } from '../src/auth/otp.js';
 import { DevBypassBotVerifier, type BotVerifier } from '../src/auth/bot-check.js';
+import {
+  createErrorReporter,
+  NOOP_REPORTER,
+  type ErrorReporter,
+} from '../src/lib/error-reporter.js';
+import { NotificationWorker } from '../src/notify/worker.js';
+import { FakePushSender, FakeSmsSender } from './app-test-helpers.js';
 import { resetAllHavenTables } from './db-test-helper.js';
 import {
   buildTestApp,
@@ -467,5 +474,79 @@ describe('SA-21: verifying a phone another account owns is a 409', () => {
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('CONFLICT');
     await app.close();
+  });
+});
+
+describe('SA-13: errors reach Sentry, scrubbed; nothing is sent without a DSN', () => {
+  class FakeReporter implements ErrorReporter {
+    seen: { err: unknown; context?: { requestId?: string; tags?: Record<string, string> } }[] = [];
+    captureException(
+      err: unknown,
+      context?: { requestId?: string; tags?: Record<string, string> },
+    ) {
+      this.seen.push({ err, context });
+    }
+  }
+
+  it('without SENTRY_DSN the reporter is the no-op', () => {
+    expect(createErrorReporter({ APP_ENV: 'local', SENTRY_DSN: undefined })).toBe(NOOP_REPORTER);
+  });
+
+  it('an unhandled error is reported with its request id; the response carries no detail', async () => {
+    const reporter = new FakeReporter();
+    const env = testEnv();
+    const app = await buildApp({
+      env,
+      logger: createLogger(env),
+      db,
+      clock,
+      mediaStorage: new MemoryMediaStorage(),
+      checkDb: async () => true,
+      errorReporter: reporter,
+    });
+    app.get('/v1/__boom', async () => {
+      throw new Error('boom for +919876543210');
+    });
+    await app.ready();
+    const res = await supertest(app.server).get('/v1/__boom');
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(res.body)).not.toContain('boom');
+    expect(reporter.seen).toHaveLength(1);
+    expect(reporter.seen[0]?.context?.requestId).toBe(res.body.error.requestId);
+    await app.close();
+  });
+
+  it('a permanently failed notification is reported by kind and channel, never its text or phone', async () => {
+    const reporter = new FakeReporter();
+    const row = await db
+      .insertInto('haven.notifications')
+      .values({
+        recipient_type: 'phone',
+        recipient_phone: '+919812300001',
+        kind: 'N-OVERSTAY-GUEST',
+        channel: 'sms',
+        body: 'Not the template',
+        sms_template_id: 'HAVEN_OVERSTAY',
+        data: JSON.stringify({ smsVars: ['4:30 pm'] }),
+        next_attempt_at: NOW,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await new NotificationWorker({
+      db,
+      clock,
+      push: new FakePushSender(),
+      sms: new FakeSmsSender(),
+      reporter,
+    }).tick();
+    expect(reporter.seen).toHaveLength(1);
+    expect(reporter.seen[0]?.context?.tags).toEqual({
+      kind: 'N-OVERSTAY-GUEST',
+      channel: 'sms',
+      notification_id: row.id,
+    });
+    expect(String((reporter.seen[0]?.err as Error).message)).not.toMatch(
+      /9812300001|Not the template/,
+    );
   });
 });

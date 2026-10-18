@@ -1,5 +1,9 @@
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../lib/auth-context.js';
+import { initSentry } from '../lib/sentry.js';
+
+// No-op unless EXPO_PUBLIC_SENTRY_DSN is set (SDD §8.4).
+initSentry();
 
 /**
  * Root layout (SDD §13.3: route groups decide which shell a signed-in principal sees).

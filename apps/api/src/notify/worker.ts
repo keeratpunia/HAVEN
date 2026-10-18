@@ -6,6 +6,7 @@ import type { Logger } from '../lib/logger.js';
 import type { PushSender, SmsProvider } from './senders.js';
 import { isDltTemplateId, renderDlt } from './dlt.js';
 import { personalDataIn } from './sending-rules.js';
+import type { ErrorReporter } from '../lib/error-reporter.js';
 
 /**
  * Notification outbox worker (SDD §9.7). Every `intervalMs` (2 s) it claims up to 50
@@ -56,6 +57,8 @@ export interface NotificationWorkerDeps {
   push: PushSender;
   sms: SmsProvider;
   logger?: Pick<Logger, 'warn' | 'error'>;
+  /** §9.7 "then failed (and logged to Sentry)". */
+  reporter?: ErrorReporter;
 }
 
 /** A failure retrying can't fix: finish as `failed` now. */
@@ -116,6 +119,7 @@ export class NotificationWorker {
             { notificationId: row.id, kind: row.kind, error: message },
             'notification failed',
           );
+          this.reportFailure(row, message);
           await this.finish(row, 'failed', message);
         } else {
           await this.scheduleRetry(row, now, message);
@@ -338,15 +342,22 @@ export class NotificationWorker {
       .execute();
   }
 
+  /** The error text never includes the body or recipient — only kind, channel and why. */
+  private reportFailure(row: ClaimedRow, error: string): void {
+    this.deps.reporter?.captureException(new Error(`notification failed: ${error}`), {
+      tags: { kind: row.kind, channel: row.channel, notification_id: row.id },
+    });
+  }
+
   private async scheduleRetry(row: ClaimedRow, now: Date, error: string): Promise<void> {
     const delay = RETRY_DELAYS_MS[row.attempts - 1];
     if (delay === undefined) {
-      // "then failed (and logged to Sentry)" — logged here; Sentry is not wired in the
-      // prototype (docs/DECISIONS.md DEC-015).
+      // "then failed (and logged to Sentry)" (§9.7).
       this.deps.logger?.error(
         { notificationId: row.id, kind: row.kind, error },
         'notification failed',
       );
+      this.reportFailure(row, error);
       await this.finish(row, 'failed', error);
       return;
     }

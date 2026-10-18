@@ -4,6 +4,7 @@ import type { Clock } from '../lib/clock.js';
 import type { Logger } from '../lib/logger.js';
 import type { MediaStorage } from '../gate/media.js';
 import type { PushSender } from '../notify/senders.js';
+import type { ErrorReporter } from '../lib/error-reporter.js';
 import { purgeDueMedia } from './media-purge.js';
 import { checkPushReceipts } from '../notify/receipts.js';
 import { processDeletionRequests } from '../account/deletion.js';
@@ -87,6 +88,7 @@ export interface JobRunnerDeps {
   mediaStorage: MediaStorage;
   push: PushSender;
   logger?: Pick<Logger, 'warn' | 'error' | 'info'>;
+  reporter?: ErrorReporter;
 }
 
 export class JobRunner {
@@ -130,6 +132,7 @@ export class JobRunner {
         ran.push(job.fn);
       } catch (err) {
         this.deps.logger?.error({ err, job: job.fn }, 'scheduled job failed');
+        this.deps.reporter?.captureException(err, { tags: { job: job.fn } });
       }
     }
     this.minute += 1;

@@ -20,6 +20,7 @@
     "@haven/shared": "workspace:*",
     "@haven/ui": "workspace:*",
     "@microsoft/fetch-event-source": "^2.0.1",
+    "@sentry/browser": "11.8.0",
     "@zxing/browser": "^0.1.5",
     "expo": "~57.0.26",
     "expo-camera": "~57.0.6",
