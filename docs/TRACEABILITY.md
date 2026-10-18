@@ -604,6 +604,99 @@ staff use the DEC-011 dev sign-in, so a staff invite can be created but not acce
 dev); Android was never run; W-09 has no map preview (DEC-014 item 18); the FR-60 daily
 digest (priority C) isn't built; account deletion (FR-09) isn't built.
 
+## 0l. Async milestone: notifications, jobs, retention, deletion (2026-10-18)
+
+### 0l.1 Audit before changes
+
+Audited against SDD §9.7, §9.8, §11.5, §11.8, §15, §16.5 and §16.6, at commit 5d47684,
+before any code changed.
+- **MATCHES:** implementation and text agree with the SDD, and a test proves it.
+- **WRONG:** behaviour or text differs from the SDD.
+- **MISSING:** not built.
+- **UNTESTED:** looks right but no test proves it.
+
+"Same tx" means the row is inserted in the same database transaction as the state
+change that causes it. The SQL jobs insert in the same statement as their `UPDATE`.
+
+**Notifications (§15.2)**
+
+| Kind | Trigger → recipient | Channel(s) and fallback | Text vs SDD | Enqueued in | Same tx | Test | Before |
+|---|---|---|---|---|---|---|---|
+| N-WALKIN | Walk-in submitted → host | Push (approvals); SMS `HAVEN_WALKIN` after 60 s if unopened | Verbatim | `visits/service.ts` `createWalkIn` | Yes | `resident-approvals-notifications` (text, opening cancels the SMS, no-token immediate SMS) | UNTESTED: "unopened → exactly one SMS at 60 s" isn't proven |
+| N-WALKIN-EXPIRED | 10 min, no decision → host | Push (updates) | Verbatim (migration 20261017000001) | SQL `job_expire_walkins` | Yes | `resident-approvals-notifications` (job expires it, host told by name) | WRONG: job boundary is `<`, so the walk-in isn't expired at exactly 10:00 (BR-12) |
+| N-CONFIRM-LOCATION | Unverified check-in/walk-in → host | Push (approvals); SMS `HAVEN_CONFIRM_LOC` after 60 s | Verbatim | `visits/service.ts`, `visits/host-actions.ts` | Yes | `resident-approvals-notifications` (F3, TC-FLOW-04) | MATCHES |
+| N-ARRIVED | Check-in → host | Push (updates) | Verbatim | `visits/service.ts` `checkIn` | Yes | `resident-approvals-notifications`, `templates.test.ts` | MATCHES |
+| N-LEFT | Check-out → host | Push (updates) | Verbatim + F5 sentence (DEC-012) | `visits/service.ts` `checkOut` | Yes | `templates.test.ts`, `resident-approvals-notifications` | MATCHES |
+| N-OVERSTAY-HOST | Overstay flagged → host | Push (alerts), at most one per visit | Verbatim | SQL `job_flag_overstays` | Yes | `jobs-runner` (TC-JOB-01) | WRONG: flags only *after* window_end + 15:00 (strict `>`); BR-13 says + 15:00 is overstaying. Job reads the database clock, so the boundary can't be tested with an injected clock |
+| N-OVERSTAY-GUEST | Overstay flagged → guest | SMS `HAVEN_OVERSTAY` | Uses the §15.2 body ("…visit to {hostelCode} ended at…"), not the registered §15.3 DLT text ("Your HAVEN visit ended at {#var#}…") | SQL `job_flag_overstays` | Yes | `jobs-runner` (TC-JOB-01) | WRONG: an SMS must match its DLT template exactly or the operator rejects it (SDD conflict, see DEC-015) |
+| N-OVERSTAY-WARDEN | 30 min after flag → wardens | Push (alerts) | Verbatim | SQL `job_flag_overstays` | Yes | none | WRONG + UNTESTED: escalates only *after* 30:00 (strict `<`); no test of the escalation |
+| N-NIGHT-SWEEP | 22:00 → wardens | Push (alerts), in-app if zero | Verbatim; zero case uses the §11.8 text | SQL `job_night_sweep` | Yes | none | WRONG + UNTESTED: tapping it opens a *resident* screen, not W-02 filtered to the guests (§11.8); TC-JOB-02 not written |
+| N-NIGHT-SWEEP-HOST | 22:00, day guest inside → host | Push (alerts) | Verbatim | SQL `job_night_sweep` | Yes | none | UNTESTED |
+| N-DISPUTE | "Not my guest" → wardens | Push (alerts) + SMS `HAVEN_DISPUTE` immediately | Verbatim | `visits/host-actions.ts` `disputeArrival` | Yes | `resident-approvals-notifications` (TC-FLOW-06) | MATCHES |
+| N-OVERNIGHT-REQ | Overnight/guest-room requested → wardens | Push (approvals) | Verbatim | `visits/service.ts` | Yes | `resident-onboarding-visits` | MATCHES |
+| N-OVERNIGHT-DECIDED | Warden decision → host | Push (updates) | Verbatim | `visits/service.ts` | Yes | `resident-onboarding-visits`, `templates.test.ts` | MATCHES |
+| N-RES-SUBMITTED | Resident submits → wardens | Push (approvals) | Verbatim | `residents/service.ts` | Yes | `resident-onboarding-visits` | MATCHES |
+| N-RES-DECIDED | Warden verifies/rejects → resident | Push (updates) | Verbatim | `admin/people-routes.ts` | Yes | `staff-behaviour` | MATCHES |
+| N-GATE-OFFLINE | Device silent 5 min → wardens | Push (alerts), once per outage | Time is zero-padded ("04:42 pm"; §13.1 is "4:42 pm") | SQL `job_gate_offline` | Yes | `staff-behaviour` (row exists) | WRONG: time format; tapping opens a resident screen, not W-09 |
+| N-CHARGE | Charge created or marked paid → resident | In-app | Verbatim | `admin/charges-routes.ts` (fine created, paid) | Yes | `staff-behaviour` | MISSING: no N-CHARGE when an overnight approval creates the pending charge (BR-08) |
+| N-HOST-SUSPENDED | Warden suspends → resident | Push (updates) | Verbatim; no-end-date wording proposed in DEC-014 | `admin/people-routes.ts` | Yes | `staff-behaviour` | MATCHES |
+| N-WALKIN-REJECTED | Host rejects walk-in → guest page | In-app only | §13.6 "Walk-in rejected" copy; named in §7.1, not in the §15.2 table | `visits/service.ts` `rejectWalkIn` | Yes | `resident-approvals-notifications` | MATCHES (note: an in-app guest-page message from §7.1, not a sent push/SMS) |
+
+**Delivery and sending rules (§9.7, §15.3, §15.5)**
+
+| Requirement | Before |
+|---|---|
+| Producers only insert; a rolled-back transaction sends nothing | UNTESTED (every producer passes its transaction; no rollback test) |
+| Claim with `FOR UPDATE SKIP LOCKED`; concurrent workers never double-send | UNTESTED (the query is the SDD's; no two-worker test) |
+| Retries 10 s, 30 s, 2 min, 10 min, then `failed` | MATCHES (`resident-approvals-notifications`) |
+| "failed (and logged to Sentry)" | MISSING: no Sentry anywhere in the API (NFR-13) |
+| Idempotent if a row is processed twice; a crash mid-send leaves rows in `sending` forever | MISSING: no recovery for stuck `sending` rows; a late finish can overwrite another worker's result |
+| Push via `expo-server-sdk`, chunked; `DeviceNotRegistered` disables the token | MATCHES for tickets (`resident-approvals-notifications`) |
+| "A job fetches receipts 15 min later" | MISSING |
+| `SmsProvider.send(to, templateId, vars)`; `ConsoleSmsProvider` | WRONG: the interface takes a pre-built body, not DLT variables, and nothing stops a template outside §15.3 |
+| `Msg91SmsProvider` | MISSING (not in this milestone's brief: provider boundary + dev fake only) |
+| Fallback: SMS after 60 s if the push is unopened; opened tracking | MATCHES for "opened cancels" and staleness; UNTESTED for timing (59 s vs 60 s, exactly one SMS) |
+| No guest phone number or photo in any push or SMS body | UNTESTED (true of every template by inspection; nothing enforces or tests it) |
+| At most one overstay push per visit to the host | MATCHES by dedupe key (TC-JOB-01) |
+| At most one gate-offline push per outage | UNTESTED |
+| No active push token → SMS fallback now for kinds that have one, else in-app only | MATCHES (`resident-approvals-notifications`) |
+
+**Jobs (§9.8, §11.8)**
+
+| Job | Schedule (SDD) | Runner | What it does vs SDD | Test | Before |
+|---|---|---|---|---|---|
+| `job_expire_walkins` | Every min | pg_cron / `JobRunner` every 1 min | Expires `pending_host` older than `walk_in_timeout_minutes`, notifies host | `resident-approvals-notifications` | WRONG: strict `<` (10:00 not expired); uses the DB clock |
+| `job_expire_approved` | Every 5 min | every 5 min | Never-entered → `expired`, entered → `completed`; waives pending charges | none | WRONG + UNTESTED: strict `<` on `window_end` (FR-71 "at window_end"); charge waiving picks visits "closed in the last 5 minutes", which misses or repeats rows depending on timing |
+| `job_flag_overstays` | Every 5 min | every 5 min | Flags, host push, guest SMS, 30-min warden escalation | `jobs-runner` (TC-JOB-01) | WRONG: boundaries (above), SMS text vs DLT template |
+| `job_night_sweep` | 22:00 IST (16:30 UTC) | daily 22:00 IST | Per hostel: wardens get push (or in-app if none), hosts get push | none | WRONG + UNTESTED: tap target (above); TC-JOB-02 not written |
+| `job_gate_offline` | Every 5 min | every 5 min | Silent > 5 min → wardens, once per outage | `staff-behaviour` (row exists) | WRONG: time format; once-per-outage UNTESTED |
+| `job_retention` | 03:00 IST (21:30 UTC) | daily 03:00 IST | Marks media due, anonymises per §16.5 | none | WRONG + MISSING + UNTESTED (see §16.5 below) |
+| `job_expire_sessions` | Hourly | every 60 min | Deletes old scan sessions, OTP challenges, idempotency keys, pairing codes | none | UNTESTED |
+| Push receipts | "15 min later" (§9.7) | none | — | none | MISSING |
+| Media file deletion | "the API worker deletes the files" (§11.8) | none | — | none | MISSING: `delete_after` is set but no file is ever deleted |
+| Account deletion worker | "within 7 days" (§16.6) | none | — | none | MISSING |
+
+**Retention schedule (§16.5) and account deletion (§16.6)**
+
+| Row | Before |
+|---|---|
+| Scan sessions deleted 1 day after expiry | UNTESTED (`job_expire_sessions`) |
+| OTP challenges deleted after 1 day | UNTESTED (`job_expire_sessions`) |
+| Gate photos: `delete_after = created_at + 180 days`; file deleted, `deleted_at` set | MISSING: date set, file never deleted |
+| Guest profile photo deleted 365 days after `last_visit_at` | WRONG: `delete_after` is stamped once and never moved, so a guest who comes back still loses their photo on the old date; MISSING: file never deleted |
+| Guest identity anonymised 365 days after last visit with no future visits | WRONG: setting `phone = null` violates the `visitors` check (phone or host-created) for every self-registered guest, which aborts the whole retention run. Also `last_visit_at` is only set at sign-in, not at check-in |
+| Visit rows: `invited_name`, `invited_phone` nulled after 2 years | UNTESTED |
+| Resident ID card deleted at the verification decision | MATCHES (synchronous, `staff-behaviour` FR-05 tests) |
+| Audit log kept 2 years | MISSING: never purged, and the append-only trigger blocks any delete |
+| Notification bodies nulled after 90 days | UNTESTED |
+| FR-09 / §16.6 account deletion: `POST /me/deletion-request`, sign-out, waiting rules, unpaid-charges block, worker, R-15 and G-17 buttons | MISSING |
+| FR-60 daily digest (C) | MISSING (build only if everything else is done) |
+
+**Summary before:** 19 notification kinds: 10 MATCHES, 6 WRONG, 1 MISSING, 2
+UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
+0 MATCHES, 6 WRONG, 1 UNTESTED, 3 MISSING. 11 retention/deletion rows: 1 MATCHES,
+2 WRONG, 4 MISSING, 4 UNTESTED.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
