@@ -18,6 +18,7 @@ import { registerGatePolicies, __resetGatePoliciesForTests } from '../src/gate/p
 import { __resetAuthPoliciesForTests } from '../src/auth/policy-rules.js';
 import { __resetNotificationPoliciesForTests } from '../src/notify/policy.js';
 import { __resetResidentPoliciesForTests } from '../src/residents/routes.js';
+import { __resetAdminPoliciesForTests } from '../src/admin/policy.js';
 import type { MediaStorage } from '../src/gate/media.js';
 import type { PushMessage, PushSender, PushTicket, SmsSender } from '../src/notify/senders.js';
 import { TEST_DATABASE_URL } from './pg-test-constants.js';
@@ -49,7 +50,8 @@ export function testEnv(overrides: Record<string, string> = {}) {
     OTP_PEPPER,
     GOOGLE_CLIENT_IDS: 'test-client-id',
     DATA_ENCRYPTION_KEY: DATA_ENCRYPTION_KEY_B64,
-    LOG_LEVEL: 'silent',
+    // TEST_LOG_LEVEL=error shows server-side errors while debugging a test.
+    LOG_LEVEL: process.env.TEST_LOG_LEVEL ?? 'silent',
     API_BASE_URL,
     WEB_BASE_URL,
     ...overrides,
@@ -94,7 +96,7 @@ export class FakeSmsSender implements SmsSender {
 
 export async function buildTestApp(
   clock: FakeClock,
-  opts: { env?: Record<string, string>; mediaStorage?: MediaStorage } = {},
+  opts: { env?: Record<string, string>; mediaStorage?: MediaStorage; streamPingMs?: number } = {},
 ): Promise<FastifyInstance> {
   __resetPolicyRegistryForTests();
   __resetVisitPoliciesForTests();
@@ -102,6 +104,7 @@ export async function buildTestApp(
   __resetAuthPoliciesForTests();
   __resetNotificationPoliciesForTests();
   __resetResidentPoliciesForTests();
+  __resetAdminPoliciesForTests();
   registerVisitPolicies();
   registerGatePolicies();
   const env = testEnv(opts.env);
@@ -113,6 +116,7 @@ export async function buildTestApp(
     googleVerifier: new FakeGoogleIdTokenVerifier(new Map()),
     mediaStorage: opts.mediaStorage ?? new MemoryMediaStorage(),
     checkDb: async () => true,
+    streamPingMs: opts.streamPingMs,
   });
   await app.ready();
   return app;

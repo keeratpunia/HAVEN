@@ -94,6 +94,14 @@ export class RevocationCache {
     for (const [sessionId, entry] of this.entries) {
       if (entry.userId === userId) this.entries.delete(sessionId);
     }
+    for (const listener of this.forgetListeners) listener(userId);
+  }
+
+  private readonly forgetListeners: ((userId: string) => void)[] = [];
+
+  /** E.g. the SSE hub closes the user's open streams (FR-07). */
+  onForgetUser(listener: (userId: string) => void): void {
+    this.forgetListeners.push(listener);
   }
 
   /** Test-only: forces the next check to hit the DB again. */

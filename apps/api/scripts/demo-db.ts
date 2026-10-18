@@ -62,6 +62,9 @@ async function main() {
     user: DEMO_PG_USER,
     password: DEMO_PG_PASSWORD,
     persistent: false,
+    // UTF-8 like Supabase. Without this, initdb on Windows picks WIN1252 and the
+    // database can't store ₹ or any non-Latin guest name (docs/DECISIONS.md DEC-014).
+    initdbFlags: ['--encoding=UTF8', '--locale=C'],
     onLog: () => {},
     onError: (e) => console.error(e),
   });

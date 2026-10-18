@@ -36,6 +36,9 @@ import { registerAdminVisitRoutes } from './admin/visit-routes.js';
 import { registerAdminPeopleRoutes } from './admin/people-routes.js';
 import { registerAdminConfigRoutes } from './admin/config-routes.js';
 import { registerAdminChargesRoutes } from './admin/charges-routes.js';
+import { StreamHub } from './stream/hub.js';
+import { JobRunner } from './jobs/runner.js';
+import { registerStreamRoutes } from './stream/routes.js';
 import { registerMediaRoutes } from './media/routes.js';
 import { registerResidentPolicies, registerResidentRoutes } from './residents/routes.js';
 import {
@@ -68,6 +71,8 @@ export interface BuildAppOptions {
   /** Where gate/profile photos are written (SDD §9.10). Real callers use
    * `server.ts`'s `LocalDiskMediaStorage`; tests can inject an in-memory fake. */
   mediaStorage: MediaStorage;
+  /** SSE ping interval override for tests (SDD §9.9 default: 25 s). */
+  streamPingMs?: number;
   /** Delivery adapters for the notification worker; default to Expo push and console SMS. */
   pushSender?: PushSender;
   smsSender?: SmsSender;
@@ -136,6 +141,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const dataEncryptionKey = parseDataEncryptionKey(env.DATA_ENCRYPTION_KEY);
   const mediaSigner = new MediaUrlSigner(env.JWT_SECRET, env.API_BASE_URL, clock);
   const rules = new RulesProvider(db);
+  const hub = new StreamHub(env.DATABASE_URL, logger);
+  revocationCache.onForgetUser((userId) => hub.disconnectUser(userId));
 
   const app = Fastify({
     // Cast: our pino instance (packages' own pino types) is runtime-compatible with
@@ -146,6 +153,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   configureZodValidation(app);
+
+  // Open event streams would keep the HTTP server from closing; end them first.
+  app.addHook('preClose', async () => hub.close());
 
   // --- Security headers (SDD §16.4) ---
   await app.register(helmet, {
@@ -272,6 +282,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   if (worker) {
     worker.start();
     app.addHook('onClose', async () => worker.stop());
+    // SDD §9.8 jobs when pg_cron isn't installed (DEC-014).
+    const jobs = new JobRunner({ db, clock, logger });
+    app.addHook('onReady', async () => {
+      await jobs.start();
+    });
+    app.addHook('onClose', async () => jobs.stop());
   }
 
   // GET /ready — 200 only if the DB answers `select 1` within 1s and, where this
@@ -360,6 +376,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         cache: revocationCache,
       });
       await registerAdminChargesRoutes(v1, { db, clock, signer: mediaSigner, rules });
+      await registerStreamRoutes(v1, { hub, cache: revocationCache, pingMs: options.streamPingMs });
     },
     { prefix: '/v1' },
   );
