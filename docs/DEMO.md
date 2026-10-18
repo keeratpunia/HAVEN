@@ -274,6 +274,74 @@ use the same dev sign-in as residents. It is refused outside `NODE_ENV=developme
 accepting one needs Google sign-in, so you can show the invite being created, not
 accepted.
 
+### I. Notifications, background jobs and account deletion
+
+**What runs in the background.** The demo API is the one instance with
+`WORKER_ENABLED=true`. Every 2 seconds it delivers whatever is waiting in the
+notification outbox. Every minute it runs the scheduled jobs from SDD §9.8 on their
+real schedule: walk-in expiry every minute; overstays, approved-visit expiry and gate
+offline every 5 minutes; the night sweep at 22:00 IST; retention at 03:00 IST.
+
+- **Push** goes only to phones running the HAVEN Android app. On the web, residents see
+  the same message under **Notifications**. Wardens on the web have no notification
+  list (W-01..W-12 don't include one), so their alerts show up as the dashboard tiles
+  changing live. To show a warden's alert itself, use the Android app.
+- **SMS** isn't really sent. It's printed in the terminal using the registered DLT
+  template, with the phone number masked, for example:
+  `[api] [sms:dev] +91•••••43210 HAVEN_OVERSTAY: Your HAVEN visit ended at 4:30 pm. Please check out at the gate now.`
+
+**Triggering a job now instead of waiting.** Run these in a second terminal while
+`pnpm demo` is running:
+
+```
+pnpm --filter @haven/api run demo:job -- list                 # every job and its schedule
+pnpm --filter @haven/api run demo:job -- overstay VDEM001     # Ananya's visit ended 16 min ago
+pnpm --filter @haven/api run demo:job -- escalate VDEM001     # ...and was flagged 31 min ago
+pnpm --filter @haven/api run demo:job -- run job_night_sweep  # the 22:00 sweep, now
+pnpm --filter @haven/api run demo:job -- gate-offline         # paired gate screens silent 6 min
+```
+
+31. **Force an overstay.** Keep the warden dashboard on the projector and run
+    `overstay VDEM001`. The **Overstaying** tile goes up without a reload. Priya's
+    **Notifications** shows "Your guest is still inside", and the terminal prints the
+    guest's SMS. Run it again and nothing new is sent. That's the rule: one overstay
+    push per visit (SDD §15.5, TC-JOB-01).
+32. **Escalate it.** `escalate VDEM001` sends the wardens a push (Android) "Guest
+    overstaying — Ananya Rao (host Priya Sharma, room 101) is 30+ min past their end
+    time." Kavya
+    (VDEM002) is seeded as already overstaying, so about 10 minutes into the demo the
+    wardens get her escalation on their own.
+33. **Night sweep.** `run job_night_sweep`. Each host gets "Your guest is still inside
+    after 10 pm" (Priya and Fatima can see it under **Notifications**). On Android the
+    warden gets "3 day guests still inside", and tapping it opens **Inside** with a
+    **Night sweep** chip showing just those guests. It counts once per night: running
+    it again the same evening sends nothing new.
+34. **Gate offline.** Pair the gate laptop (step C), then either run `gate-offline` or
+    close the gate tab for more than 5 minutes. The gate's status on the dashboard
+    turns offline live. On Android, each warden gets one "Gate screen offline" push
+    per outage; once the screen comes back and goes silent again, they get one more.
+35. **Walk-in expiry.** Leave a walk-in (step F) unanswered for 10 minutes. The guest's
+    screen changes to "No answer from Priya — Try calling her, then request again", and
+    Priya gets "Guest request expired".
+
+**Account deletion (FR-09).**
+
+36. **As a guest:** open **My visits** and choose **Delete my account**. The guest is
+    signed out everywhere at once. If they're inside, or have a visit in the next 24
+    hours, the app says deletion waits until that visit ends. The worker finishes
+    within 15 minutes: photos deleted, name becomes "Former guest", phone removed. The
+    host's visit history keeps the visit rows, without the guest's details.
+37. **As a resident:** **Profile** (R-15) → **Delete my account**. Both seeded residents
+    owe a charge (Priya ₹400, Fatima ₹100), so the app says "Clear your charges first".
+    To show the full path, have the office mark the charge paid on **Charges**, then
+    try again.
+38. **Retention** (SDD §16.5) runs at 03:00 IST. `run job_retention` is safe to show,
+    but demo data is minutes old, so nothing is due. The automated tests cover every
+    retention row (`apps/api/test/retention.integration.test.ts`).
+
+The wording after the "Delete my account" button is proposed copy that isn't in the SDD
+yet (docs/DECISIONS.md DEC-015). Say so if anyone asks.
+
 ## 2. If something goes wrong on stage
 
 ### Venue Wi-Fi / indoor GPS is unreliable
