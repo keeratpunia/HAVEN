@@ -79,13 +79,19 @@ async function ownedPhoto(
   owner: { visitorId?: string; userId?: string },
   kind: 'visitor_profile' | 'gate_photo' | 'resident_selfie',
 ) {
-  const path = `${kind}/${randomUUID()}.jpg`;
-  await storage.put(path, Buffer.from('jpeg'));
+  const bucket =
+    kind === 'resident_selfie'
+      ? 'resident-docs'
+      : kind === 'gate_photo'
+        ? 'gate-photos'
+        : 'visitor-photos';
+  const path = `${owner.visitorId ?? owner.userId ?? 'x'}/${randomUUID()}.jpg`;
+  await storage.put({ bucket, path }, Buffer.from('jpeg'));
   await db
     .insertInto('haven.media')
     .values({
       kind,
-      bucket: kind === 'resident_selfie' ? 'resident-docs' : 'visitor-photos',
+      bucket,
       path,
       sha256: Buffer.from(randomUUID()),
       bytes: 4,
@@ -93,7 +99,7 @@ async function ownedPhoto(
       owner_user_id: owner.userId ?? null,
     })
     .execute();
-  return path;
+  return { bucket, path } as const;
 }
 
 describe('POST /v1/me/deletion-request (§16.6 step 1)', () => {

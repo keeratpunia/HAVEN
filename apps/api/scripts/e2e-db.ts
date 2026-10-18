@@ -251,9 +251,9 @@ async function main() {
     })
       .jpeg()
       .toBuffer();
-    const mediaPath = `${pendingId}/${kind}.jpg`;
-    mkdirSync(path.dirname(path.join(mediaRoot, mediaPath)), { recursive: true });
-    writeFileSync(path.join(mediaRoot, mediaPath), bytes);
+    const mediaPath = `${pendingId}/${kind.replace(/_/g, '-')}.jpg`;
+    mkdirSync(path.dirname(path.join(mediaRoot, 'resident-docs', mediaPath)), { recursive: true });
+    writeFileSync(path.join(mediaRoot, 'resident-docs', mediaPath), bytes);
     const m = await client.query<{ id: string }>(
       `insert into haven.media (kind, bucket, path, sha256, bytes, owner_user_id)
        values ($1, 'resident-docs', $2, $3, $4, $5)

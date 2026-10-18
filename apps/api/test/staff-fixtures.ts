@@ -5,6 +5,7 @@ import { sql } from 'kysely';
 import { GH8_RULES_CONFIG_V1 } from '@haven/shared';
 import type { FakeClock } from '../src/lib/clock.js';
 import { generateVisitCode } from '../src/lib/ids.js';
+import type { MediaStorage } from '../src/gate/media.js';
 import { db, issueToken, makeGateWithSecret } from './app-test-helpers.js';
 import { makeHostel, makeVerifiedHost, makeVisitor } from './visits-fixtures.js';
 
@@ -182,10 +183,7 @@ export async function seedCharge(p: {
 }
 
 /** A resident who has submitted for verification, with an ID card and selfie stored. */
-export async function pendingResident(
-  hostelId: string,
-  storage: { put(path: string, b: Buffer): Promise<void> },
-) {
+export async function pendingResident(hostelId: string, storage: Pick<MediaStorage, 'put'>) {
   const userId = await makeUser('Neha Pending');
   const card = await db
     .insertInto('haven.media')
@@ -209,8 +207,8 @@ export async function pendingResident(
     })
     .returning(['id', 'path'])
     .executeTakeFirstOrThrow();
-  await storage.put(card.path, Buffer.from('card'));
-  await storage.put(selfie.path, Buffer.from('self'));
+  await storage.put({ bucket: 'resident-docs', path: card.path }, Buffer.from('card'));
+  await storage.put({ bucket: 'resident-docs', path: selfie.path }, Buffer.from('self'));
   await db
     .insertInto('haven.residents')
     .values({

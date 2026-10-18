@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { FakeClock } from '../src/lib/clock.js';
+import type { MediaObject } from '../src/gate/media.js';
 import { JobRunner } from '../src/jobs/runner.js';
 import { generateVisitCode } from '../src/lib/ids.js';
 import { resetAllHavenTables } from './db-test-helper.js';
@@ -37,14 +38,15 @@ async function photo(p: {
   kind: 'gate_photo' | 'visitor_profile';
   visitorId: string;
   createdAt: Date;
-}): Promise<{ id: string; path: string }> {
-  const path = `${p.kind}/${randomUUID()}.jpg`;
-  await storage.put(path, Buffer.from('jpeg'));
+}): Promise<MediaObject & { id: string }> {
+  const bucket = p.kind === 'gate_photo' ? 'gate-photos' : 'visitor-photos';
+  const path = `${p.visitorId}/${randomUUID()}.jpg`;
+  await storage.put({ bucket, path }, Buffer.from('jpeg'));
   const row = await db
     .insertInto('haven.media')
     .values({
       kind: p.kind,
-      bucket: p.kind === 'gate_photo' ? 'gate-photos' : 'visitor-photos',
+      bucket,
       path,
       sha256: Buffer.from(randomUUID()),
       bytes: 4,
@@ -53,7 +55,7 @@ async function photo(p: {
     })
     .returning('id')
     .executeTakeFirstOrThrow();
-  return { id: row.id, path };
+  return { id: row.id, bucket, path };
 }
 
 async function guest(lastVisitAt: Date | null, name = 'Asha Rani'): Promise<string> {
@@ -121,13 +123,13 @@ describe('§16.5 retention (job_retention + media purge)', () => {
 
     await runner.run('job_retention');
     expect(await media(old.id)).toEqual({ delete_after: NOW, deleted_at: NOW });
-    expect(await storage.get(old.path)).toBeNull();
+    expect(await storage.get(old)).toBeNull();
     expect((await media(young.id)).deleted_at).toBeNull();
-    expect(await storage.get(young.path)).not.toBeNull();
+    expect(await storage.get(young)).not.toBeNull();
 
     clock.set(new Date(NOW.getTime() + 60_000));
     await runner.run('media_purge'); // the hourly purge picks it up when it falls due
-    expect(await storage.get(young.path)).toBeNull();
+    expect(await storage.get(young)).toBeNull();
   });
 
   it('guest profile photo: deleted 365 days after last_visit_at — moved forward when the guest comes back', async () => {
@@ -145,7 +147,7 @@ describe('§16.5 retention (job_retention + media purge)', () => {
     });
 
     await runner.run('job_retention');
-    expect(await storage.get(goneProfile.path)).toBeNull();
+    expect(await storage.get(goneProfile)).toBeNull();
     expect((await media(goneProfile.id)).deleted_at).toEqual(NOW);
     expect((await media(backProfile.id)).delete_after).toEqual(
       new Date(ago(300).getTime() + 365 * DAY),
@@ -182,7 +184,7 @@ describe('§16.5 retention (job_retention + media purge)', () => {
     clock.set(new Date(NOW.getTime() + 65 * DAY + 1));
     await runner.run('job_retention');
     expect((await media(backProfile.id)).delete_after).toEqual(new Date(NOW.getTime() + 365 * DAY));
-    expect(await storage.get(backProfile.path)).not.toBeNull();
+    expect(await storage.get(backProfile)).not.toBeNull();
   });
 
   it('guest identity: 365 days after the last visit with no future visits → "Former guest", phone null', async () => {

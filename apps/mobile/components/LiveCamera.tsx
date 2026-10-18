@@ -13,6 +13,12 @@ import { Button } from './Button.js';
  */
 const SHUTTER_DELAY_MS = 1_000;
 const CAPTURE_SIZE = 720;
+const MEDIA_STYLE = { width: '100%', height: '100%', objectFit: 'cover' } as const;
+
+/** SDD §9.4: getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 720 } }, audio: false }). */
+function videoConstraints(facing: 'user' | 'environment'): MediaTrackConstraints {
+  return { facingMode: facing, width: { ideal: CAPTURE_SIZE }, height: { ideal: CAPTURE_SIZE } };
+}
 
 export type LiveCameraState = 'idle' | 'opening' | 'open' | 'denied' | 'captured';
 
@@ -61,7 +67,7 @@ export function LiveCamera({
     let cancelled = false;
     setState('opening');
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: facing }, audio: false })
+      .getUserMedia({ video: videoConstraints(facing), audio: false })
       .then((stream) => {
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
@@ -112,7 +118,7 @@ export function LiveCamera({
     setCapturedUrl(null);
     setState('opening');
     navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: facing }, audio: false })
+      .getUserMedia({ video: videoConstraints(facing), audio: false })
       .then((stream) => attach(stream))
       .catch(() => {
         setState('denied');
@@ -149,7 +155,8 @@ export function LiveCamera({
               autoPlay: true,
               playsInline: true,
               muted: true,
-              style: styles.media,
+              // §9.4 "mirrored preview" for the front camera; the capture isn't mirrored.
+              style: facing === 'user' ? { ...MEDIA_STYLE, transform: 'scaleX(-1)' } : MEDIA_STYLE,
             })}
             {facing === 'user' ? (
               <View

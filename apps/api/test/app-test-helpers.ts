@@ -19,7 +19,8 @@ import { __resetAuthPoliciesForTests } from '../src/auth/policy-rules.js';
 import { __resetNotificationPoliciesForTests } from '../src/notify/policy.js';
 import { __resetResidentPoliciesForTests } from '../src/residents/routes.js';
 import { __resetAdminPoliciesForTests } from '../src/admin/policy.js';
-import type { MediaStorage } from '../src/gate/media.js';
+import { assertMediaObject, type MediaObject, type MediaStorage } from '../src/gate/media.js';
+import { __resetMediaPoliciesForTests } from '../src/media/routes.js';
 import type {
   PushMessage,
   PushReceipt,
@@ -67,15 +68,20 @@ export function testEnv(overrides: Record<string, string> = {}) {
 
 /** Keeps uploaded bytes so signed media URLs can be fetched back. */
 export class MemoryMediaStorage implements MediaStorage {
+  /** Keyed "<bucket>/<path>". */
   readonly objects = new Map<string, Buffer>();
-  async put(path: string, bytes: Buffer): Promise<void> {
-    this.objects.set(path, bytes);
+  private key(o: MediaObject) {
+    assertMediaObject(o);
+    return `${o.bucket}/${o.path}`;
   }
-  async get(path: string): Promise<Buffer | null> {
-    return this.objects.get(path) ?? null;
+  async put(o: MediaObject, bytes: Buffer): Promise<void> {
+    this.objects.set(this.key(o), bytes);
   }
-  async delete(path: string): Promise<void> {
-    this.objects.delete(path);
+  async get(o: MediaObject): Promise<Buffer | null> {
+    return this.objects.get(this.key(o)) ?? null;
+  }
+  async delete(o: MediaObject): Promise<void> {
+    this.objects.delete(this.key(o));
   }
 }
 
@@ -135,6 +141,7 @@ export async function buildTestApp(
   __resetNotificationPoliciesForTests();
   __resetResidentPoliciesForTests();
   __resetAdminPoliciesForTests();
+  __resetMediaPoliciesForTests();
   registerVisitPolicies();
   registerGatePolicies();
   const env = testEnv(opts.env);

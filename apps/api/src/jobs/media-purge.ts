@@ -1,7 +1,7 @@
 import type { Kysely } from 'kysely';
 import type { Database } from '../db/index.js';
 import type { Logger } from '../lib/logger.js';
-import type { MediaStorage } from '../gate/media.js';
+import type { MediaBucket, MediaStorage } from '../gate/media.js';
 
 /**
  * SDD §11.8: "job_retention() sets media.delete_after ...; the API worker deletes the
@@ -18,7 +18,7 @@ export async function purgeDueMedia(p: {
 }): Promise<number> {
   const due = await p.db
     .selectFrom('haven.media')
-    .select(['id', 'path'])
+    .select(['id', 'bucket', 'path'])
     .where('deleted_at', 'is', null)
     .where('delete_after', 'is not', null)
     .where('delete_after', '<=', p.now)
@@ -29,7 +29,7 @@ export async function purgeDueMedia(p: {
   let deleted = 0;
   for (const row of due) {
     try {
-      await p.storage.delete(row.path);
+      await p.storage.delete({ bucket: row.bucket as MediaBucket, path: row.path });
       await p.db
         .updateTable('haven.media')
         .set({ deleted_at: p.now.toISOString() })

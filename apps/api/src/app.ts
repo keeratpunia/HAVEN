@@ -240,6 +240,25 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return;
     }
 
+    // Multipart limits (SDD §9.4 "max 3 MB"): @fastify/multipart throws its own 413
+    // error from file.toBuffer(). It's the client's photo, not our failure: §12.2's
+    // PHOTO_INVALID (400), never a 500.
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE' || err.code === 'FST_FILES_LIMIT') {
+      const tooLarge = new AppError('PHOTO_INVALID', 400, 'Photo is too large (max 3 MB).');
+      reply.status(400).send(toErrorEnvelope(tooLarge, request.id));
+      return;
+    }
+    if (
+      typeof err.code === 'string' &&
+      /^FST_(INVALID_MULTIPART|PARTS_LIMIT|FIELDS_LIMIT|PROTO_VIOLATION|NO_FORM_DATA)/.test(
+        err.code,
+      )
+    ) {
+      const invalid = new AppError('VALIDATION_FAILED', 400, 'Upload could not be read.');
+      reply.status(400).send(toErrorEnvelope(invalid, request.id));
+      return;
+    }
+
     if (err.statusCode === 429) {
       // @fastify/rate-limit throws its own error shape; map it to SDD §12.2's
       // RATE_LIMITED envelope instead of leaking the plugin's own message/format.

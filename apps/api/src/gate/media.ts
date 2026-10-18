@@ -1,5 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import type { Kysely } from 'kysely';
@@ -25,34 +25,74 @@ import type { Clock } from '../lib/clock.js';
 export const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
 const MAX_DIMENSION = 720;
 const JPEG_QUALITY = 80;
+/**
+ * Decoding limit: a 3 MB PNG can declare an enormous canvas and exhaust memory when
+ * decoded. 40 megapixels is above any phone camera's live frame; the client sends 720 px.
+ */
+export const MAX_INPUT_PIXELS = 40_000_000;
 
-export interface MediaStorage {
-  put(path: string, bytes: Buffer): Promise<void>;
-  /** Null when the object doesn't exist (deleted by retention, or never stored). */
-  get(path: string): Promise<Buffer | null>;
-  /** Removes the object; deleting one that's already gone is not an error. */
-  delete(path: string): Promise<void>;
+/** The three private buckets of SDD §9.10. */
+export const MEDIA_BUCKETS = ['visitor-photos', 'gate-photos', 'resident-docs'] as const;
+export type MediaBucket = (typeof MEDIA_BUCKETS)[number];
+
+/** One stored object, addressed exactly like Supabase Storage: bucket + path in it. */
+export interface MediaObject {
+  bucket: MediaBucket;
+  path: string;
 }
 
-export class LocalDiskMediaStorage implements MediaStorage {
-  constructor(private readonly rootDir: string) {}
+export interface MediaStorage {
+  put(object: MediaObject, bytes: Buffer): Promise<void>;
+  /** Null when the object doesn't exist (deleted by retention, or never stored). */
+  get(object: MediaObject): Promise<Buffer | null>;
+  /** Removes the object; deleting one that's already gone is not an error. */
+  delete(object: MediaObject): Promise<void>;
+}
 
-  async put(path: string, bytes: Buffer): Promise<void> {
-    const fullPath = join(this.rootDir, path);
+// Paths are built from UUIDs (§9.10), so only these characters ever appear.
+const SAFE_PATH = /^[A-Za-z0-9-]+(?:\/[A-Za-z0-9-]+)*\.jpg$/;
+
+/** Rejects anything that isn't a §9.10 bucket and a plain path inside it. */
+export function assertMediaObject(object: MediaObject): void {
+  if (
+    !(MEDIA_BUCKETS as readonly string[]).includes(object.bucket) ||
+    !SAFE_PATH.test(object.path)
+  ) {
+    throw new Error('invalid media object');
+  }
+}
+
+/** Local stand-in for Supabase Storage: `<root>/<bucket>/<path>`, never outside root. */
+export class LocalDiskMediaStorage implements MediaStorage {
+  private readonly root: string;
+
+  constructor(rootDir: string) {
+    this.root = resolve(rootDir);
+  }
+
+  private fullPath(object: MediaObject): string {
+    assertMediaObject(object);
+    const full = resolve(this.root, object.bucket, object.path);
+    if (!full.startsWith(this.root + sep)) throw new Error('invalid media object');
+    return full;
+  }
+
+  async put(object: MediaObject, bytes: Buffer): Promise<void> {
+    const fullPath = this.fullPath(object);
     await mkdir(dirname(fullPath), { recursive: true });
     await writeFile(fullPath, bytes);
   }
 
-  async get(path: string): Promise<Buffer | null> {
+  async get(object: MediaObject): Promise<Buffer | null> {
     try {
-      return await readFile(join(this.rootDir, path));
+      return await readFile(this.fullPath(object));
     } catch {
       return null;
     }
   }
 
-  async delete(path: string): Promise<void> {
-    await rm(join(this.rootDir, path), { force: true });
+  async delete(object: MediaObject): Promise<void> {
+    await rm(this.fullPath(object), { force: true });
   }
 }
 
@@ -103,7 +143,7 @@ async function processPhotoBytes(raw: Buffer): Promise<Buffer> {
   }
 
   try {
-    return await sharp(raw)
+    return await sharp(raw, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' })
       .rotate() // auto-orient from EXIF, then strip all metadata (no .withMetadata() call)
       .resize({
         width: MAX_DIMENSION,
@@ -124,7 +164,7 @@ export interface StorePhotoParams {
   clock: Clock;
   raw: Buffer;
   kind: MediaKind;
-  bucket: string;
+  bucket: MediaBucket;
   path: (mediaId: string, now: Date) => string;
   ownerVisitorId?: string | null;
   ownerUserId?: string | null;
@@ -167,7 +207,7 @@ async function storePhoto(params: StorePhotoParams): Promise<{ photoId: string }
     .returning('id')
     .executeTakeFirstOrThrow();
 
-  await params.storage.put(path, processed);
+  await params.storage.put({ bucket: params.bucket, path }, processed);
 
   return { photoId: inserted.id };
 }
@@ -260,11 +300,11 @@ export async function deleteMedia(params: {
 }): Promise<void> {
   const row = await params.db
     .selectFrom('haven.media')
-    .select(['path', 'deleted_at'])
+    .select(['bucket', 'path', 'deleted_at'])
     .where('id', '=', params.mediaId)
     .executeTakeFirst();
   if (!row || row.deleted_at) return;
-  await params.storage.delete(row.path);
+  await params.storage.delete({ bucket: row.bucket as MediaBucket, path: row.path });
   await params.db
     .updateTable('haven.media')
     .set({ deleted_at: params.clock.now().toISOString() })

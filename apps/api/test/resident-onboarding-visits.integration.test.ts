@@ -634,7 +634,7 @@ describe('visit history and detail (FR-16) with authorization boundaries', () =>
       })
       .returning('id')
       .executeTakeFirstOrThrow();
-    await media.put(`${visitorId}/p.jpg`, bytes);
+    await media.put({ bucket: 'visitor-photos', path: `${visitorId}/p.jpg` }, bytes);
     void hostelId;
 
     const { MediaUrlSigner } = await import('../src/media/signing.js');

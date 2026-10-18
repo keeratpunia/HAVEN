@@ -451,7 +451,7 @@ describe('staff actions and their effects', () => {
     );
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ status: 'verified', idCardPhoto: null });
-    expect(storage.objects.has(r.cardPath)).toBe(false);
+    expect(storage.objects.has(`resident-docs/${r.cardPath}`)).toBe(false);
     const media = await db
       .selectFrom('haven.media')
       .select('deleted_at')
@@ -494,7 +494,7 @@ describe('staff actions and their effects', () => {
       A.hostelId,
     ).send({ reason: 'ID card unreadable' });
     expect(res.body).toMatchObject({ status: 'rejected', rejectionReason: 'ID card unreadable' });
-    expect(storage.objects.has(r.cardPath)).toBe(false);
+    expect(storage.objects.has(`resident-docs/${r.cardPath}`)).toBe(false);
     const n = await db
       .selectFrom('haven.notifications')
       .select(['title', 'body'])
