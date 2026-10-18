@@ -740,6 +740,33 @@ What changed, by finding:
 notification list on the web (not in W-01..W-12); a Playwright test of the guest's
 expired-walk-in screen; the proposed deletion copy awaits approval.
 
+## 0m. Media verification and security audit (2026-10-19)
+
+**Part 0** (DEC-016):
+- the account-deletion copy is approved;
+- FR-60's daily digest is built (N-DIGEST, a team-approved catalogue addition);
+- the overstay SMS keeps the §15.3 DLT text (§15.2 to be corrected);
+- SMS recipient phones are nulled after 90 days.
+
+**Media** (§9.4, §9.10), checked line by line and fixed where it differed:
+- storage is addressed by bucket and path;
+- an upload over 3 MB returned 500 and is now `PHOTO_INVALID`;
+- decoding is capped at 40 MP;
+- a path-traversal guard was added;
+- the media route goes through `authorize()`;
+- web capture uses §9.4's ideal 720 px constraints and a mirrored preview.
+
+Tests: `apps/api/test/media.integration.test.ts` (11).
+
+**Security audit:** `docs/SECURITY-AUDIT.md`, written before fixing.
+- Found: 3 HIGH, 10 MEDIUM, 10 LOW, 7 INFO.
+- Fixed: every HIGH; every MEDIUM except SA-12 (web CSP, needs a decision); 4 LOW.
+- Decisions recorded in DEC-017.
+- Sentry is wired (API and web).
+- Turnstile is implemented behind `BotVerifier` (API and web).
+- Regression tests: `apps/api/test/security.integration.test.ts` (23). 17 of its first
+  20 fail on the pre-fix code.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -776,8 +803,8 @@ expired-walk-in screen; the proposed deletion copy awaits approval.
 | FR-21 | M | Scanning QR opens guest web app; requests location, validates token + GPS first | `apps/api/src/gate/token.ts`/`scanSessions.ts`/`geofence.ts`, `POST /v1/scan-sessions`, `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/src/gate/token.test.ts`, `geofence.test.ts`, `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-errors.spec.ts` | Done — **accepted deviation (DEC-013):** a first-time guest who signs up mid-scan must scan once more (SDD §9.3/F2 say no re-scan); they get the "You're signed in — scan once more" screen, tested in `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` (DEC-013 test) |
 | FR-22 | S | Guest app offers an in-app scanner on home screen | — | — | — |
 | FR-23 | M | App offers Check in / Check out / Request entry based on visit state | `GET /v1/scan-sessions/:id` (`gate/routes.ts`), `apps/mobile/app/(guest)/g/[token].tsx` | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/golden-path.spec.ts` + `gate-retry-and-walkin.spec.ts` | Done |
-| FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | `apps/mobile/components/LiveCamera.tsx`, `apps/api/src/gate/media.ts` (`storeGatePhoto`/`storeVisitorProfilePhoto`) | `apps/api/test/gate-routes.integration.test.ts` (photo upload, dedup), `apps/mobile/e2e` suite (fake camera device) | Done — live-only capture is enforced and every captured photo (profile and gate) is now actually processed and persisted, closing the DEC-009 gap |
-| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) + `POST /v1/scan-sessions/:id/walk-in` (`gate/routes.ts`) + `apps/mobile/app/(guest)/g/[token].tsx`'s `find_host`/`visit_type` phases | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done — accepted deviation DEC-013: a first-time walk-in who signs up mid-scan scans the QR once more |
+| FR-24 | M | Check-in/out capture live front-camera photo; no file picker ever | `apps/mobile/components/LiveCamera.tsx`, `apps/api/src/gate/media.ts` (`storeGatePhoto`/`storeVisitorProfilePhoto`) | `apps/api/test/gate-routes.integration.test.ts` (photo upload, dedup), `apps/mobile/e2e` suite (fake camera device) | Done — live-only capture is enforced and every captured photo (profile and gate) is now actually processed and persisted, closing the DEC-009 gap Verified against §9.4/§9.10 in the security milestone: bucket-addressed storage, 3 MB → `PHOTO_INVALID` (was 500), 40 MP decode cap, traversal guard, mirrored preview and ideal 720 px capture (`apps/api/test/media.integration.test.ts`). |
+| FR-25 | M | Walk-in: room search, pick resident, visit type, duration, live photo, submit | `createWalkIn` (`visits/service.ts`) + `POST /v1/scan-sessions/:id/walk-in` (`gate/routes.ts`) + `apps/mobile/app/(guest)/g/[token].tsx`'s `find_host`/`visit_type` phases | `apps/api/test/gate-routes.integration.test.ts`, `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done — accepted deviation DEC-013: a first-time walk-in who signs up mid-scan scans the QR once more Room search is now SDD §12.7 `GET /hostels/{id}/rooms/{number}/residents` (live scan session, display names, 10/min; SECURITY-AUDIT SA-01, `apps/api/test/security.integration.test.ts`). |
 | FR-26 | M | Guest waits on live status screen; approval flips to green without re-scan | `apps/mobile/app/(guest)/g/[token].tsx`'s `waiting_for_host` phase (3s poll of `GET /v1/visits/{id}`, `Cancel request` via `POST /v1/me/visits/{id}/cancel`) | `apps/mobile/e2e/tests/resident-app.spec.ts` (approval turns the guest screen green without reload; reject) | Done |
 | FR-27 | M | 3x GPS failure or permission denied → host-confirm fallback | `apps/mobile/app/(guest)/g/[token].tsx` (3-attempt retry, then "Ask host to confirm"), gate check-in route's `awaiting_host_confirmation` short-circuit | `apps/api/test/gate-routes.integration.test.ts` ("awaiting_host_confirmation"), `apps/mobile/e2e/tests/gate-retry-and-walkin.spec.ts` | Done |
 | FR-28 | M | Host-assisted entry: host scans QR, enters guest details, photographs, checks in/out | `POST /v1/scan-sessions/:id/host-assisted-entry`/`-exit` ★ (now runs `evaluateEntry`, records real GPS facts); R-12 `apps/mobile/app/(resident)/assist.tsx` (web QR via `@zxing/browser`, native via expo-camera; native GPS refuses mock location) | `apps/api/test/gate-routes.integration.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts` (GPS facts, no N-LEFT to self, AFTER_ENTRY_CUTOFF) | WIP — API fully tested; the R-12 screen has no e2e test (the fake camera can't show a QR) and the native path hasn't run |
@@ -832,13 +859,13 @@ expired-walk-in screen; the proposed deletion copy awaits approval.
 | NFR-04 | Freshness | Warden dashboard reflects visit change within 5s | — | — | — |
 | NFR-05 | Availability | API 99.5% between 07:00–23:00 IST during pilot | — | — | — |
 | NFR-06 | Capacity | 50 scans/min/gate burst; 1,000 visits/day/hostel without changes | — | — | — |
-| NFR-07 | Security | All §16.4 controls in place before real data loaded | — | — | — |
+| NFR-07 | Security | All §16.4 controls in place before real data loaded | Independent audit `docs/SECURITY-AUDIT.md` (SA-01..SA-30) and fixes (DEC-017) | `apps/api/test/security.integration.test.ts` (23), `apps/api/test/media.integration.test.ts` (11) | WIP — every HIGH and MEDIUM fixed except SA-12 (web CSP/HSTS needs the hosting and API-domain decision); the people/process rows (two owners, MFA) are a Week 0 checklist, not code |
 | NFR-08 | Privacy | Retention schedule §16.5 enforced automatically | JobRunner / pg_cron run `job_retention` daily and the media purge hourly | `apps/api/test/retention.integration.test.ts` | Done |
 | NFR-09 | Usability | Returning guest ≤30s/≤4 taps; first-time guest ≤3 min | — | — | — |
 | NFR-10 | Compatibility | Guest web: Chrome 100+/Android 9+, Safari iOS 15+, Samsung Internet 18+; app Android 9+ | — | — | — |
 | NFR-11 | Accessibility | WCAG 2.1 AA for guest web; text scales to 200% | — | — | — |
 | NFR-12 | Maintainability | Rules engine 100% branch coverage; API services ≥70% line coverage; no `any` | `packages/shared/vitest.config.ts` (coverage thresholds), `eslint.config.mjs` (`no-explicit-any` across every workspace) | `pnpm --filter shared test:coverage` — 100% branches/statements/functions/lines, verified | WIP — the rules-engine coverage bar and the no-`any` lint rule are both genuinely met and enforced; API services' ≥70% line coverage isn't tracked/enforced anywhere yet (no coverage config in `apps/api`) |
-| NFR-13 | Observability | Every request has a request ID; errors reach Sentry within 1 min | `apps/api/src/lib/request-id.ts`, wired into every request/error envelope via `apps/api/src/app.ts` | `test/app.test.ts` ("unknown routes return the SDD §12.1 error envelope with a request id") | WIP — the request-ID half is genuinely done and tested on every response, including errors; Sentry is not integrated, so "errors reach Sentry within 1 min" is not satisfied |
+| NFR-13 | Observability | Every request has a request ID; errors reach Sentry within 1 min | `apps/api/src/lib/request-id.ts`; Sentry: `apps/api/src/lib/error-reporter.ts` (500s, failed notifications, failed jobs), `apps/mobile/lib/sentry.ts` (web), scrubbed by `packages/shared/src/scrub.ts` | `test/app.test.ts`, `apps/api/test/security.integration.test.ts` (SA-13), `packages/shared/src/scrub.test.ts` | WIP — wired and tested with a fake; not yet exercised against a real Sentry project, and the Android build is a no-op |
 | NFR-14 | Cost | ≤ ₹1,500/month during pilot | — | — | — |
 
 ## 3. Business rules (BR-xx) — SDD §4.2
@@ -965,18 +992,18 @@ expired-walk-in screen; the proposed deletion copy awaits approval.
 | TC-SEC-07 | `UPDATE haven.gate_events` as `haven_api` | permission error | `supabase/tests/004_api_role_and_rls.sql` | Done |
 | TC-SEC-08 | Audit row for a visit update | contains no `invited_phone`, `invited_name` | `supabase/tests/003_audit_pii_stripping.sql` | Done — the test exercises the shared `audit_row()` trigger via `haven.gates` (lat/lng) rather than a literal visit update, because no audit trigger is attached to `haven.users` and a *visit* update needs API-level `evaluateEntry`/state-machine code that doesn't exist yet to reach meaningfully; the strip-list (`invited_phone`, `invited_name` included) is the same function for every audited table, so this proves the mechanism TC-SEC-08 is about |
 | TC-SEC-09 | 4th OTP request in 10 min for one phone | `RATE_LIMITED` | `test/otp-service.integration.test.ts` | Done — rate limiting only; Turnstile gating (CLAUDE.md §4) not implemented, see §0e |
-| TC-SEC-10 | Upload a PNG with EXIF GPS | stored file has no EXIF | — | — |
-| TC-SEC-11 | Same photo bytes uploaded twice by one visitor | `PHOTO_REUSED` | — | — |
+| TC-SEC-10 | Upload a PNG with EXIF GPS | stored file has no EXIF | `apps/api/test/media.integration.test.ts` ("strips EXIF, including GPS", "accepts a PNG ... re-encoded as JPEG") | Done |
+| TC-SEC-11 | Same photo bytes uploaded twice by one visitor | `PHOTO_REUSED` | `apps/api/test/media.integration.test.ts` ("PHOTO_REUSED") | Done |
 
 ## 6. Coverage summary (update when rows change)
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
 | FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 40 (FR-01, FR-04, FR-05, FR-07, FR-09, FR-10..16, FR-21, FR-23..27, FR-29, FR-40..45, FR-50..55, FR-57..60, FR-70..73, FR-75) | 8 (FR-02, FR-03, FR-06, FR-20, FR-28, FR-30, FR-56, FR-74) | 2 (FR-08, FR-22) | 0 |
-| NFR | 14 | 1 (NFR-08) | 2 (NFR-12, NFR-13) | 11 | 0 |
+| NFR | 14 | 1 (NFR-08) | 3 (NFR-07, NFR-12, NFR-13) | 10 | 0 |
 | BR | 20 | 7 (BR-08, BR-10, BR-12, BR-13, BR-14, BR-15, BR-18) | 13 (BR-01..07, 09, 11, 16, 17, 19, 20) | 0 | 0 |
 | E | 24 | 7 (E-11, E-12, E-13, E-18, E-19, E-21, E-22) | 5 (E-01, E-14, E-17, E-23, E-24) | 12 | 0 |
-| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 40 (TC-RULE ×16, TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09, TC-JOB-01/02, TC-SEC-01..09) | 1 (TC-FLOW-04) | 10 | 0 |
+| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 42 (TC-RULE ×16, TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09, TC-JOB-01/02, TC-SEC-01..11) | 1 (TC-FLOW-04) | 8 | 0 |
 
 Corrected during the rules-engine milestone: this table had silently gone stale after
 the API-foundation milestone set NFR-13 to WIP without updating the summary row —

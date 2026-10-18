@@ -1287,6 +1287,78 @@ Source for all of Part 1: SDD §2.7.
   (§15.2 gains N-DIGEST; §15.2's N-OVERSTAY-GUEST text changes to the §15.3 template).
   The deletion copy becomes §13.6 text at the next revision.
 
+### DEC-017 — Security audit fixes: choices made, and items left for the team
+
+- **Date:** 2026-10-19
+- **Context:** The independent audit in `docs/SECURITY-AUDIT.md` (SA-01..SA-30). The
+  CRITICAL, HIGH and MEDIUM implementation defects were fixed. Where a fix needed a
+  choice the SDD doesn't make, the more restrictive one was taken and recorded here.
+  Anything that changes SDD behaviour was not changed; it's listed at the end.
+- **Decision:**
+  1. **Room search follows §12.7 exactly**
+     (`GET /v1/hostels/{id}/rooms/{number}/residents`, display names, 10/min).
+     - It also requires the session's `X-Scan-Nonce`, in addition to
+       `X-Scan-Session`, and that the session is bound to the caller and at a gate of
+       that hostel. §12.7 names only the session header; the nonce is what proves the
+       session is the caller's (§9.3 "Binding").
+     - The guest app now uses the session's hostel instead of the first hostel in
+       `GET /hostels`.
+  2. **`APP_ENV` has no default**, in the API and the seed script. Every environment
+     must say what it is. `.env.example` keeps `APP_ENV=local`.
+  3. **OTP CAPTCHA (T10).**
+     - From the 4th request in the per-IP hour a passed Cloudflare Turnstile token is
+       required.
+     - Refusals are `429 RATE_LIMITED` with `details.reason: 'CAPTCHA_REQUIRED'`.
+       §12.2 has no CAPTCHA code, so none was invented.
+     - The bypass verifier exists only for `APP_ENV=local`. Staging and production
+       refuse to boot without `TURNSTILE_SECRET`. The verifier fails closed when
+       Cloudflare is unreachable.
+     - The Android app has no widget; it shows the API's message (residents verify a
+       phone once; guests use the web).
+  4. **Concurrency on OTP.**
+     - Requests take transaction-scoped advisory locks per phone, then per IP (fixed
+       order, so they can't deadlock).
+     - Verification reserves an attempt atomically before comparing.
+     - A correct code that loses a race to another correct submission gets
+       `OTP_INVALID` ("one code, one sign-in").
+  5. **Proxy trust.** `TRUST_PROXY_HOPS` (default 0) decides whether
+     `X-Forwarded-For` is believed. Production sets it to the number of proxies in
+     front of the API.
+  6. **Logs.**
+     - The request serializer logs method, path (query string replaced by
+       `?[redacted]`, invite tokens masked), host and client IP. No headers or bodies.
+     - The console OTP line masks the phone; §9.5's "prints codes to the API log" is
+       kept.
+  7. **Reads of resident ID documents** are audited as `read.resident_documents`, one
+     row per list response that contained any ID-card or selfie URL (T15).
+  8. **Uploads.**
+     - JSON bodies are capped at 64 KB (§16.4); multipart keeps its 3 MB file limit.
+     - Decoding is capped at 40 MP.
+     - An oversized upload is `PHOTO_INVALID` (400), no longer a 500.
+  9. **Media storage** addresses objects by the §9.10 bucket and path. The local
+     store writes `<root>/<bucket>/<path>` and refuses anything else.
+  10. **Sentry (§8.4, NFR-13).**
+      - It runs in the API and the web app only when a DSN is set.
+      - No default integrations, no breadcrumbs, no user, IP, headers, cookies, bodies
+        or query strings.
+      - Every string is scrubbed by `scrubSentryEvent` in `@haven/shared` (the §16.4
+        list plus phones, JWTs, emails and query credentials). Error codes and stack
+        frames are kept.
+      - The Android build is a no-op until the React Native SDK and a native build
+        are possible.
+  11. **Dependency upgrade:** `sharp` 0.33.5 → 0.35.5 (dedicated commit, CLAUDE.md §5).
+- **Left for the team (not changed):**
+  - **SA-12, web security headers.** These need the hosting choice and the
+    production API domain for `connect-src`. A proposed `vercel.json` is in
+    SECURITY-AUDIT.md.
+  - **SA-24, the test OTP.** §9.5 allows the test phones in any non-production
+    environment, including staging. The brief asked for development only; that is an
+    SDD change. After SA-02 it can't be enabled by accident, and it never works with
+    `APP_ENV=production`.
+  - **SA-15, SA-17, SA-19, SA-23.** LOW items: accept or schedule.
+- **SDD updated?** No. Items 1, 3 and 10 should be reflected in §12.7, §12.2 and §8.4
+  at the next revision.
+
 Template for a new entry:
 
 ```markdown

@@ -36,28 +36,28 @@ the end.
 
 | ID | Sev | Finding | Status |
 |---|---|---|---|
-| SA-01 | HIGH | `GET /v1/rooms/search` is public and returns residents' full names and user ids for any room: the whole hostel can be enumerated without signing in | To fix |
-| SA-02 | HIGH | `APP_ENV` defaults to `local`. A deploy that forgets it accepts `123456` for the test phones, allows console SMS, and drops `Secure` and `Domain` from the refresh cookie. The seed script would add fake residents | To fix |
-| SA-03 | HIGH | `sharp` 0.33.5 (libvips/libheif/librsvg CVEs) decodes every untrusted upload | To fix |
-| SA-04 | MEDIUM | OTP verify reads, then increments, the attempt counter, so parallel guesses beat the 5-attempt limit | To fix |
-| SA-05 | MEDIUM | OTP request counts, then inserts, so parallel requests beat 3/phone and 10/IP (SMS pumping, T10) | To fix |
-| SA-06 | MEDIUM | §12.11's `POST /auth/otp/verify` limit (10 per IP per 10 min) is missing | To fix |
-| SA-07 | MEDIUM | No CAPTCHA (Cloudflare Turnstile) after 3 OTP requests from one IP (T10, CLAUDE.md §4) | To fix |
-| SA-08 | MEDIUM | Request URLs are logged raw: invite tokens, media signatures, and phone numbers typed into the warden's search | To fix |
-| SA-09 | MEDIUM | No 64 KB JSON body limit (§16.4 Input); Fastify's default is 1 MB | To fix |
-| SA-10 | MEDIUM | Behind the hosting proxy every client shares the proxy's IP, so per-IP limits apply to everyone at once | To fix |
-| SA-11 | MEDIUM | Reading residents' ID-card and selfie photos (W-04/W-08) writes no `read.*` audit row (T15) | To fix |
+| SA-01 | HIGH | `GET /v1/rooms/search` is public and returns residents' full names and user ids for any room: the whole hostel can be enumerated without signing in | Fixed `782a8cc` |
+| SA-02 | HIGH | `APP_ENV` defaults to `local`. A deploy that forgets it accepts `123456` for the test phones, allows console SMS, and drops `Secure` and `Domain` from the refresh cookie. The seed script would add fake residents | Fixed `782a8cc` |
+| SA-03 | HIGH | `sharp` 0.33.5 (libvips/libheif/librsvg CVEs) decodes every untrusted upload | Fixed `c050861` |
+| SA-04 | MEDIUM | OTP verify reads, then increments, the attempt counter, so parallel guesses beat the 5-attempt limit | Fixed `782a8cc` |
+| SA-05 | MEDIUM | OTP request counts, then inserts, so parallel requests beat 3/phone and 10/IP (SMS pumping, T10) | Fixed `782a8cc` |
+| SA-06 | MEDIUM | §12.11's `POST /auth/otp/verify` limit (10 per IP per 10 min) is missing | Fixed `782a8cc` |
+| SA-07 | MEDIUM | No CAPTCHA (Cloudflare Turnstile) after 3 OTP requests from one IP (T10, CLAUDE.md §4) | Fixed `782a8cc` (API), `9a57d52` (web) |
+| SA-08 | MEDIUM | Request URLs are logged raw: invite tokens, media signatures, and phone numbers typed into the warden's search | Fixed `782a8cc` |
+| SA-09 | MEDIUM | No 64 KB JSON body limit (§16.4 Input); Fastify's default is 1 MB | Fixed `782a8cc` |
+| SA-10 | MEDIUM | Behind the hosting proxy every client shares the proxy's IP, so per-IP limits apply to everyone at once | Fixed `782a8cc` (config; set per environment) |
+| SA-11 | MEDIUM | Reading residents' ID-card and selfie photos (W-04/W-08) writes no `read.*` audit row (T15) | Fixed `782a8cc` |
 | SA-12 | MEDIUM | The web app has no CSP / `frame-ancestors` / HSTS headers configured anywhere (§16.4 Headers) | **Open — needs your decision** |
-| SA-13 | MEDIUM | Sentry is not wired (NFR-13, §9.7 "logged to Sentry") | To fix |
-| SA-14 | LOW | The console OTP line logs the full phone number (§16.4: phones masked only) | To fix |
+| SA-13 | MEDIUM | Sentry is not wired (NFR-13, §9.7 "logged to Sentry") | Fixed `91b0218` (API + web; Android no-op) |
+| SA-14 | LOW | The console OTP line logs the full phone number (§16.4: phones masked only) | Fixed `782a8cc` |
 | SA-15 | LOW | Some handlers enforce access by principal type or scan-session binding, not `authorize()` (CLAUDE.md §3.10 consistency) | Open (recommendation) |
-| SA-16 | LOW | Access-token verification doesn't pin the HS256 algorithm | To fix |
+| SA-16 | LOW | Access-token verification doesn't pin the HS256 algorithm | Fixed `782a8cc` |
 | SA-17 | LOW | PHOTO_REUSED is check-then-insert (a race lets two identical uploads through) | Open |
 | SA-18 | LOW | Registering a push token another user holds moves it to the caller | Open (by design) |
 | SA-19 | LOW | `X-Client: native` makes `/auth/refresh` return the refresh token in JSON on the web too, so XSS could read it | Open |
-| SA-20 | LOW | CORS config accepts a `*` entry | To fix |
-| SA-21 | LOW | Phone-verifying a number another user owns returns 500, not 409 | To fix |
-| SA-22 | LOW | Warden search uses ILIKE without escaping `%` and `_` (wider matches only) | To fix |
+| SA-20 | LOW | CORS config accepts a `*` entry | Fixed `782a8cc` |
+| SA-21 | LOW | Phone-verifying a number another user owns returns 500, not 409 | Fixed `782a8cc` |
+| SA-22 | LOW | Warden search uses ILIKE without escaping `%` and `_` (wider matches only) | Not an issue: both searches already escape `\ % _` (false positive) |
 | SA-23 | LOW | Dev-tooling advisories (braces, node-forge, sprintf-js, decode-uri-component, uuid) via Expo/Metro/Jest; `pnpm audit` fails at high | Open |
 | SA-24 | INFO | The test OTP is enabled in staging by SDD design (§9.5 "non-production"); you asked it to be development-only | **Open — needs your decision** |
 | SA-25 | INFO | The gate secret lives in the gate browser's localStorage (§9.2 design) | Accepted |
@@ -65,7 +65,7 @@ the end.
 | SA-27 | INFO | CSRF: bearer tokens everywhere except the refresh cookie (SameSite=Lax, POST) | OK |
 | SA-28 | INFO | SQL: Kysely and parameterised `pg` only; the one `format('%I')` iterates `pg_tables` | OK |
 | SA-29 | INFO | SSRF: no user-controlled outbound URL | OK |
-| SA-30 | INFO | The dev sign-in is refused at boot unless `NODE_ENV=development`, but no test proved it | To fix |
+| SA-30 | INFO | The dev sign-in is refused at boot unless `NODE_ENV=development`, but no test proved it | Fixed (tests) `782a8cc` |
 | SA-M1..M4 | MEDIUM/LOW | Media (found and fixed in the Part 1 media review): 3 MB+ upload gave 500; no pixel limit; no traversal guard; the media route skipped `authorize()` | Fixed in `0bc7c3f` |
 
 **Totals.** 3 HIGH, 10 MEDIUM, 10 LOW and 7 INFO, plus 4 media findings already
@@ -326,4 +326,38 @@ fixed.
 
 ## Final status
 
-Filled in after the fixes; see the end of this document.
+| Severity | Found | Fixed | Open | Open items |
+|---|---|---|---|---|
+| CRITICAL | 0 | 0 | 0 | — |
+| HIGH | 3 | 3 | 0 | — |
+| MEDIUM | 10 | 9 | 1 | SA-12 web CSP/HSTS (needs the hosting and API-domain decision) |
+| LOW | 10 | 4 (+1 false positive) | 5 | SA-15 authorize() consistency, SA-17 reuse race, SA-18 token takeover (by design), SA-19 body refresh token on web, SA-23 dev-tooling advisories |
+| INFO | 7 | 1 (tests) | 1 decision | SA-24 test OTP in staging (SDD §9.5 vs your brief) |
+| Media (Part 1) | 4 | 4 | 0 | — |
+
+**Proof the regression tests are real.**
+`apps/api/test/security.integration.test.ts` has 23 tests. Its first 20 were run
+against the source as it was before the fixes (stashed sources, same tests):
+- 17 failed;
+- the 3 that passed are the SA-30 gating proofs, which describe behaviour that was
+  already correct.
+
+All 23 pass with the fixes.
+
+**Other tests added for this audit:**
+- `apps/api/test/media.integration.test.ts` (11);
+- `apps/api/src/config.test.ts` (+4);
+- `apps/api/src/lib/logger.test.ts` (+1, and 3 updated: the request serializer now
+  drops headers and bodies entirely, so they assert absence);
+- `packages/shared/src/scrub.test.ts` (3).
+
+**`pnpm audit` after the fixes:** 2 high (`braces`, `node-forge`) and 3 moderate.
+All are in Expo/Metro/Jest dev tooling, with no patched versions for the two highs
+(SA-23).
+
+**Deployment checklist these fixes add** (each fails closed if left unset):
+- set `APP_ENV` explicitly;
+- set `TURNSTILE_SECRET` (staging and production refuse to boot without it);
+- set `TRUST_PROXY_HOPS` to the number of proxies in front of the API (Render: 1);
+- set `SENTRY_DSN` and `EXPO_PUBLIC_SENTRY_DSN`, plus `EXPO_PUBLIC_TURNSTILE_SITE_KEY`
+  for the web build.
