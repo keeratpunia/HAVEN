@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import { Button } from './Button.js';
@@ -28,6 +28,10 @@ export function ConfirmSheet({
   loading?: boolean;
 }) {
   const [reason, setReason] = useState('');
+  // Each opening starts empty, so a reason typed for one action never carries over.
+  useEffect(() => {
+    if (visible) setReason('');
+  }, [visible]);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
       <Pressable style={styles.backdrop} onPress={onCancel} accessibilityLabel="Close" />

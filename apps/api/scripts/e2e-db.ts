@@ -11,10 +11,11 @@
  * see docs/DECISIONS.md DEC-004/DEC-007/DEC-009). Stays running in the foreground
  * until killed; prints the DATABASE_URL to use.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
+import sharp from 'sharp';
 import { encryptAesGcm, parseDataEncryptionKey, sha256 } from '../src/lib/crypto.js';
 import {
   E2E_DATABASE_URL,
@@ -213,6 +214,101 @@ async function main() {
     `insert into haven.users (google_sub, email, full_name, is_active)
      values ('e2e-newcomer', 'e2e-newcomer@haven.test', 'Neha Gill', true)
      on conflict (google_sub) do nothing`,
+  );
+
+  // ---- Warden and office specs (apps/mobile/e2e/tests/warden-office.spec.ts) ----
+  const staffUser = async (sub: string, email: string, name: string, role: 'warden' | 'office') => {
+    const u = await client.query<{ id: string }>(
+      `insert into haven.users (google_sub, email, full_name, is_active) values ($1, $2, $3, true)
+       on conflict (google_sub) do update set full_name = excluded.full_name returning id`,
+      [sub, email, name],
+    );
+    await client.query(
+      `insert into haven.role_assignments (user_id, hostel_id, role) values ($1, $2, $3)
+       on conflict do nothing`,
+      [u.rows[0].id, hostelId, role],
+    );
+  };
+  await staffUser('e2e-warden', 'e2e-warden@haven.test', 'Meera Warden', 'warden');
+  await staffUser('e2e-office', 'e2e-office@haven.test', 'Omar Office', 'office');
+
+  // A resident waiting for verification, with real (tiny) ID card and selfie files so
+  // W-04 can show the photos through signed URLs.
+  const mediaRoot = path.join(process.cwd(), '.e2e-media');
+  const pendingUser = await client.query<{ id: string }>(
+    `insert into haven.users (google_sub, email, full_name, phone, phone_verified_at, is_active)
+     values ('e2e-pending', 'e2e-pending@haven.test', 'Kiran Pending', '+919999911102', now(), true)
+     on conflict (google_sub) do update set full_name = excluded.full_name returning id`,
+  );
+  const pendingId = pendingUser.rows[0].id;
+  const docIds: string[] = [];
+  for (const [kind, shade] of [
+    ['resident_id_card', 120],
+    ['resident_selfie', 200],
+  ] as const) {
+    const bytes = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: { r: shade, g: 90, b: 60 } },
+    })
+      .jpeg()
+      .toBuffer();
+    const mediaPath = `${pendingId}/${kind}.jpg`;
+    mkdirSync(path.dirname(path.join(mediaRoot, mediaPath)), { recursive: true });
+    writeFileSync(path.join(mediaRoot, mediaPath), bytes);
+    const m = await client.query<{ id: string }>(
+      `insert into haven.media (kind, bucket, path, sha256, bytes, owner_user_id)
+       values ($1, 'resident-docs', $2, $3, $4, $5)
+       on conflict (path) do update set deleted_at = null returning id`,
+      [kind, mediaPath, sha256(bytes), bytes.length, pendingId],
+    );
+    docIds.push(m.rows[0].id);
+  }
+  await client.query(
+    `insert into haven.residents (user_id, hostel_id, claimed_room, status, id_card_media_id, selfie_media_id, submitted_at)
+     values ($1, $2, '102', 'pending', $3, $4, now())
+     on conflict (user_id) do update set status = 'pending', id_card_media_id = excluded.id_card_media_id`,
+    [pendingId, hostelId, docIds[0], docIds[1]],
+  );
+
+  // An overnight request waiting for the warden (F6 step 4), host Priya.
+  await client.query(`delete from haven.visits where code in ('VE2E004','VE2E005','VE2E006')`);
+  const arrival = new Date(E2E_FIXED_NOW.getTime() + 2 * 86_400_000);
+  arrival.setUTCHours(2, 30, 0, 0); // 08:00 IST
+  const departure = new Date(arrival.getTime() + 2 * 86_400_000 + 4 * 3_600_000); // 12:00 IST, 2 nights
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, invited_name, invited_phone, invited_gender, type, status, origin, zone,
+        window_start, window_end, nights, rules_version, created_by_type, created_by_id)
+     values ('VE2E004', $1, $2, 'Overnight Cousin', '+919812300099', 'female', 'overnight_room', 'pending_warden',
+             'overnight_request', 'room', $3, $4, 2, 1, 'user', $2)`,
+    [hostelId, hostId, arrival.toISOString(), departure.toISOString()],
+  );
+
+  // A guest inside right now (to force check-out and ban), signing in as ...05 later.
+  const banGuest = await client.query<{ id: string }>(
+    `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed)
+     values ('+919999900005', 'Ban Tester', 'female', true)
+     on conflict (phone) do update set full_name = excluded.full_name returning id`,
+  );
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, visitor_id, type, status, origin, zone,
+        window_start, window_end, rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at)
+     values ('VE2E005', $1, $2, $3, 'day', 'inside', 'invite', 'visitors_room', $4, $5, 1, 'user', $2, $4, $4)`,
+    [hostelId, hostId, banGuest.rows[0].id, windowStart.toISOString(), windowEnd.toISOString()],
+  );
+
+  // A guest with an approved visit who checks in while the warden watches (SSE), as ...04.
+  const liveGuest = await client.query<{ id: string }>(
+    `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed)
+     values ('+919999900004', 'Live Tester', 'female', true)
+     on conflict (phone) do update set full_name = excluded.full_name returning id`,
+  );
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, visitor_id, type, status, origin, zone,
+        window_start, window_end, rules_version, created_by_type, created_by_id)
+     values ('VE2E006', $1, $2, $3, 'day', 'approved', 'invite', 'visitors_room', $4, $5, 1, 'user', $2)`,
+    [hostelId, hostId, liveGuest.rows[0].id, windowStart.toISOString(), windowEnd.toISOString()],
   );
 
   await client.end();
