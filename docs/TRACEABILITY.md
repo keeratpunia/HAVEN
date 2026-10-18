@@ -697,6 +697,49 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 0 MATCHES, 6 WRONG, 1 UNTESTED, 3 MISSING. 11 retention/deletion rows: 1 MATCHES,
 2 WRONG, 4 MISSING, 4 UNTESTED.
 
+### 0l.2 After this milestone
+
+Same rows as §0l.1, after the fixes. Decisions: docs/DECISIONS.md DEC-015.
+
+| Area | Before (MATCHES / WRONG / MISSING / UNTESTED) | After |
+|---|---|---|
+| 19 notification kinds | 10 / 6 / 1 / 2 | 19 MATCHES (N-OVERSTAY-GUEST now sends the §15.3 DLT text — an SDD conflict, DEC-015 item 3) |
+| 14 delivery and sending rules | 4 / 1 / 4 / 5 | 12 MATCHES, 2 MISSING: Sentry (NFR-13, not wired anywhere) and `Msg91SmsProvider` (outside this brief; no credentials) |
+| 10 jobs and API-side workers | 0 / 6 / 3 / 1 | 10 MATCHES |
+| 11 retention and deletion rows | 1 / 2 / 4 / 4 | 10 MATCHES, 1 deferred: FR-60 digest (no §15.2 text; proposal awaits approval) |
+
+What changed, by finding:
+- **Boundaries.** BR-12 (10:00), FR-71 (window_end), BR-13 (+15:00) and FR-72 (30:00)
+  are inclusive. Every job takes the injected clock (`p_now`); pg_cron still calls
+  them with none. Tested to the second in `apps/api/test/jobs-runner.integration.test.ts`.
+- **N-OVERSTAY-GUEST** sends the registered DLT text. **N-GATE-OFFLINE** has its §15.2
+  sentence, the "4:42 pm" time format, one alert per warden (only the first warden
+  was alerted before) and once per outage. **N-NIGHT-SWEEP** opens W-02 filtered to
+  the guests. **N-CHARGE** is also sent when an approval creates a charge.
+- **Worker.** A two-worker concurrency test, a rolled-back transaction that sends
+  nothing, a claim lease for crashed workers, and a guard against late finishes. SMS
+  goes out as a DLT template + variables through `SmsProvider.send(to, templateId,
+  vars)`. A §15.5 guard refuses phone numbers and photo links. Push receipts are
+  fetched at 15 min. All in `apps/api/test/notification-worker.integration.test.ts`.
+- **Retention.** Anonymisation works (constraint relaxed); `last_visit_at` moves on
+  every entry; profile-photo dates follow the latest visit; audit rows are purged
+  after 2 years; files are deleted; a `job.retention` audit row is written per run.
+  In `apps/api/test/retention.integration.test.ts`.
+- **Account deletion.** Built end to end: API, worker, R-15 and G-17. Tested in
+  `apps/api/test/account-deletion.integration.test.ts` and
+  `apps/mobile/e2e/tests/account-deletion.spec.ts`.
+- **Guest page.** It now shows an expired walk-in instead of waiting forever.
+
+**Tests added:** `jobs-runner.integration.test.ts` (rewritten, 10),
+`notification-worker.integration.test.ts` (13), `retention.integration.test.ts` (7),
+`account-deletion.integration.test.ts` (9), an N-CHARGE assertion in
+`resident-onboarding-visits.integration.test.ts`, and Playwright
+`account-deletion.spec.ts` (3).
+
+**Not done:** FR-60 (deferred, above); Sentry; `Msg91SmsProvider`; a warden
+notification list on the web (not in W-01..W-12); a Playwright test of the guest's
+expired-walk-in screen; the proposed deletion copy awaits approval.
+
 ## 1. Functional requirements (FR-xx) — SDD §5
 
 ### 5.1 Accounts and onboarding
@@ -711,7 +754,7 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 | FR-06 | S | Warden invites office by email; super admin invites wardens; 48h expiry bound to email | `POST /admin/staff-invites` (`apps/api/src/admin/config-routes.ts`; warden → office, super admin → warden), `POST /admin/hostels`; acceptance in `src/auth/google-service.ts`; W-10 `apps/mobile/app/warden/staff.tsx`, `app/(auth)/staff-invite/[token].tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (W-10 48 h, email-bound), `apps/api/test/staff-permissions.integration.test.ts`, `test/google-service.integration.test.ts` | WIP — creation and API acceptance tested; accepting in the app needs Google sign-in, untested without OAuth credentials (DEC-014) |
 | FR-07 | M | Warden deactivates staff / marks resident left; sessions end immediately | `POST /admin/residents/{id}/mark-left`, `POST /admin/staff/{id}/deactivate` → `endAllSessions` (`apps/api/src/admin/effects.ts`: sessions revoked, push tokens disabled, cache cleared, streams closed); W-08, W-10 | `apps/api/test/staff-behaviour.integration.test.ts` (FR-07 block), `apps/api/test/staff-permissions.integration.test.ts`, `test/sessions.integration.test.ts` | Done |
 | FR-08 | S | Guest/resident edit name, retake profile photo | — | — | — |
-| FR-09 | S | Guest/resident request account deletion | — | — | — (R-15 has no delete button until `POST /me/deletion-request` exists) |
+| FR-09 | S | Guest/resident request account deletion | `POST /v1/me/deletion-request` (`apps/api/src/account/routes.ts`), worker `processDeletionRequests` (`apps/api/src/account/deletion.ts`, every 15 min), table `deletion_requests`; R-15 and G-17 buttons (`apps/mobile/components/DeleteAccount.tsx`) | `apps/api/test/account-deletion.integration.test.ts` (sign-out everywhere, waits while inside / visit in 24 h, unpaid-charges block, staff refused, photos deleted, anonymised, visit rows kept), `apps/mobile/e2e/tests/account-deletion.spec.ts` | Done — copy after the button label is proposed (DEC-015), awaiting approval |
 
 ### 5.2 Visits and invites
 
@@ -749,7 +792,7 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 | FR-41 | S | SMS fallback if walk-in push unopened in 60s | outbox producer `cancel_if_opened` + worker (`apps/api/src/notify/`) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (cancelled when opened; sent after 60 s; released at once with no push token; stale after approval) | Done (console SMS — MSG91 per DEC-007) |
 | FR-42 | M | Host push for every check-in with photo compare; Yes/Not my guest (30 min window) | N-ARRIVED; `POST /visits/{id}/confirm-arrival` ★; R-09 `apps/mobile/app/(resident)/arrival/[id].tsx` | `apps/api/test/resident-approvals-notifications.integration.test.ts` (N-ARRIVED text, confirm once, 30-min expiry, TC-FLOW-04 host confirm, expired session 410), `apps/mobile/e2e/tests/resident-app.spec.ts` (Notifications → R-09) | Done |
 | FR-43 | M | "Not my guest" disputes the visit; alerts warden immediately (push + SMS) | `POST /visits/{id}/dispute` ★ (`disputeArrival`), N-DISPUTE push + immediate SMS; warden side: W-01 Disputed tile, W-05 Resolve dispute (`POST /admin/visits/{id}/resolve-dispute`) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (TC-FLOW-06, duplicate 409, window expiry, not for walk-ins), `apps/mobile/e2e/tests/resident-app.spec.ts`, `apps/api/test/staff-permissions.integration.test.ts` | Done |
-| FR-44 | M | Host push on guest check-out and on guest overstay | N-LEFT (§15 + F5 unverified sentence) from `checkOut`; N-OVERSTAY-HOST from `job_flag_overstays()` (fixed by migration 20261018000002; scheduled by `JobRunner` where pg_cron is absent) | `apps/api/src/notify/templates.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts`, `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01) | Done |
+| FR-44 | M | Host push on guest check-out and on guest overstay | N-LEFT from `checkOut`; N-OVERSTAY-HOST from `job_flag_overstays()` (migration 20261019000007), one per visit | `apps/api/src/notify/templates.test.ts`, `apps/api/test/resident-approvals-notifications.integration.test.ts`, `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01) | Done |
 | FR-45 | M | Host can mark "My guest has left"; logged and flagged to warden | `POST /visits/{id}/mark-left` ★ (`hostMarksGuestLeft`, `close_reason = host_marked_left`); R-10; warden sees the flag in W-02/W-05 and search (`flag=host_marked_left`) | `apps/api/test/resident-approvals-notifications.integration.test.ts` (completed + identical replay) | Done — the warden-side filter has no dedicated test |
 
 ### 5.5 Warden and office
@@ -766,18 +809,18 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 | FR-57 | S | Warden searches visits (name/phone/host/room/date/status); CSV export | `GET /admin/visits` (status, type, flag, q, from, to, expectedToday, cursor), `GET /admin/reports/visits(.csv)` (audited `read.export`); W-12 `apps/mobile/app/warden/reports.tsx`, search `visits/index.tsx` | `apps/api/test/staff-permissions.integration.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (audit of export) | Done |
 | FR-58 | S | Warden views audit log filtered by actor/entity/date | `GET /admin/audit` (entity, entityId, actorId, from, to); W-11 `apps/mobile/app/warden/audit.tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (entity filter), `apps/api/test/staff-permissions.integration.test.ts` | Done |
 | FR-59 | M | Office sees charges; confirms, marks paid. **Waiving and manual fines are warden-only** (not office — see permission matrix §3.3 and `POST /admin/charges/{id}/waive`, caller: Warden) | `apps/api/src/admin/charges-routes.ts` (list, fine, confirm, mark-paid with receipt, waive with reason; office serializer); O-01 `apps/mobile/app/office/charges.tsx`, warden `app/warden/charges.tsx` | `apps/api/test/staff-behaviour.integration.test.ts` (BR-18/FR-59, TC-SEC-03), `apps/api/test/staff-permissions.integration.test.ts`, `apps/mobile/e2e/tests/warden-office.spec.ts` (office marks paid) | Done |
-| FR-60 | C | Daily 08:00 digest to warden | — | — | — |
+| FR-60 | C | Daily 08:00 digest to warden | — | — | Deferred — §15.2 has no kind or text for it; proposed `N-DIGEST` text in DEC-015 awaits approval |
 
 ### 5.6 System
 
 | ID | Priority | Requirement (summary) | Implementation | Tests | Status |
 |---|---|---|---|---|---|
-| FR-70 | M | Walk-in requests expire after 10 min; both parties told | `haven.job_expire_walkins()` (N-WALKIN-EXPIRED text fixed), run every minute by pg_cron or `JobRunner`; the guest page sees the expiry through its poll | `apps/api/test/resident-approvals-notifications.integration.test.ts` (job expires it, host told by name, later approve 409), `visits-concurrency.integration.test.ts`, `apps/api/test/jobs-runner.integration.test.ts` (cadence) | Done |
-| FR-71 | M | Approved-never-entered visits expire at window_end | `expireApprovedVisit` (`apps/api/src/visits/service.ts`); `haven.job_expire_approved()` every 5 min via pg_cron or `JobRunner` | `visits-service.integration.test.ts`, `apps/api/test/jobs-runner.integration.test.ts` (cadence) | WIP — the job is scheduled; its effect on a real row has no dedicated test |
-| FR-72 | M | Overstay detection every 5 min; alerts host/guest; escalates to warden after 30 min | `haven.job_flag_overstays()` (fixed by migration 20261018000002), every 5 min via pg_cron or `JobRunner`; W-01 Overstaying tile | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01) | WIP — flagging and host/guest alerts tested; the 30-minute warden escalation has no dedicated test |
-| FR-73 | M | Night sweep at 22:00 lists day/quick guests still inside to the warden | `haven.job_night_sweep()` scheduled by `JobRunner` (22:00 IST) | `apps/api/test/jobs-runner.integration.test.ts` (schedule only) | WIP — TC-JOB-02 not written |
+| FR-70 | M | Walk-in requests expire after 10 min; both parties told | `haven.job_expire_walkins(p_now)` (expires at exactly 10:00, migration 20261019000007); host gets N-WALKIN-EXPIRED; the guest page shows §13.6 "No answer from …" (fixed: it had no expired state) | `apps/api/test/jobs-runner.integration.test.ts` (BR-12 boundary), `apps/api/test/resident-approvals-notifications.integration.test.ts`, `visits-concurrency.integration.test.ts` | Done — the guest page's expired state has no Playwright test |
+| FR-71 | M | Approved-never-entered visits expire at window_end | `haven.job_expire_approved(p_now)` (at window_end; waives only that visit's pending charge) | `apps/api/test/jobs-runner.integration.test.ts` (FR-71), `visits-service.integration.test.ts` | Done |
+| FR-72 | M | Overstay detection every 5 min; alerts host/guest; escalates to warden after 30 min | `haven.job_flag_overstays(p_now)`: host push, guest SMS (§15.3 HAVEN_OVERSTAY), wardens at exactly 30:00 | `apps/api/test/jobs-runner.integration.test.ts` (BR-13 / FR-72 boundaries, TC-JOB-01) | Done |
+| FR-73 | M | Night sweep at 22:00 lists day/quick guests still inside to the warden | `haven.job_night_sweep(p_now)` at 22:00 IST; tap opens W-02 filtered to the guests (`/warden/inside?ids=`) | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-02, incl. around midnight IST) | Done — web wardens have no notification list (DEC-015) |
 | FR-74 | M | Every state change and admin action written to append-only audit log | `supabase/migrations/20261001000001_init.sql` — `audit_row()` + 9 `t_audit_*` triggers on every table SDD §11.6 lists (visits, residents, role_assignments, bans, charges, gates, gate_devices, hostel_rules, staff_invites), plus `forbid_mutation()` making `gate_events`/`audit_log`/`approvals`/`hostel_rules` append-only. **Every `haven.visits` state change now sets real actor context** — every `visits/service.ts` mutation runs inside `lib/tx.ts`'s `withTx`, which sets `haven.actor_type`/`haven.actor_id`/`haven.request_id` from the real `Principal` (or `system` for job-triggered transitions) before the UPDATE/INSERT, so `audit_row()` attributes correctly for visits specifically | `supabase/tests/002_constraints_and_triggers.sql`, `supabase/tests/003_audit_pii_stripping.sql` | WIP — the mechanism is correct and exercised for every visits transition; other SDD §11.6 tables (residents, bans, charges, gate devices, ...) still have no API caller setting actor context yet, so this remains incomplete hostel-wide. **Warden/office milestone (§0k):** every `/v1/admin` action writes a named `audit_log` row (`apps/api/src/admin/audit.ts`), and reads of visit detail, the emergency list and CSV exports write `read.*` rows; tested in `apps/api/test/staff-behaviour.integration.test.ts` ("every privileged action writes an audit entry") |
-| FR-75 | S | Personal data purged per retention schedule (§16.5) | — | — | — |
+| FR-75 | S | Personal data purged per retention schedule (§16.5) | `haven.job_retention(p_now)` (03:00 IST) + `purgeDueMedia` (`apps/api/src/jobs/media-purge.ts`, deletes files) + `job_expire_sessions` | `apps/api/test/retention.integration.test.ts` (one test per §16.5 row, file deletion included), `apps/api/test/jobs-runner.integration.test.ts` (scan sessions, OTPs) | Done |
 
 ## 2. Non-functional requirements (NFR-xx) — SDD §17.1
 
@@ -790,7 +833,7 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 | NFR-05 | Availability | API 99.5% between 07:00–23:00 IST during pilot | — | — | — |
 | NFR-06 | Capacity | 50 scans/min/gate burst; 1,000 visits/day/hostel without changes | — | — | — |
 | NFR-07 | Security | All §16.4 controls in place before real data loaded | — | — | — |
-| NFR-08 | Privacy | Retention schedule §16.5 enforced automatically | — | — | — |
+| NFR-08 | Privacy | Retention schedule §16.5 enforced automatically | JobRunner / pg_cron run `job_retention` daily and the media purge hourly | `apps/api/test/retention.integration.test.ts` | Done |
 | NFR-09 | Usability | Returning guest ≤30s/≤4 taps; first-time guest ≤3 min | — | — | — |
 | NFR-10 | Compatibility | Guest web: Chrome 100+/Android 9+, Safari iOS 15+, Samsung Internet 18+; app Android 9+ | — | — | — |
 | NFR-11 | Accessibility | WCAG 2.1 AA for guest web; text scales to 200% | — | — | — |
@@ -813,9 +856,9 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 | BR-09 | Banned guests cannot be invited, request entry, or check in | Create + entry | `evaluateCreate`/`evaluateEntry` — `VISITOR_BANNED`, fed by `visits/context.ts`'s `isVisitorBanned` against `haven.bans` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — same as BR-01 |
 | BR-10 | Suspended hosts cannot create/approve; future visits cancelled on suspension start | Create + entry | `evaluateCreate`/`evaluateEntry` — `HOST_SUSPENDED`; `cancelFutureVisits` (`apps/api/src/admin/effects.ts`) on suspend, ban and mark left (DEC-014 item 13) | `evaluate-create.test.ts`, `evaluate-entry.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (BR-10) | Done |
 | BR-11 | Host max `max_active_day_guests` (default 3) day/quick guests inside at once | Create + approval | `evaluateCreate` — `HOST_DAY_LIMIT` (deny, today only); `evaluateEntry` — `HOST_DAY_LIMIT` (flag); counted for real by `visits/repository.ts`'s `countHostActiveDayGuests` | `evaluate-create.test.ts`, `evaluate-entry.test.ts` | WIP — same as BR-01 |
-| BR-12 | Walk-in expires if host doesn't decide within 10 min | Job | The *transition itself* (`pending_host -> expired`, trigger `walk_in_timeout`) exists as `apps/api/src/visits/service.ts`'s `expireWalkIn` | `visits-service.integration.test.ts`, `visits-concurrency.integration.test.ts` ("host approval vs. 10-minute timeout") | WIP — the state transition a job would call is implemented and tested, including its race against approval; no scheduled job calls it yet |
-| BR-13 | Overstay when inside past `window_end + 15 min` | Job | `haven.job_flag_overstays()` (fixed by migration 20261018000002), scheduled by pg_cron or `JobRunner` | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01) | WIP — the 15-minute boundary itself has no dedicated test |
-| BR-14 | At 22:00, every inside day/quick guest listed to warden | Job | `haven.job_night_sweep()` scheduled by `JobRunner` | — (TC-JOB-02 not written) | WIP |
+| BR-12 | Walk-in expires if host doesn't decide within 10 min | Job | `haven.job_expire_walkins(p_now)` (`<=`, so 10:00 exactly) | `apps/api/test/jobs-runner.integration.test.ts` (9:59 not expired, 10:00 expired), `visits-concurrency.integration.test.ts` | Done |
+| BR-13 | Overstay when inside past `window_end + 15 min` | Job | `haven.job_flag_overstays(p_now)` (`>=`, so + 15:00 exactly) | `apps/api/test/jobs-runner.integration.test.ts` (+14:59 no, +15:00 yes) | Done |
+| BR-14 | At 22:00, every inside day/quick guest listed to warden | Job | `haven.job_night_sweep(p_now)` | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-02) | Done |
 | BR-15 | A guest can be inside only one visit at a time, anywhere | DB constraint | `supabase/migrations/20261001000001_init.sql` (`visits_one_inside_per_visitor`) **and** `evaluateEntry`'s `ALREADY_INSIDE` check, **both now wired into** `apps/api/src/visits/repository.ts` (catches the constraint violation, maps to `409 ALREADY_INSIDE`) and `visits/service.ts`'s `checkIn`/`approveWalkIn` | `supabase/tests/002_constraints_and_triggers.sql`, `evaluate-entry.test.ts`, `visits-concurrency.integration.test.ts` ("two visits attempting to make the same visitor inside at once") — the last one races two real concurrent `checkIn` calls against the real constraint, not a mock | Done — both layers are now wired into the real check-in path and proven under an actual concurrent-request race, not just unit-tested in isolation |
 | BR-16 | Pre-invites ≤7 days ahead; overnight requests ≤30 days ahead | Create | `evaluateCreate` — `TOO_FAR_AHEAD` | `evaluate-create.test.ts` (exact day-count boundaries for both limits) | WIP — now called by the visits service; no HTTP route |
 | BR-17 | Check-out never refused for rule reasons; failed GPS on exit allowed but flagged | Exit | `evaluateExit` — never returns `deny`; `LOCATION_UNVERIFIED` flag, called by `visits/service.ts`'s `checkOut` | `evaluate-exit.test.ts`, `visits-service.integration.test.ts` | WIP — same as BR-01 |
@@ -848,7 +891,7 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 | E-19 | Overnight stay spans two months | Nights split by month for quota | `packages/shared/src/rules/nights.ts` (`monthsTouched`) + `evaluate-create.ts`'s per-month `QUOTA_EXCEEDED` loop | `nights.test.ts`, `evaluate-create.test.ts` (31 Oct → 2 Nov / 30 Oct → 1 Nov worked examples) | Done — the month-splitting logic itself is fully implemented and tested; no API/DB layer needed for this specific edge case, it's pure date arithmetic |
 | E-20 | Two residents claim the same room | Allowed (roommates) | — | — | — |
 | E-21 | Host disputes by mistake | Warden resolves after talking to host; visit stays as is | `POST /admin/visits/{id}/resolve-dispute` (flag cleared, note in audit) | `apps/api/test/staff-permissions.integration.test.ts`, `apps/api/test/staff-behaviour.integration.test.ts` (audit) | Done |
-| E-22 | Guest never checks out, host doesn't respond | Overstay → warden escalation → night sweep → force check-out | overstay job, night sweep (`JobRunner`), W-05 force check-out | `apps/api/test/jobs-runner.integration.test.ts` (TC-JOB-01), `apps/api/test/staff-behaviour.integration.test.ts` (force check-out) | WIP — escalation and night sweep have no dedicated test |
+| E-22 | Guest never checks out, host doesn't respond | Overstay → warden escalation → night sweep → force check-out | overstay job, night sweep, W-05 force check-out | `apps/api/test/jobs-runner.integration.test.ts` (overstay, escalation, night sweep), `apps/api/test/staff-behaviour.integration.test.ts` (force check-out) | Done |
 | E-23 | Two gate devices paired to one gate | Both show valid QRs (same secret); either works | `apps/api/src/gate/devices.ts`'s `pairDevice` (secret is per-gate, every paired device gets the same one) | — (true by construction; no dedicated two-device test) | WIP |
 | E-24 | Approved guest arrives at a different hostel's gate | No matching visit there; only Request entry offered | `apps/api/src/gate/routes.ts`'s `GET /scan-sessions/:id` (approved-visit query scoped to the scanned gate's own `hostel_id`) | — (correctly implemented; no dedicated cross-hostel test case) | WIP |
 
@@ -906,8 +949,8 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 
 | ID | Case | Expected | Test file | Status |
 |---|---|---|---|---|
-| TC-JOB-01 | Overstay job twice in a row | one host push, one guest SMS (dedupe) | `apps/api/test/jobs-runner.integration.test.ts` | Done |
-| TC-JOB-02 | Night sweep: 2 day guests + 1 overnight guest inside | warden notified of 2 only | — | — |
+| TC-JOB-01 | Overstay job twice in a row | one host push, one guest SMS (dedupe) | `apps/api/test/jobs-runner.integration.test.ts` (delivered through the worker) | Done |
+| TC-JOB-02 | Night sweep: 2 day guests + 1 overnight guest inside | warden notified of 2 only | `apps/api/test/jobs-runner.integration.test.ts` | Done |
 
 ### Security (TC-SEC)
 
@@ -929,11 +972,11 @@ UNTESTED. 14 delivery rules: 4 MATCHES, 1 WRONG, 4 MISSING, 5 UNTESTED. 10 jobs:
 
 | Category | Total IDs | Done | WIP | Not started | Deferred |
 |---|---|---|---|---|---|
-| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 34 (FR-01, FR-04, FR-05, FR-07, FR-10..16, FR-21, FR-23..27, FR-29, FR-40..45, FR-50..55, FR-57..59, FR-70) | 11 (FR-02, FR-03, FR-06, FR-20, FR-28, FR-30, FR-56, FR-71, FR-72, FR-73, FR-74) | 5 (FR-08, FR-09, FR-22, FR-60, FR-75) | 0 |
-| NFR | 14 | 0 | 2 (NFR-12, NFR-13) | 12 | 0 |
-| BR | 20 | 4 (BR-08, BR-10, BR-15, BR-18) | 16 (BR-01..07, 09, 11..14, 16, 17, 19, 20) | 0 | 0 |
-| E | 24 | 6 (E-11, E-12, E-13, E-18, E-19, E-21) | 6 (E-01, E-14, E-17, E-22, E-23, E-24) | 12 | 0 |
-| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 39 (TC-RULE ×16, TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09, TC-JOB-01, TC-SEC-01..09) | 1 (TC-FLOW-04) | 11 | 0 |
+| FR | 50 (FR-01..09, 10..16, 20..30, 40..45, 50..60, 70..75) | 39 (FR-01, FR-04, FR-05, FR-07, FR-09, FR-10..16, FR-21, FR-23..27, FR-29, FR-40..45, FR-50..55, FR-57..59, FR-70..73, FR-75) | 8 (FR-02, FR-03, FR-06, FR-20, FR-28, FR-30, FR-56, FR-74) | 2 (FR-08, FR-22) | 1 (FR-60) |
+| NFR | 14 | 1 (NFR-08) | 2 (NFR-12, NFR-13) | 11 | 0 |
+| BR | 20 | 7 (BR-08, BR-10, BR-12, BR-13, BR-14, BR-15, BR-18) | 13 (BR-01..07, 09, 11, 16, 17, 19, 20) | 0 | 0 |
+| E | 24 | 7 (E-11, E-12, E-13, E-18, E-19, E-21, E-22) | 5 (E-01, E-14, E-17, E-23, E-24) | 12 | 0 |
+| TC | 51 (TC-RULE ×16 [incl. the TC-RULE-01..11 worked-examples group], TC-TOK ×5, TC-GEO ×5, TC-FLOW ×12, TC-JOB ×2, TC-SEC ×11) | 40 (TC-RULE ×16, TC-TOK ×5, TC-GEO ×5, TC-FLOW-01/08/09, TC-JOB-01/02, TC-SEC-01..09) | 1 (TC-FLOW-04) | 10 | 0 |
 
 Corrected during the rules-engine milestone: this table had silently gone stale after
 the API-foundation milestone set NFR-13 to WIP without updating the summary row —
@@ -964,6 +1007,8 @@ Updated 2026-10-18 for the warden and office milestone (§0k), recounted directl
 the rows above (they had drifted: the resident milestone's FR-04, FR-11, FR-13, FR-14,
 FR-16, FR-41, FR-42, FR-43 and TC-SEC-01/02 changes never reached this table). No SDD ID
 range changed.
+
+Updated 2026-10-18 for the async milestone (§0l), recounted from the rows above.
 
 ## 6a. Database-level guarantees implemented but not mapped to a single ID
 

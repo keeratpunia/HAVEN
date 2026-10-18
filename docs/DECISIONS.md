@@ -1076,6 +1076,174 @@ Source for all of Part 1: SDD §2.7.
   fill gaps and are flagged here for review. Item 14 is proposed copy to add to §15
   when the SDD is next revised. Nothing here widens a permission the SDD grants.
 
+### DEC-015 — Async milestone: outbox, jobs, retention and account deletion
+
+- **Date:** 2026-10-18
+- **Context:** Auditing and completing SDD §9.7 (outbox and worker), §9.8 / §11.8
+  (jobs), §15 (notifications), §16.5 (retention) and §16.6 (account deletion). The
+  audit before any change is in TRACEABILITY §0l.1. Where the SDD is silent or
+  contradicts itself, each choice below takes the more restrictive reading
+  (CLAUDE.md §1.4).
+- **Decision — time:**
+  1. Every SQL job takes `p_now timestamptz default now()`. pg_cron still calls
+     `haven.job_x()` with no argument; the in-process JobRunner passes its injected
+     Clock. That makes the SDD's boundaries testable to the second (§9.13).
+  2. Boundaries are inclusive where the SDD names a moment:
+     - a walk-in expires at exactly `walk_in_timeout_minutes` (BR-12);
+     - an approved visit expires at `window_end` (FR-71);
+     - an overstay starts at `window_end + overstay_grace_minutes` (BR-13);
+     - wardens are told at exactly 30 minutes (FR-72).
+     Gate offline stays strict, because §9.8 says "silent > 5 min".
+- **Decision — notification text (§15 wins over §11.8's example SQL):**
+  3. **SDD conflict, N-OVERSTAY-GUEST.** §15.2 gives "Your HAVEN visit to
+     {hostelCode} ended at {endTime}. Please check out at the gate now." The DLT
+     template §15.3 registers as HAVEN_OVERSTAY is "Your HAVEN visit ended at
+     {#var#}. Please check out at the gate now." Indian operators reject an SMS that
+     differs from its registered template, so HAVEN sends the §15.3 text. **The SDD
+     should change §15.2 to match.**
+  4. §11.8's example SQL paraphrases several texts (e.g. N-WALKIN-EXPIRED). The
+     §15.2 table is used verbatim ("Anything not in this table must not be sent").
+     The night sweep's zero-guests case uses §11.8's in-app text "No day guests
+     inside at 10 pm", since §15.2 says only "in-app if zero".
+  5. **N-GATE-OFFLINE fixes:**
+     - it now includes "Guests can't scan in.", which the job had dropped;
+     - times read "4:42 pm";
+     - its dedupe key now includes the warden. Before, only the first warden of a
+       hostel was ever alerted.
+  6. N-CHARGE is now also sent when an overnight or guest-room approval creates the
+     pending charge (§15.2: "Charge created or marked paid").
+  7. N-WALKIN-REJECTED (in-app, the guest's page) isn't in the §15.2 table. It's named
+     by the §7.1 state table, and its text is §13.6's "Walk-in rejected". It is kept,
+     because nothing is pushed or texted.
+  8. Tap targets:
+     - N-NIGHT-SWEEP opens W-02 filtered to the swept visits (`/warden/inside?ids=…`,
+       shown as a "Night sweep" chip; §11.8);
+     - N-GATE-OFFLINE opens W-09.
+- **Decision — delivery:**
+  9. `SmsProvider.send(to, templateId, vars)` as §9.7 names it, with
+     `ConsoleSmsProvider` for dev and tests.
+     - Only the five §15.3 templates can be sent.
+     - SMS rows store their variables in `data.smsVars`. The worker refuses
+       (permanently fails) a row whose stored text isn't exactly the template filled
+       with those variables.
+     - `Msg91SmsProvider` is not built: there are no credentials, and this
+       milestone's brief is the provider boundary plus a dev fake.
+     - OTP codes are still printed by the OTP service in the request (§9.5's
+       synchronous path), not through the outbox. When Msg91 lands, they go through
+       `SmsProvider` as HAVEN_OTP.
+  10. **Claim lease.** Claiming a row stamps `next_attempt_at` with the claim time.
+      A row still `sending` 5 minutes later belongs to a worker that died mid-send,
+      so the next tick re-queues it, counting as an attempt. Every write after the
+      claim is conditional on the row still being this claim's (status and attempt
+      number). So processing a row twice never double-finishes it, and a late worker
+      can't overwrite the result. Delivery is at-least-once only in the
+      crash-mid-send case.
+  11. **§15.5 enforcement.** The worker refuses to deliver any push or SMS whose
+      title or body contains an Indian mobile number or a photo link, and marks the
+      row failed. It doesn't redact, because a guest can type digits into their
+      name. The in-app copy is unaffected.
+  12. **Push receipts** (§9.7 "15 min later"):
+      - `provider_ref` holds `<ticket id>:<push_tokens id>` pairs;
+      - new column `notifications.receipt_checked_at`; each push is checked once;
+      - a receipt Expo no longer has counts as delivered.
+  13. "Failed (and logged to Sentry)": permanent failures are logged at error level.
+      Sentry isn't wired anywhere in the API yet (NFR-13); that remains open.
+- **Decision — retention (§16.5):**
+  14. **Constraint fix.** The `visitors` check (phone or host-created) made
+      anonymisation impossible for self-registered guests and aborted every
+      retention run. An anonymised row is now allowed to have neither.
+  15. **`last_visit_at` moves on every gate entry** (a trigger on `gate_events`),
+      not only at sign-in. Otherwise a returning guest whose session was still
+      valid could be anonymised mid-relationship.
+  16. **Profile-photo date.** A guest's `delete_after` follows their latest visit,
+      re-set on every run. A guest who never visited counts from when their row
+      was created.
+  17. **Anonymisation guard.** Guest identity is anonymised only with no visit
+      whose window is still ahead and no open visit (inside, pending or approved).
+  18. **Audit log, kept 2 years, then deleted.** The append-only trigger allows a
+      delete only when the retention job sets `haven.retention_cutoff` for its own
+      transaction, and only for rows at or before it. `job_retention` is security
+      definer; `haven_api` still has no DELETE grant on `audit_log`.
+  19. **Notifications after 90 days:** body set to '' (the column is NOT NULL),
+      title null, and `data` cleared too, since it can hold SMS variables such as a
+      guest's name.
+      - `recipient_phone` on old SMS rows is kept, because the table's check
+        requires it for phone recipients. **Flagged for review:** §16.5 doesn't
+        mention it.
+  20. Each run writes one `job.retention` audit row with counts only (FR-74).
+- **Decision — account deletion (§16.6, FR-09):**
+  21. **Storage.** Requests live in a new `deletion_requests` table (the SDD names
+      the endpoint, not a table), one open request per person.
+  22. **Response.** `POST /me/deletion-request` returns 202 with
+      `{ status, waitingFor, waitUntil }`, so the app can show that deletion waits
+      (step 2).
+  23. **Staff are refused** (403 FORBIDDEN). FR-09 covers guests and residents;
+      staff access ends by deactivation (FR-07).
+  24. **Unpaid charges.** "Unpaid" means a charge that's pending or confirmed. The
+      request is refused with `409 CONFLICT`, `details: { reason: 'UNPAID_CHARGES',
+      unpaidInr }`. §12.2 has no specific code, so none was invented. Nothing is
+      recorded and the person stays signed in.
+  25. **Waiting.** Step 2 says "a guest inside right now, or has a visit in the next
+      24 h". The narrower-risk reading is used: a resident also waits while their
+      own guest is inside or due in the next 24 hours.
+      - Signing in again (e.g. to check out at the gate) is allowed and doesn't
+        cancel the request.
+      - `GET /me` shows the open request.
+  26. **The worker** runs every 15 minutes (§16.6 "within 7 days"). It:
+      - deletes every photo the person owns, the guest's gate photos included;
+      - cancels their approved visits that haven't started;
+      - anonymises (§16.5 for guests; for residents: "Former resident", email
+        `deleted-<id>@deleted.invalid`, `google_sub` `deleted:<id>`, phone null,
+        inactive, `residents.status = 'left'`; new column `users.anonymised_at`);
+      - revokes every session and push token;
+      - writes `account.deleted` to the audit log.
+      Visit rows keep their ids, so the host's record survives.
+- **Proposed copy — not in §13.6; awaiting the team's approval** (keys in
+  `packages/shared/src/copy/en.ts`). The button label "Delete my account" and the
+  sheet's "Reason (optional)" field are the only fixed UI strings.
+  - `ACCOUNT_DELETE_CONFIRM_GUEST`: "Delete your account?" / "You'll be signed out
+    everywhere. Within 7 days we delete your photos and remove your name and phone
+    number. Your hosts keep a record of past visits, without your details."
+  - `ACCOUNT_DELETE_CONFIRM_RESIDENT`: "Delete your account?" / "You'll be signed out
+    everywhere. Within 7 days we delete your photos and remove your name, email and
+    phone number, and cancel guest visits that haven't started. Records of past
+    visits stay, without your details."
+  - `ACCOUNT_DELETION_REQUESTED`: "Deletion requested" / "You've been signed out.
+    Your account will be deleted within 7 days."
+  - `ACCOUNT_DELETION_WAITS_INSIDE`: "Deletion requested" / "You're checked in right
+    now, so we'll delete your account after this visit ends. You've been signed out —
+    sign in again only to check out at the gate."
+  - `ACCOUNT_DELETION_WAITS_UPCOMING`: "Deletion requested" / "You have a visit in
+    the next 24 hours, so we'll delete your account after it ends. You've been signed
+    out."
+  - `ACCOUNT_DELETION_UNPAID`: "Clear your charges first" / "You owe ₹{amount}. You
+    can delete your account once the warden's office marks it paid."
+- **FR-60 daily digest — deferred, needs a decision.** The brief says to build it
+  only once everything else is done; it would be next. But §15.2 has no kind or text
+  for it, and "Anything not in this table must not be sent", so it isn't built
+  without approved text. Proposal: kind `N-DIGEST`, push (alerts) to each warden at
+  08:00 IST, title "Yesterday at {hostelCode}", body "{visits} visits · {disputes}
+  disputed · {overstays} overstayed · {unverified} location not verified · {forced}
+  forced check-outs." Tapping it opens W-12 for yesterday.
+- **Also fixed:** the guest's waiting page never showed an expired walk-in. It now
+  shows §13.6 "No answer from {hostFirstName} / Try calling her, then request again"
+  (FR-70).
+- **Known limitation:** wardens on the web have no notification list (W-01..W-12
+  don't include one). Their alerts reach them as Android pushes, and on the web only
+  as the dashboard updating live.
+- **Alternatives considered:**
+  - Redacting phone numbers instead of refusing to send (rejected: it changes
+    catalogue text).
+  - Leaving the jobs on the database clock (rejected: the BR-12/BR-13 boundaries
+    couldn't be tested).
+  - Exactly-once delivery with a provider idempotency key (rejected: Expo push
+    doesn't offer one).
+  - A new error code for unpaid charges (rejected: §12.2 is closed;
+    `CONFLICT` + details is enough).
+- **SDD updated?** No. Item 3 needs §15.2 changed to the §15.3 text. Items 21–26
+  fill gaps in §16.6 and §12.4. The proposed copy and the FR-60 text need approval
+  before they become SDD text.
+
 Template for a new entry:
 
 ```markdown
