@@ -4,7 +4,8 @@ import { scrubSentryEvent, scrubText } from './scrub.js';
 /** docs/SECURITY-AUDIT.md SA-13: nothing personal reaches the error tracker. */
 describe('scrubSentryEvent', () => {
   const event = {
-    message: 'Failed for +919876543210 with Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4eHh4eHgifQ.c2lnbmF0dXJlLXZhbHVl',
+    message:
+      'Failed for +919876543210 with Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4eHh4eHgifQ.c2lnbmF0dXJlLXZhbHVl',
     user: { id: 'u1', email: 'priya@example.com', ip_address: '1.2.3.4' },
     server_name: 'api-1',
     request: {
@@ -55,7 +56,10 @@ describe('scrubSentryEvent', () => {
       expect(text).not.toContain(secret);
     }
     expect(out.user).toBeUndefined();
-    expect(out.request).toEqual({ method: 'GET', url: 'https://api.haven.test/v1/invites/[redacted]' });
+    expect(out.request).toEqual({
+      method: 'GET',
+      url: 'https://api.haven.test/v1/invites/[redacted]',
+    });
   });
 
   it('keeps what makes an error diagnosable: error codes and stack frames', () => {
@@ -68,6 +72,8 @@ describe('scrubSentryEvent', () => {
   });
 
   it('masks phones to their last five digits', () => {
-    expect(scrubText('call +91 9876543210 or 919876512345')).toBe('call +91•••••43210 or +91•••••12345');
+    expect(scrubText('call +91 9876543210 or 919876512345')).toBe(
+      'call +91•••••43210 or +91•••••12345',
+    );
   });
 });
