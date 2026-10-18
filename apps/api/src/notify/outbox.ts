@@ -79,7 +79,7 @@ export async function enqueueNotification(
         title: null,
         body: p.sms.text.body,
         sms_template_id: p.sms.text.templateId,
-        data: { screen },
+        data: { screen, smsVars: p.sms.text.vars },
         cancel_if_opened: p.sms.delayMs > 0 ? inserted.id : null,
         dedupe_key: p.dedupeKey ? `${p.dedupeKey}:sms` : null,
         next_attempt_at: new Date(p.now.getTime() + p.sms.delayMs),

@@ -660,6 +660,7 @@ describe('push registration, in-app list and the worker (SDD §9.7, §12.4, §15
       {
         to: hostPhone,
         templateId: 'HAVEN_WALKIN',
+        vars: ['Test Guest', expect.stringContaining(`/walk-in/${visitId}`)],
         body: expect.stringContaining('Test Guest is at the GH-8 gate'),
       },
     ]);

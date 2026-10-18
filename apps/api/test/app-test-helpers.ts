@@ -20,7 +20,14 @@ import { __resetNotificationPoliciesForTests } from '../src/notify/policy.js';
 import { __resetResidentPoliciesForTests } from '../src/residents/routes.js';
 import { __resetAdminPoliciesForTests } from '../src/admin/policy.js';
 import type { MediaStorage } from '../src/gate/media.js';
-import type { PushMessage, PushSender, PushTicket, SmsSender } from '../src/notify/senders.js';
+import type {
+  PushMessage,
+  PushReceipt,
+  PushSender,
+  PushTicket,
+  SmsProvider,
+} from '../src/notify/senders.js';
+import { renderDlt, type DltTemplateId } from '../src/notify/dlt.js';
 import { TEST_DATABASE_URL } from './pg-test-constants.js';
 
 /**
@@ -76,20 +83,43 @@ export class FakePushSender implements PushSender {
   readonly sent: PushMessage[] = [];
   /** Per-token override; default ok. */
   readonly responses = new Map<string, PushTicket>();
+  /** Receipts the next getReceipts() call returns, by ticket id. */
+  readonly receipts = new Map<string, PushReceipt>();
+  readonly receiptRequests: string[][] = [];
   fail: Error | null = null;
+  /** Resolved before send() returns — lets a test hold a send open (concurrency). */
+  gate: Promise<void> | null = null;
   async send(messages: PushMessage[]): Promise<PushTicket[]> {
     if (this.fail) throw this.fail;
     this.sent.push(...messages);
+    const n = this.sent.length;
+    if (this.gate) await this.gate;
     return messages.map(
-      (m, i) => this.responses.get(m.to) ?? { status: 'ok', id: `ticket-${this.sent.length}-${i}` },
+      (m, i) => this.responses.get(m.to) ?? { status: 'ok', id: `ticket-${n}-${i}` },
     );
+  }
+  async getReceipts(ticketIds: string[]): Promise<Record<string, PushReceipt>> {
+    this.receiptRequests.push(ticketIds);
+    const out: Record<string, PushReceipt> = {};
+    for (const id of ticketIds) {
+      const r = this.receipts.get(id);
+      if (r) out[id] = r;
+    }
+    return out;
   }
 }
 
-export class FakeSmsSender implements SmsSender {
-  readonly sent: { to: string; templateId: string; body: string }[] = [];
-  async send(to: string, templateId: string, body: string): Promise<{ ref: string }> {
-    this.sent.push({ to, templateId, body });
+/** Records SMS the way the console provider would send them: template + variables. */
+export class FakeSmsSender implements SmsProvider {
+  readonly sent: { to: string; templateId: string; vars: readonly string[]; body: string }[] = [];
+  fail: Error | null = null;
+  async send(
+    to: string,
+    templateId: DltTemplateId,
+    vars: readonly string[],
+  ): Promise<{ ref: string }> {
+    if (this.fail) throw this.fail;
+    this.sent.push({ to, templateId, vars, body: renderDlt(templateId, vars) });
     return { ref: `sms-${this.sent.length}` };
   }
 }

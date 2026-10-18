@@ -71,6 +71,7 @@ interface UsersTable {
   phone_verified_at: ColumnType<Date | null, string | null | undefined, string | null>;
   is_active: ColumnType<boolean, boolean | undefined, boolean>;
   last_login_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  anonymised_at: ColumnType<Date | null, string | null | undefined, string | null>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -370,7 +371,21 @@ interface NotificationsTable {
   last_error: string | null;
   sent_at: ColumnType<Date | null, string | null | undefined, string | null>;
   opened_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  receipt_checked_at: ColumnType<Date | null, string | null | undefined, string | null>;
   created_at: Generated<Date>;
+}
+
+/** SDD §16.6 account deletion requests (migration 20261019000005). */
+interface DeletionRequestsTable {
+  id: Generated<string>;
+  principal_type: 'user' | 'visitor';
+  principal_id: string;
+  reason: string | null;
+  status: ColumnType<'pending' | 'completed', 'pending' | 'completed' | undefined>;
+  waiting_for: 'inside' | 'upcoming_visit' | 'unpaid_charges' | null;
+  requested_at: ColumnType<Date, string | undefined, string>;
+  checked_at: ColumnType<Date | null, string | null | undefined, string | null>;
+  completed_at: ColumnType<Date | null, string | null | undefined, string | null>;
 }
 
 interface PushTokensTable {
@@ -441,4 +456,5 @@ export interface Database {
   'haven.idempotency_keys': IdempotencyKeysTable;
   'haven.audit_log': AuditLogTable;
   'haven.hostel_rules': HostelRulesTable;
+  'haven.deletion_requests': DeletionRequestsTable;
 }

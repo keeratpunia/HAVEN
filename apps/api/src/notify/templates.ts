@@ -1,4 +1,5 @@
 import { formatDateShort, formatDuration, formatTime12h, VISIT_TYPE_LABELS } from '@haven/shared';
+import { renderDlt } from './dlt.js';
 
 /**
  * SDD §15 notification text, transcribed verbatim (§15: "Every message HAVEN sends is
@@ -144,32 +145,30 @@ export function chargeText(p: {
 // ---------------------------------------------------------------------------
 
 export interface SmsText {
-  templateId: 'HAVEN_WALKIN' | 'HAVEN_CONFIRM_LOC' | 'HAVEN_DISPUTE';
+  templateId: 'HAVEN_WALKIN' | 'HAVEN_CONFIRM_LOC' | 'HAVEN_DISPUTE' | 'HAVEN_OVERSTAY';
+  /** The DLT variables, in order — what the provider actually sends (§9.7). */
+  vars: string[];
+  /** The rendered text, kept on the outbox row for the in-app list and audits. */
   body: string;
+}
+
+function sms(templateId: SmsText['templateId'], vars: string[]): SmsText {
+  return { templateId, vars, body: renderDlt(templateId, vars) };
 }
 
 /** HAVEN_WALKIN — "{#var#} is at the GH-8 gate to visit you. Open HAVEN to approve: {#var#}" */
 export function walkInSms(p: { guestName: string; link: string }): SmsText {
-  return {
-    templateId: 'HAVEN_WALKIN',
-    body: `${p.guestName} is at the GH-8 gate to visit you. Open HAVEN to approve: ${p.link}`,
-  };
+  return sms('HAVEN_WALKIN', [p.guestName, p.link]);
 }
 
 /** HAVEN_CONFIRM_LOC — "{#var#} needs you to confirm they're at the gate. Open HAVEN: {#var#}" */
 export function confirmLocationSms(p: { guestName: string; link: string }): SmsText {
-  return {
-    templateId: 'HAVEN_CONFIRM_LOC',
-    body: `${p.guestName} needs you to confirm they're at the gate. Open HAVEN: ${p.link}`,
-  };
+  return sms('HAVEN_CONFIRM_LOC', [p.guestName, p.link]);
 }
 
 /** HAVEN_DISPUTE — "HAVEN alert: a resident reported an unknown guest at {#var#}. Open the app: {#var#}" */
 export function disputeSms(p: { hostelCode: string; link: string }): SmsText {
-  return {
-    templateId: 'HAVEN_DISPUTE',
-    body: `HAVEN alert: a resident reported an unknown guest at ${p.hostelCode}. Open the app: ${p.link}`,
-  };
+  return sms('HAVEN_DISPUTE', [p.hostelCode, p.link]);
 }
 
 /** SDD §15.2: N-WALKIN and N-CONFIRM-LOCATION get an SMS "after 60 s if unopened". */

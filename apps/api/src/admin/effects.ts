@@ -54,7 +54,8 @@ export async function cancelFutureVisits(
     where: { hostId: string } | { visitorId: string; hostelId: string | null };
     reason: string;
     clock: Clock;
-    actorUserId: string;
+    /** Null when the system cancels (account deletion, SDD §16.6). */
+    actorUserId: string | null;
   },
 ): Promise<string[]> {
   let q = trx

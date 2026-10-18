@@ -26,6 +26,19 @@ function isSelf(principal: Principal | null, resource: SelfResource): boolean {
   return false;
 }
 
+/**
+ * FR-09: "Guests and residents can request deletion of their account". Staff accounts
+ * end through deactivation (FR-07), so a user holding any staff role is refused
+ * (docs/DECISIONS.md DEC-015).
+ */
+export interface DeleteSelfResource extends SelfResource {
+  hasStaffRole: boolean;
+}
+
+function canDeleteSelf(principal: Principal | null, resource: DeleteSelfResource): boolean {
+  return isSelf(principal, resource) && !resource.hasStaffRole;
+}
+
 let registered = false;
 
 /** Idempotent — safe to call from both app boot and tests that re-import this module. */
@@ -34,6 +47,7 @@ export function registerAuthPolicies(): void {
   registered = true;
   definePolicy<SelfResource>('me.read', isSelf);
   definePolicy<SelfResource>('me.update', isSelf);
+  definePolicy<DeleteSelfResource>('me.delete', canDeleteSelf);
 }
 
 /** Test-only: lets a test file force a clean registration against a reset registry. */

@@ -102,8 +102,8 @@ export interface CreatePendingChargeParams {
 export async function createPendingCharge(
   trx: Transaction<Database>,
   params: CreatePendingChargeParams,
-): Promise<void> {
-  await trx
+): Promise<{ id: string; amountInr: number }> {
+  const row = await trx
     .insertInto('haven.charges')
     .values({
       hostel_id: params.hostelId,
@@ -117,7 +117,9 @@ export async function createPendingCharge(
       status: 'pending',
       created_by: params.createdBy,
     })
-    .execute();
+    .returning(['id', 'amount_inr'])
+    .executeTakeFirstOrThrow();
+  return { id: row.id, amountInr: row.amount_inr };
 }
 
 /** SDD §7.1: a visit's charge is waived automatically on cancel/expire-without-entry. */

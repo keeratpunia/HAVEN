@@ -3,23 +3,34 @@ import { channelForKind, defaultScreenForKind, type PushData } from '@haven/shar
 import type { Database } from '../db/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { Logger } from '../lib/logger.js';
-import type { PushSender, SmsSender } from './senders.js';
+import type { PushSender, SmsProvider } from './senders.js';
+import { isDltTemplateId, renderDlt } from './dlt.js';
+import { personalDataIn } from './sending-rules.js';
 
 /**
  * Notification outbox worker (SDD §9.7). Every `intervalMs` (2 s) it claims up to 50
- * due rows with the SDD's exact `FOR UPDATE SKIP LOCKED` query, so a second replica
- * can never double-send, then for each row:
+ * due rows with the SDD's `FOR UPDATE SKIP LOCKED` query, so concurrent workers never
+ * claim the same row, then for each row:
  *   1. cancels it if its `cancel_if_opened` push was opened (SMS fallback no longer needed);
  *   2. cancels it if it's stale for its kind (e.g. a walk-in SMS once the visit is no
  *      longer `pending_host`);
- *   3. delivers: push via Expo to every active token, SMS via the provider, in-app
- *      needs no delivery;
- *   4. on failure, retries at 10 s, 30 s, 2 min, 10 min, then `failed`.
+ *   3. refuses it if the text breaks §15.5 (a phone number or photo in a push/SMS);
+ *   4. delivers: push via Expo to every active token, SMS as its DLT template and
+ *      variables (§15.3), in-app needs no delivery;
+ *   5. on failure, retries at 10 s, 30 s, 2 min, 10 min, then `failed`.
  * "Push to a user with no active push token → the worker creates the SMS fallback
  * immediately for kinds that have one; otherwise in-app only" (§15.5).
+ *
+ * Claiming also stamps `next_attempt_at` with the claim time. A row still `sending`
+ * `LEASE_MS` later belongs to a worker that died mid-send; the next tick puts it back in
+ * the queue (counting as an attempt). Every write after the claim is conditional on the
+ * row still being this claim's (`status = 'sending'` with the same attempt number), so a
+ * row processed twice is delivered and finished at most once per claim
+ * (docs/DECISIONS.md DEC-015).
  */
 
-const RETRY_DELAYS_MS = [10_000, 30_000, 120_000, 600_000];
+export const RETRY_DELAYS_MS = [10_000, 30_000, 120_000, 600_000];
+export const LEASE_MS = 5 * 60_000;
 const BATCH_SIZE = 50;
 
 interface ClaimedRow {
@@ -43,9 +54,12 @@ export interface NotificationWorkerDeps {
   db: Kysely<Database>;
   clock: Clock;
   push: PushSender;
-  sms: SmsSender;
+  sms: SmsProvider;
   logger?: Pick<Logger, 'warn' | 'error'>;
 }
+
+/** A failure retrying can't fix: finish as `failed` now. */
+class PermanentFailure extends Error {}
 
 export class NotificationWorker {
   private timer: NodeJS.Timeout | null = null;
@@ -78,8 +92,10 @@ export class NotificationWorker {
   /** Processes one batch. Returns how many rows were claimed. */
   async tick(): Promise<number> {
     const now = this.deps.clock.now();
+    await this.requeueAbandoned(now);
     const result = await sql<ClaimedRow>`
-      update haven.notifications set status = 'sending', attempts = attempts + 1
+      update haven.notifications
+         set status = 'sending', attempts = attempts + 1, next_attempt_at = ${now}
        where id in (
          select id from haven.notifications
           where status = 'queued' and next_attempt_at <= ${now}
@@ -94,21 +110,45 @@ export class NotificationWorker {
       try {
         await this.process(row, now);
       } catch (err) {
-        await this.scheduleRetry(row, now, err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        if (err instanceof PermanentFailure) {
+          this.deps.logger?.error(
+            { notificationId: row.id, kind: row.kind, error: message },
+            'notification failed',
+          );
+          await this.finish(row, 'failed', message);
+        } else {
+          await this.scheduleRetry(row, now, message);
+        }
       }
     }
     this.lastTickAt = this.deps.clock.now();
     return result.rows.length;
   }
 
+  /** Rows a dead worker left in `sending` go back in the queue after the lease. */
+  private async requeueAbandoned(now: Date): Promise<void> {
+    await this.deps.db
+      .updateTable('haven.notifications')
+      .set({ status: 'queued', last_error: 'worker lease expired', next_attempt_at: now })
+      .where('status', '=', 'sending')
+      .where('next_attempt_at', '<=', new Date(now.getTime() - LEASE_MS))
+      .execute();
+  }
+
   private async process(row: ClaimedRow, now: Date): Promise<void> {
+    if (!(await this.stillClaimed(row))) return;
     if (row.cancel_if_opened && (await this.wasOpened(row.cancel_if_opened))) {
-      return this.finish(row.id, 'cancelled', 'push was opened');
+      return this.finish(row, 'cancelled', 'push was opened');
     }
     const staleReason = await this.staleReason(row);
-    if (staleReason) return this.finish(row.id, 'cancelled', staleReason);
+    if (staleReason) return this.finish(row, 'cancelled', staleReason);
 
-    if (row.channel === 'in_app') return this.finish(row.id, 'sent', null, now);
+    if (row.channel === 'in_app') return this.finish(row, 'sent', null, now);
+
+    const blocked = personalDataIn(row.title) ?? personalDataIn(row.body);
+    if (blocked) throw new PermanentFailure(`blocked by §15.5: ${blocked}`);
+
     if (row.channel === 'sms') return this.deliverSms(row, now);
     return this.deliverPush(row, now);
   }
@@ -116,7 +156,7 @@ export class NotificationWorker {
   private async deliverPush(row: ClaimedRow, now: Date): Promise<void> {
     if (row.recipient_type !== 'user' || !row.recipient_id) {
       // Guests have no push (SDD §9.9); anything addressed to them is in-app only.
-      return this.finish(row.id, 'sent', null, now);
+      return this.finish(row, 'sent', null, now);
     }
     const tokens = await this.deps.db
       .selectFrom('haven.push_tokens')
@@ -127,7 +167,7 @@ export class NotificationWorker {
 
     if (tokens.length === 0) {
       await this.releaseSmsFallback(row.id, now);
-      return this.finish(row.id, 'cancelled', 'no active push token; in-app only');
+      return this.finish(row, 'cancelled', 'no active push token; in-app only');
     }
 
     const data: PushData = {
@@ -158,6 +198,7 @@ export class NotificationWorker {
       })
       .map((t) => t.id);
     if (deadTokenIds.length > 0) {
+      // "DeviceNotRegistered disables that push_tokens row" (§9.7).
       await this.deps.db
         .updateTable('haven.push_tokens')
         .set({ disabled_at: now })
@@ -165,24 +206,41 @@ export class NotificationWorker {
         .execute();
     }
 
-    const okIds = tickets.flatMap((t) => (t?.status === 'ok' ? [t.id] : []));
-    if (okIds.length > 0) {
-      await this.finish(row.id, 'sent', null, now, okIds.join(','));
+    // "<ticket id>:<push_tokens id>" pairs, so the receipts job can disable the right token.
+    const okRefs = tokens.flatMap((t, i) => {
+      const ticket = tickets[i];
+      return ticket?.status === 'ok' ? [`${ticket.id}:${t.id}`] : [];
+    });
+    if (okRefs.length > 0) {
+      await this.finish(row, 'sent', null, now, okRefs.join(','));
       return;
     }
     if (deadTokenIds.length === tokens.length) {
       await this.releaseSmsFallback(row.id, now);
-      return this.finish(row.id, 'cancelled', 'all push tokens unregistered; in-app only');
+      return this.finish(row, 'cancelled', 'all push tokens unregistered; in-app only');
     }
     const firstError = tickets.find((t) => t?.status === 'error');
     throw new Error(firstError?.status === 'error' ? firstError.message : 'push send failed');
   }
 
   private async deliverSms(row: ClaimedRow, now: Date): Promise<void> {
+    const templateId = row.sms_template_id ?? '';
+    if (!isDltTemplateId(templateId)) {
+      throw new PermanentFailure(`${templateId || 'no template'} is not a §15.3 DLT template`);
+    }
+    const rawVars = row.data?.smsVars;
+    const vars =
+      Array.isArray(rawVars) && rawVars.every((v) => typeof v === 'string') ? rawVars : null;
+    if (!vars) throw new PermanentFailure('SMS row has no DLT variables');
+    // The operator rejects text that differs from the registered template, so the text
+    // we recorded must be exactly the template with these variables.
+    if (renderDlt(templateId, vars) !== row.body) {
+      throw new PermanentFailure(`SMS text does not match ${templateId}`);
+    }
     const phone = await this.phoneFor(row);
-    if (!phone) return this.finish(row.id, 'failed', 'recipient has no phone number');
-    const { ref } = await this.deps.sms.send(phone, row.sms_template_id ?? 'UNKNOWN', row.body);
-    await this.finish(row.id, 'sent', null, now, ref);
+    if (!phone) throw new PermanentFailure('recipient has no phone number');
+    const { ref } = await this.deps.sms.send(phone, templateId, vars);
+    await this.finish(row, 'sent', null, now, ref);
   }
 
   private async phoneFor(row: ClaimedRow): Promise<string | null> {
@@ -202,6 +260,15 @@ export class NotificationWorker {
       .where('id', '=', row.recipient_id)
       .executeTakeFirst();
     return visitor?.phone ?? null;
+  }
+
+  private async stillClaimed(row: ClaimedRow): Promise<boolean> {
+    const current = await this.deps.db
+      .selectFrom('haven.notifications')
+      .select(['status', 'attempts'])
+      .where('id', '=', row.id)
+      .executeTakeFirst();
+    return current?.status === 'sending' && current.attempts === row.attempts;
   }
 
   private async wasOpened(notificationId: string): Promise<boolean> {
@@ -249,8 +316,9 @@ export class NotificationWorker {
       .execute();
   }
 
+  /** Only finishes the row if it is still this claim's — see the class comment. */
   private async finish(
-    id: string,
+    row: ClaimedRow,
     status: 'sent' | 'cancelled' | 'failed',
     lastError: string | null,
     sentAt?: Date,
@@ -264,18 +332,22 @@ export class NotificationWorker {
         ...(sentAt ? { sent_at: sentAt.toISOString() } : {}),
         ...(providerRef ? { provider_ref: providerRef } : {}),
       })
-      .where('id', '=', id)
+      .where('id', '=', row.id)
+      .where('status', '=', 'sending')
+      .where('attempts', '=', row.attempts)
       .execute();
   }
 
   private async scheduleRetry(row: ClaimedRow, now: Date, error: string): Promise<void> {
     const delay = RETRY_DELAYS_MS[row.attempts - 1];
     if (delay === undefined) {
+      // "then failed (and logged to Sentry)" — logged here; Sentry is not wired in the
+      // prototype (docs/DECISIONS.md DEC-015).
       this.deps.logger?.error(
         { notificationId: row.id, kind: row.kind, error },
         'notification failed',
       );
-      await this.finish(row.id, 'failed', error);
+      await this.finish(row, 'failed', error);
       return;
     }
     this.deps.logger?.warn({ notificationId: row.id, kind: row.kind, error }, 'notification retry');
@@ -287,6 +359,8 @@ export class NotificationWorker {
         next_attempt_at: new Date(now.getTime() + delay),
       })
       .where('id', '=', row.id)
+      .where('status', '=', 'sending')
+      .where('attempts', '=', row.attempts)
       .execute();
   }
 }

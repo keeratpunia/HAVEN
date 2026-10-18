@@ -24,6 +24,7 @@ import { authorize } from './policy.js';
 import { registerAuthPolicies } from './policy-rules.js';
 import { storeVisitorProfilePhoto, type MediaStorage } from '../gate/media.js';
 import { loadResidentProfile } from '../residents/service.js';
+import { openDeletionRequest } from '../account/deletion.js';
 
 export interface AuthRoutesOptions {
   env: Env;
@@ -281,6 +282,7 @@ export async function registerAuthRoutes(
         roles: principal.roles,
         residentStatus,
         resident: await loadResidentProfile(db, principal.userId),
+        deletionRequest: await openDeletionRequest(db, { type: 'user', id: principal.userId }),
       });
       return;
     }
@@ -301,6 +303,7 @@ export async function registerAuthRoutes(
       phone: row.phone,
       gender: row.gender,
       isAdultConfirmed: row.is_adult_confirmed,
+      deletionRequest: await openDeletionRequest(db, { type: 'visitor', id: principal.visitorId }),
     });
   });
 

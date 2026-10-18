@@ -468,6 +468,19 @@ describe('overnight requests, quota and charges (FR-14, FR-15, BR-05, BR-07, BR-
       .executeTakeFirstOrThrow();
     expect(decided.title).toBe('Overnight request approved');
     expect(decided.body).toBe('Share the invite with Asha Rani.');
+    // N-CHARGE (§15.2 "Charge created or marked paid"), in-app to the resident, in the
+    // same transaction as the approval.
+    const charged = await db
+      .selectFrom('haven.notifications')
+      .selectAll()
+      .where('kind', '=', 'N-CHARGE')
+      .executeTakeFirstOrThrow();
+    expect(charged).toMatchObject({
+      channel: 'in_app',
+      recipient_id: hostId,
+      title: null,
+      body: '₹300 Guest room stay, 2 night(s). — pending',
+    });
 
     // Now approved, the host can share the invite.
     const after = await supertest(app.server)

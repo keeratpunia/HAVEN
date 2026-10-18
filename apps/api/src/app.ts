@@ -29,6 +29,7 @@ import type { MediaStorage } from './gate/media.js';
 import { NotificationWorker } from './notify/worker.js';
 import { registerNotificationPolicies } from './notify/policy.js';
 import { registerNotificationRoutes } from './notify/routes.js';
+import { registerAccountRoutes } from './account/routes.js';
 import { MediaUrlSigner } from './media/signing.js';
 import { RulesProvider } from './rules/provider.js';
 import { registerAdminPolicies } from './admin/policy.js';
@@ -42,10 +43,10 @@ import { registerStreamRoutes } from './stream/routes.js';
 import { registerMediaRoutes } from './media/routes.js';
 import { registerResidentPolicies, registerResidentRoutes } from './residents/routes.js';
 import {
-  ConsoleSmsSender,
+  ConsoleSmsProvider,
   ExpoPushSender,
   type PushSender,
-  type SmsSender,
+  type SmsProvider,
 } from './notify/senders.js';
 
 export interface BuildAppOptions {
@@ -75,7 +76,7 @@ export interface BuildAppOptions {
   streamPingMs?: number;
   /** Delivery adapters for the notification worker; default to Expo push and console SMS. */
   pushSender?: PushSender;
-  smsSender?: SmsSender;
+  smsSender?: SmsProvider;
 }
 
 const BOOT_TIME = new Date();
@@ -270,20 +271,28 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
 
   // Notification outbox worker (SDD §9.7) — only in the one instance with
   // WORKER_ENABLED=true.
+  const pushSender = options.pushSender ?? new ExpoPushSender(env.EXPO_ACCESS_TOKEN);
   const worker = env.WORKER_ENABLED
     ? new NotificationWorker({
         db,
         clock,
-        push: options.pushSender ?? new ExpoPushSender(env.EXPO_ACCESS_TOKEN),
-        sms: options.smsSender ?? new ConsoleSmsSender(env.APP_ENV),
+        push: pushSender,
+        sms: options.smsSender ?? new ConsoleSmsProvider(env.APP_ENV),
         logger,
       })
     : null;
   if (worker) {
     worker.start();
     app.addHook('onClose', async () => worker.stop());
-    // SDD §9.8 jobs when pg_cron isn't installed (DEC-014).
-    const jobs = new JobRunner({ db, clock, logger });
+    // SDD §9.8 jobs when pg_cron isn't installed (DEC-014), plus the API-side media
+    // purge, push receipts and account deletion workers (DEC-015).
+    const jobs = new JobRunner({
+      db,
+      clock,
+      logger,
+      push: pushSender,
+      mediaStorage: options.mediaStorage,
+    });
     app.addHook('onReady', async () => {
       await jobs.start();
     });
@@ -343,6 +352,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       });
       await registerMediaRoutes(v1, { db, storage: options.mediaStorage, signer: mediaSigner });
       await registerNotificationRoutes(v1, { db, clock });
+      await registerAccountRoutes(v1, { db, clock, cache: revocationCache });
       await registerResidentRoutes(v1, { db, clock, mediaStorage: options.mediaStorage });
       await registerGateRoutes(v1, {
         db,

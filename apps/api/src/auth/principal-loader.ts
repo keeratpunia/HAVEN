@@ -97,6 +97,11 @@ export class RevocationCache {
     for (const listener of this.forgetListeners) listener(userId);
   }
 
+  /** Drops specific sessions (a guest has no user id to forget by — SDD §16.6). */
+  forgetSessions(sessionIds: readonly string[]): void {
+    for (const id of sessionIds) this.entries.delete(id);
+  }
+
   private readonly forgetListeners: ((userId: string) => void)[] = [];
 
   /** E.g. the SSE hub closes the user's open streams (FR-07). */

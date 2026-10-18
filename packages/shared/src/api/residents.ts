@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { DeletionWaitingFor } from './account.js';
 
 /** Resident onboarding and account contracts (SDD §12.4, §12.5, flow F7). */
 
@@ -42,6 +43,8 @@ export interface MeUserDTO {
   roles: { h: string; r: 'super_admin' | 'warden' | 'office' }[];
   residentStatus: ResidentStatus | null;
   resident: ResidentProfileDTO | null;
+  /** An open account-deletion request (FR-09, SDD §16.6), so the app can show it. */
+  deletionRequest?: { status: 'pending'; waitingFor: DeletionWaitingFor | null } | null;
 }
 
 export const QuotaQuerySchema = z.object({

@@ -41,6 +41,7 @@ import {
 import { enqueueNotification, wardenIdsFor } from '../notify/outbox.js';
 import {
   arrivedText,
+  chargeText,
   confirmLocationSms,
   confirmLocationText,
   leftText,
@@ -856,15 +857,26 @@ export async function approveOvernight(
           ? deps.rulesConfig.overnight_room.charge_per_night_inr
           : deps.rulesConfig.guest_room.charge_per_night_inr;
       if (current.nights > 0) {
-        await createPendingCharge(trx, {
+        const description = `${current.type === 'overnight_room' ? 'Overnight room' : 'Guest room'} stay, ${current.nights} night(s).`;
+        const charge = await createPendingCharge(trx, {
           hostelId: current.hostel_id,
           residentId: current.host_id,
           visitId: current.id,
           kind: current.type === 'overnight_room' ? 'overnight_room' : 'guest_room',
           units: current.nights,
           unitPriceInr: chargePerNight,
-          description: `${current.type === 'overnight_room' ? 'Overnight room' : 'Guest room'} stay, ${current.nights} night(s).`,
+          description,
           createdBy: params.principal?.type === 'user' ? params.principal.userId : null,
+        });
+        // N-CHARGE (§15.2): "Charge created or marked paid" → resident, in-app.
+        await enqueueNotification(trx, {
+          now: deps.clock.now(),
+          hostelId: current.hostel_id,
+          recipient: { type: 'user', userId: current.host_id },
+          kind: 'N-CHARGE',
+          channel: 'in_app',
+          text: chargeText({ amountInr: charge.amountInr, description, status: 'pending' }),
+          dedupeKey: `charge:${charge.id}:created`,
         });
       }
       await recordApproval(trx, {
