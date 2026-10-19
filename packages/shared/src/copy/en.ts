@@ -91,6 +91,43 @@ export const EN_COPY: Record<string, CopyEntry> = {
     body: "It's not you — try again in a moment.",
   },
 
+  // ---- Privacy notice and consent (SDD §16.3, FR-02, R-03) ----
+  // §16.3 says what the notice covers (purpose, data, who sees it, retention, how to
+  // delete, contact) but gives no wording. PROPOSED copy, docs/DECISIONS.md DEC-020.
+  // Changing any PRIVACY_* text means bumping CONSENT_VERSION (packages/shared/src/consent.ts).
+  PRIVACY_SUMMARY: {
+    title: 'Your privacy',
+    body: 'HAVEN uses your name, phone, gender and photos only to let you into the hostel and keep a record of your visits. Your host and the warden can see them. Photos are kept up to 180 days and your details for 365 days after your last visit. You can delete your account at any time.',
+  },
+  PRIVACY_CONSENT_LABEL: {
+    title: 'I agree to the privacy notice',
+    body: 'Read the full privacy notice',
+  },
+  PRIVACY_PURPOSE: {
+    title: 'Why we collect it',
+    body: 'Only to manage entry to the hostel: to check you are expected, to let your host recognise you, and to keep a record of who came in and left. Nothing is used for advertising or shared with third parties.',
+  },
+  PRIVACY_DATA: {
+    title: 'What we collect',
+    body: 'Guests: phone number, name, gender, a profile photo, a live photo each time you check in or out, and where you were when you scanned the gate (only to check you are at the gate, never tracked). Residents: name, Google email, phone, room, a hostel ID card photo and a selfie.',
+  },
+  PRIVACY_WHO: {
+    title: 'Who can see it',
+    body: "Your host and the warden. The warden's office sees charges only, without phone numbers or photos. Every view of photos and every export is logged.",
+  },
+  PRIVACY_RETENTION: {
+    title: 'How long we keep it',
+    body: "Gate photos: 180 days. Profile photo and your name and phone: 365 days after your last visit. Location from a scan: 1 day. A resident's ID card photo: deleted as soon as the warden decides.",
+  },
+  PRIVACY_DELETE: {
+    title: 'How to delete it',
+    body: 'Use Delete my account in My visits (guests) or Profile (residents). We sign you out at once and delete your data within 7 days.',
+  },
+  PRIVACY_CONTACT: {
+    title: 'Questions',
+    body: "Contact the warden's office of your hostel.",
+  },
+
   // ---- Account deletion (FR-09, SDD §16.6) ----
   // The SDD names only the button, "Delete my account" (§16.6). Everything below is not
   // in §13.6: proposed in docs/DECISIONS.md DEC-015 and APPROVED by the team (DEC-016).

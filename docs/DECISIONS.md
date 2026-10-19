@@ -1442,6 +1442,47 @@ Source for all of Part 1: SDD §2.7.
   build.
 - **SDD updated?** Not needed: §8.3 says how the API is hosted, not how it is built.
 
+### DEC-020 — Privacy-notice wording, consent version, and what a "complete profile" is (FINAL-QA-REPORT D-05)
+
+- **Date:** 2026-10-19
+- **Context:** SDD §16.3 requires a short notice on G-04 and R-03, an explicit
+  checkbox that is not pre-ticked, full text at `/privacy`, and storing `consent_version`
+  plus `consent_at`. It lists what the notice must cover (purpose, data, who sees it,
+  retention, how to delete, contact) but gives **no wording**. Separately, §12.2 defines
+  `PROFILE_INCOMPLETE` (403, "Guest must finish profile first") without saying which
+  fields make a profile complete. FR-02 lists them: full name, gender, 18+, privacy
+  notice, profile selfie.
+- **Decision:**
+  - **Wording.** The notice copy lives in `packages/shared/src/copy/en.ts` as `PRIVACY_*`.
+    It is **proposed** wording built from §16.3's list and the §16.5 retention schedule,
+    pending the warden's/legal sign-off (CLAUDE.md §1.2: copy the SDD does not give is
+    proposed, not invented as final).
+  - **Versioning.** The version a person agrees to is `CONSENT_VERSION`
+    (`packages/shared/src/consent.ts`, currently `privacy-2026-10-19`). Any change to the
+    `PRIVACY_*` text bumps it. The API accepts only the current version.
+  - **Complete profile.** A guest's profile is complete when the name is no longer the
+    placeholder `Guest`, `is_adult_confirmed` is true, `consent_at` is set, and there is
+    a profile photo. These are FR-02's items; gender always has a value (default
+    `undisclosed`).
+  - **Enforcement.** The API returns `PROFILE_INCOMPLETE` (403) on invite claim, gate
+    check-in and walk-in. On claim it comes after `INVITE_PHONE_MISMATCH`, so a wrong
+    phone is still reported at G-02 (F1 step 4).
+  - **App flow.** The app calls `POST /me/consent` from G-04. It claims the invite once
+    G-05's photo is stored, and a failed photo upload is shown with a retake rather than
+    skipped.
+  - **Residents.** They give consent at R-03: `POST /residents/me/submit` requires
+    `{ consent: true, consentVersion }` and stores both on `residents`. The new
+    `consent_version` and `consent_at` columns come from migration
+    `20261021000002_resident_consent.sql`.
+- **Alternatives considered:**
+  - Keep the one-line "per HAVEN's privacy notice" text without a checkbox. Rejected:
+    §16.3 requires an explicit checkbox.
+  - Enforce completeness only in the app. Rejected: the brief and §12.2 put it on the
+    API.
+- **SDD updated?** No text change is needed for the version and completeness rules,
+  which follow FR-02 and §16.3. The notice wording needs approval by the warden/legal
+  before real data is loaded (NFR-07).
+
 Template for a new entry:
 
 ```markdown

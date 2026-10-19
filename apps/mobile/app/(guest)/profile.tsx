@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
+import { CONSENT_VERSION, copyFor } from '@haven/shared';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import * as api from '../../api/client.js';
@@ -22,16 +23,21 @@ export default function Profile() {
   const [fullName, setFullName] = useState('');
   const [gender, setGender] = useState<Gender | null>(null);
   const [isAdult, setIsAdult] = useState<boolean | null>(null);
+  // §16.3 "explicit checkbox, not pre-ticked".
+  const [consented, setConsented] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoKey, setPhotoKey] = useState(0);
 
   async function continueFromAbout() {
     if (!fullName.trim() || fullName.trim().length < 2 || !gender || isAdult === null) return;
-    if (!isAdult) return; // under-18 message shown inline; Continue stays disabled below
+    if (!isAdult || !consented) return; // Continue stays disabled below
     setSaving(true);
     setError(null);
     try {
-      await api.patchMe({ fullName: fullName.trim(), gender, isAdultConfirmed: true });
+      await api.patchMe({ fullName: fullName.trim(), gender });
+      // SDD §12.4 POST /me/consent records the notice version and 18+ (§16.3).
+      await api.postConsent(CONSENT_VERSION);
       setStep('photo');
     } catch {
       setError('Could not save your details. Try again.');
@@ -41,16 +47,26 @@ export default function Profile() {
   }
 
   async function finishWithPhoto(dataUrl: string) {
+    setError(null);
     try {
       const blob = await (await fetch(dataUrl)).blob();
       await api.uploadProfilePhoto(blob);
-    } catch {
-      // A failed profile-photo upload shouldn't block onboarding — SDD §9.4's photo
-      // pipeline has its own PHOTO_INVALID/PHOTO_REUSED errors a guest can't act on
-      // mid-onboarding; the guest still completed a live capture (no gallery), and a
-      // missing profile photo doesn't block anything downstream.
+    } catch (err) {
+      // The profile photo is part of a complete profile (FR-02): without it the API
+      // refuses check-in and walk-ins (PROFILE_INCOMPLETE). Say why and let them retake.
+      setError(copyFor(err instanceof api.ApiError ? err.code : 'PHOTO_INVALID').title);
+      setPhotoKey((k) => k + 1);
+      return;
     }
     await refresh();
+    if (token) {
+      // F1 step 5: with the profile finished the invite becomes this guest's.
+      try {
+        await api.claimInvite(token);
+      } catch {
+        // Already claimed by this guest, or expired: My visits shows where things stand.
+      }
+    }
     if (returnTo) {
       router.replace(returnTo);
     } else if (token) {
@@ -65,10 +81,16 @@ export default function Profile() {
       <View style={styles.container}>
         <Text style={styles.title}>Take your profile photo</Text>
         <LiveCamera
+          key={photoKey}
           guideText="Good light, no sunglasses."
           onCapture={(dataUrl) => void finishWithPhoto(dataUrl)}
           onPermissionDenied={() => setError('camera_denied')}
         />
+        {error && error !== 'camera_denied' ? (
+          <Text style={styles.error} accessibilityRole="alert">
+            {error}
+          </Text>
+        ) : null}
         {error === 'camera_denied' ? (
           <View style={styles.deniedBox}>
             <Text style={styles.title}>Camera is blocked</Text>
@@ -140,9 +162,26 @@ export default function Profile() {
         </Text>
       ) : null}
 
-      <Text style={styles.privacy}>
-        We only use your details to manage your visit, per HAVEN's privacy notice.
-      </Text>
+      <View style={styles.notice}>
+        <Text style={styles.label}>{copyFor('PRIVACY_SUMMARY').title}</Text>
+        <Text style={styles.privacy}>{copyFor('PRIVACY_SUMMARY').body}</Text>
+        <Link href="/privacy" style={styles.link}>
+          {copyFor('PRIVACY_CONSENT_LABEL').body}
+        </Link>
+      </View>
+      <Pressable
+        onPress={() => setConsented((v) => !v)}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: consented }}
+        aria-checked={consented}
+        accessibilityLabel={copyFor('PRIVACY_CONSENT_LABEL').title}
+        style={styles.checkboxRow}
+      >
+        <View style={[styles.checkbox, consented && styles.checkboxChecked]}>
+          {consented ? <Text style={styles.checkmark}>✓</Text> : null}
+        </View>
+        <Text style={styles.body}>{copyFor('PRIVACY_CONSENT_LABEL').title}</Text>
+      </Pressable>
 
       {error && error !== 'camera_denied' ? (
         <Text style={styles.error} accessibilityRole="alert">
@@ -155,7 +194,9 @@ export default function Profile() {
           label="Continue"
           onPress={continueFromAbout}
           loading={saving}
-          disabled={!fullName.trim() || fullName.trim().length < 2 || !gender || !isAdult}
+          disabled={
+            !fullName.trim() || fullName.trim().length < 2 || !gender || !isAdult || !consented
+          }
         />
       </View>
     </View>
@@ -205,7 +246,9 @@ const styles = StyleSheet.create({
   },
   checkboxChecked: { backgroundColor: color.primary, borderColor: color.primary },
   checkmark: { color: color.onPrimary, fontSize: typeTokens.size.sm },
-  privacy: { fontSize: typeTokens.size.xs, color: color.textMuted },
+  privacy: { fontSize: typeTokens.size.sm, color: color.textMuted },
+  notice: { gap: space.xxs },
+  link: { fontSize: typeTokens.size.sm, color: color.primary, textDecorationLine: 'underline' },
   error: { fontSize: typeTokens.size.sm, color: color.danger },
   action: { marginTop: space.sm },
   deniedBox: { gap: space.xs, marginTop: space.md },

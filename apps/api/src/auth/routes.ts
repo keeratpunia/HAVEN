@@ -10,7 +10,12 @@ import { AppError } from '../lib/errors.js';
 import { REFRESH_COOKIE_NAME, refreshCookieOptions } from '../lib/cookies.js';
 import { normalizePhone } from './phone.js';
 import { requestOtp, verifyOtp } from './otp-service.js';
-import { findOrCreateVisitorByPhone } from './visitor-service.js';
+import {
+  assertVisitorProfileComplete,
+  findOrCreateVisitorByPhone,
+  isProfileComplete,
+} from './visitor-service.js';
+import { CONSENT_VERSION } from '@haven/shared';
 import { signInWithGoogle, getResidentStatus } from './google-service.js';
 import { devLogin } from './dev-login.js';
 import { issueTokensForUser, issueTokensForVisitor, type IssuedTokens } from './tokens.js';
@@ -58,6 +63,10 @@ const GoogleSignInBody = z.object({
   staffInviteToken: z.string().min(1).optional(),
 });
 const DevLoginBody = z.object({ email: z.string().email() });
+// §12.4 POST /me/consent { version, isAdult: true } → 204 (§16.3 consent record).
+const ConsentBody = z
+  .object({ version: z.literal(CONSENT_VERSION), isAdult: z.literal(true) })
+  .strict();
 const RefreshBody = z.object({ refreshToken: z.string().min(1).optional() });
 const InviteClaimParams = z.object({ token: z.string().min(1) });
 
@@ -338,7 +347,16 @@ export async function registerAuthRoutes(
     authorize(principal, 'me.read', { ownerType: 'visitor', ownerId: principal.visitorId });
     const row = await db
       .selectFrom('haven.visitors')
-      .select(['id', 'full_name', 'phone', 'gender', 'is_adult_confirmed'])
+      .select([
+        'id',
+        'full_name',
+        'phone',
+        'gender',
+        'is_adult_confirmed',
+        'consent_at',
+        'consent_version',
+        'profile_media_id',
+      ])
       .where('id', '=', principal.visitorId)
       .executeTakeFirstOrThrow();
     reply.send({
@@ -348,6 +366,9 @@ export async function registerAuthRoutes(
       phone: row.phone,
       gender: row.gender,
       isAdultConfirmed: row.is_adult_confirmed,
+      consentVersion: row.consent_version,
+      hasProfilePhoto: row.profile_media_id !== null,
+      profileComplete: isProfileComplete(row),
       deletionRequest: await openDeletionRequest(db, { type: 'visitor', id: principal.visitorId }),
     });
   });
@@ -398,6 +419,31 @@ export async function registerAuthRoutes(
     },
   );
 
+  // POST /v1/me/consent — G-04's privacy-notice checkbox and 18+ (SDD §12.4, §16.3).
+  api.post(
+    '/me/consent',
+    { schema: { body: ConsentBody }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = request.principal;
+      if (!principal || principal.type !== 'visitor') {
+        throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest first.');
+      }
+      authorize(principal, 'me.update', { ownerType: 'visitor', ownerId: principal.visitorId });
+      await withTx(db, { principal, requestId: request.id }, async (trx) => {
+        await trx
+          .updateTable('haven.visitors')
+          .set({
+            consent_version: request.body.version,
+            consent_at: clock.now().toISOString(),
+            is_adult_confirmed: true,
+          })
+          .where('id', '=', principal.visitorId)
+          .execute();
+      });
+      reply.status(204).send();
+    },
+  );
+
   // POST /v1/me/profile-photo — guest profile selfie (SDD §9.4, G-05).
   api.post('/me/profile-photo', { preHandler: requireAuth }, async (request, reply) => {
     const principal = request.principal;
@@ -439,7 +485,17 @@ export async function registerAuthRoutes(
       }
 
       const result = await withTx(db, { principal, requestId: request.id }, async (trx) =>
-        claimInvite(trx, { token, visitorId: principal.visitorId, visitorPhone }, clock),
+        claimInvite(
+          trx,
+          {
+            token,
+            visitorId: principal.visitorId,
+            visitorPhone,
+            // F1 step 5: the profile is finished before the invite becomes this guest's.
+            beforeBind: () => assertVisitorProfileComplete(trx, principal.visitorId),
+          },
+          clock,
+        ),
       );
       reply.status(200).send(result);
     },

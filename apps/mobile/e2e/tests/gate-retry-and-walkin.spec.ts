@@ -75,6 +75,7 @@ test('walk-in: a guest with no existing visit finds a host, picks a visit type, 
   await page.getByLabel('Full name').fill('Walk In Guest');
   await page.getByRole('radio', { name: 'Female' }).click();
   await page.getByRole('checkbox', { name: 'I am 18 years or older' }).click();
+  await page.getByRole('checkbox', { name: 'I agree to the privacy notice' }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
 
   await expect(page.getByText('Take your profile photo')).toBeVisible();

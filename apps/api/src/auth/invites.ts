@@ -14,7 +14,14 @@ import type { Clock } from '../lib/clock.js';
  */
 export async function claimInvite(
   trx: Transaction<Database>,
-  params: { token: string; visitorId: string; visitorPhone: string },
+  params: {
+    token: string;
+    visitorId: string;
+    visitorPhone: string;
+    /** Runs after the token and phone checks, before the visit is bound (F1 step 5:
+     * PROFILE_INCOMPLETE comes after a phone mismatch, which G-02 shows first). */
+    beforeBind?: () => Promise<void>;
+  },
   clock: Clock,
 ): Promise<{ visitId: string }> {
   const tokenHash = sha256(params.token);
@@ -43,6 +50,7 @@ export async function claimInvite(
     );
   }
 
+  await params.beforeBind?.();
   await trx
     .updateTable('haven.visits')
     .set({ visitor_id: params.visitorId })

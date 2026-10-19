@@ -276,6 +276,11 @@ export function patchMe(patch: {
   return request<void>('/v1/me', { method: 'PATCH', body: patch });
 }
 
+/** SDD §12.4 POST /me/consent — G-04's privacy checkbox and 18+ (§16.3). */
+export function postConsent(version: string) {
+  return request<void>('/v1/me/consent', { method: 'POST', body: { version, isAdult: true } });
+}
+
 /** SDD §9.4, G-05 — the guest's live profile selfie. */
 export function uploadProfilePhoto(photo: Blob) {
   const formData = new FormData();
@@ -364,8 +369,11 @@ export function uploadResidentDocument(kind: 'id_card' | 'selfie', photo: Blob) 
   return request<{ photoId: string }>('/v1/residents/me/documents', { method: 'POST', formData });
 }
 
-export function submitResident() {
-  return request<void>('/v1/residents/me/submit', { method: 'POST' });
+export function submitResident(consentVersion: string) {
+  return request<void>('/v1/residents/me/submit', {
+    method: 'POST',
+    body: { consent: true, consentVersion },
+  });
 }
 
 export function previewVisit(body: CreateVisitBody) {

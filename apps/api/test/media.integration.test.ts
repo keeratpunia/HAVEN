@@ -45,12 +45,15 @@ beforeEach(async () => {
   storage.objects.clear();
   clock.set(NOW);
   w = await hostelWorld();
+  uploader = await makeVisitor(db, undefined, 'female', { complete: false });
 });
 
 const solid = (width: number, height: number, shade = 120) =>
   sharp({ create: { width, height, channels: 3, background: { r: shade, g: 80, b: 40 } } });
 
-async function upload(bytes: Buffer, filename = 'photo.jpg', visitorId = w.visitorId) {
+/** Uploads come from a guest taking their first profile photo (no photo yet). */
+let uploader: string;
+async function upload(bytes: Buffer, filename = 'photo.jpg', visitorId = uploader) {
   const token = await issueToken(clock, { type: 'visitor', id: visitorId });
   return supertest(app.server)
     .post('/v1/me/profile-photo')
@@ -75,7 +78,13 @@ describe('upload pipeline (SDD §9.4)', () => {
     const res = await upload(big);
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('PHOTO_INVALID');
-    expect(await db.selectFrom('haven.media').select('id').execute()).toEqual([]);
+    expect(
+      await db
+        .selectFrom('haven.media')
+        .select('id')
+        .where('owner_visitor_id', '=', uploader)
+        .execute(),
+    ).toEqual([]);
   });
 
   it('refuses a non-image renamed .jpg (magic bytes, not the MIME header)', async () => {
@@ -158,7 +167,7 @@ describe('upload pipeline (SDD §9.4)', () => {
     expect(row).toEqual({
       bucket: 'visitor-photos',
       kind: 'visitor_profile',
-      path: `${w.visitorId}/${res.body.photoId}.jpg`,
+      path: `${uploader}/${res.body.photoId}.jpg`,
     });
     expect([...storage.objects.keys()]).toEqual([`visitor-photos/${row.path}`]);
   });
@@ -176,7 +185,7 @@ describe('SA-17: the same photo uploaded twice at once', () => {
     const rows = await db
       .selectFrom('haven.media')
       .select('id')
-      .where('owner_visitor_id', '=', w.visitorId)
+      .where('owner_visitor_id', '=', uploader)
       .execute();
     expect(rows).toHaveLength(1);
   });

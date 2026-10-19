@@ -70,6 +70,7 @@ async function submitWalkIn(page: Page, phone: string, guestName: string) {
   await page.getByLabel('Full name').fill(guestName);
   await page.getByRole('radio', { name: 'Female' }).click();
   await page.getByRole('checkbox', { name: 'I am 18 years or older' }).click();
+  await page.getByRole('checkbox', { name: 'I agree to the privacy notice' }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
   await expect(page.getByText('Take your profile photo')).toBeVisible();
   await takeLivePhoto(page);

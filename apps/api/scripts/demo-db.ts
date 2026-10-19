@@ -20,7 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
 import sharp from 'sharp';
-import { GH8_RULES_CONFIG_V1 } from '@haven/shared';
+import { CONSENT_VERSION, GH8_RULES_CONFIG_V1 } from '@haven/shared';
 import { encryptAesGcm, parseDataEncryptionKey, sha256 } from '../src/lib/crypto.js';
 import { generatePairingCode, formatPairingCodeForDisplay } from '../src/lib/ids.js';
 import {
@@ -358,6 +358,40 @@ async function main() {
      values ($1, $2, $3, $4)`,
     [sha256(pairingCode), gateId, resident1Id, expiresAt.toISOString()],
   );
+
+  // FR-02 / §12.2: a guest needs a finished profile (name, 18+, consent, profile photo)
+  // before the API lets them claim, check in or walk in. Seeded guests stand in for
+  // people who already did G-04/G-05.
+  const unfinished = await client.query<{ id: string }>(
+    `select id from haven.visitors where created_by_host_id is null and profile_media_id is null`,
+  );
+  for (const [i, v] of unfinished.rows.entries()) {
+    const bytes = await sharp({
+      create: {
+        width: 96,
+        height: 96,
+        channels: 3,
+        background: { r: 40 + i * 20, g: 140, b: 180 },
+      },
+    })
+      .jpeg()
+      .toBuffer();
+    const mediaPath = `${v.id}/profile.jpg`;
+    mkdirSync(path.dirname(path.join(mediaRoot, 'visitor-photos', mediaPath)), { recursive: true });
+    writeFileSync(path.join(mediaRoot, 'visitor-photos', mediaPath), bytes);
+    const m = await client.query<{ id: string }>(
+      `insert into haven.media (kind, bucket, path, sha256, bytes, owner_visitor_id)
+       values ('visitor_profile', 'visitor-photos', $1, $2, $3, $4)
+       on conflict (path) do update set deleted_at = null returning id`,
+      [mediaPath, sha256(bytes), bytes.length, v.id],
+    );
+    await client.query(
+      `update haven.visitors
+          set profile_media_id = $2, is_adult_confirmed = true, consent_version = $3, consent_at = now()
+        where id = $1`,
+      [v.id, m.rows[0].id, CONSENT_VERSION],
+    );
+  }
 
   await client.end();
 

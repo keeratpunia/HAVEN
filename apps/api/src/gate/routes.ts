@@ -20,6 +20,7 @@ import { pairDevice, recordHeartbeat } from './devices.js';
 import { storeGatePhoto, type MediaStorage } from './media.js';
 import { consumeScanSession } from './repository.js';
 import { authorize } from '../auth/policy.js';
+import { assertVisitorProfileComplete } from '../auth/visitor-service.js';
 import { displayName } from '@haven/shared';
 import {
   consumeSession,
@@ -349,6 +350,7 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to check in.');
       }
+      await assertVisitorProfileComplete(db, request.principal.visitorId);
       const nonce = scanNonceFrom(request);
       const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
         visitorId: request.principal.visitorId,
@@ -435,6 +437,7 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to request a visit.');
       }
+      await assertVisitorProfileComplete(db, request.principal.visitorId);
       const nonce = scanNonceFrom(request);
       const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
         visitorId: request.principal.visitorId,

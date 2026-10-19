@@ -40,6 +40,7 @@ test('guest can claim an invite, sign in, complete their profile, scan the gate,
   await page.getByLabel('Full name').fill('Asha Guest');
   await page.getByRole('radio', { name: 'Female' }).click();
   await page.getByRole('checkbox', { name: 'I am 18 years or older' }).click();
+  await page.getByRole('checkbox', { name: 'I agree to the privacy notice' }).click();
   await page.getByRole('button', { name: 'Continue' }).click();
 
   await expect(page.getByText('Take your profile photo')).toBeVisible();

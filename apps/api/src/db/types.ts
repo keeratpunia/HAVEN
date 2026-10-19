@@ -114,6 +114,8 @@ interface ResidentsTable {
   decided_at: ColumnType<Date | null, string | null | undefined, string | null>;
   rejection_reason: string | null;
   resubmissions: Generated<number>;
+  consent_version: string | null;
+  consent_at: ColumnType<Date | null, string | null | undefined, string | null>;
   hosting_suspended_until: ColumnType<Date | null, string | null | undefined, string | null>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;

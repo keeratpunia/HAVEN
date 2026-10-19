@@ -31,6 +31,7 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { z } from 'zod';
+import { CONSENT_VERSION } from '@haven/shared';
 import { encryptAesGcm, parseDataEncryptionKey, randomSecret, sha256 } from '../src/lib/crypto.js';
 
 const SeedEnvSchema = z.object({
@@ -280,10 +281,10 @@ async function seedVisitors(client: pg.Client): Promise<string[]> {
     const phone = `+9199999000${String(i).padStart(2, '0')}`;
     const res = await client.query<{ id: string }>(
       `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed, consent_version, consent_at)
-       values ($1, $2, $3, true, 'v1', now())
+       values ($1, $2, $3, true, $4, now())
        on conflict (phone) do update set full_name = excluded.full_name
        returning id`,
-      [phone, `Test Guest ${i}`, genders[i % genders.length]],
+      [phone, `Test Guest ${i}`, genders[i % genders.length], CONSENT_VERSION],
     );
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- RETURNING on an upsert always returns exactly one row
     visitorIds.push(res.rows[0]!.id);

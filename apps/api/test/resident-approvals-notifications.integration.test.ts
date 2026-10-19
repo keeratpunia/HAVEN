@@ -189,7 +189,11 @@ describe('walk-in approvals (FR-40, FR-41, R-08)', () => {
     expect(host.body.latestPhoto.url).toMatch(
       /^http:\/\/api\.haven\.test\/v1\/media\/[0-9a-f-]+\?exp=\d+&sig=/,
     );
-    expect(host.body.guest.profilePhoto).toBeNull();
+    // FR-40: R-08 shows the live photo beside the profile photo (every guest has one
+    // since profiles must be complete, FR-02).
+    expect(host.body.guest.profilePhoto.url).toMatch(
+      /^http:\/\/api\.haven\.test\/v1\/media\/[0-9a-f-]+\?exp=\d+&sig=/,
+    );
 
     const key = idem();
     const windowEnd = new Date(NOW.getTime() + 2 * HOUR).toISOString();

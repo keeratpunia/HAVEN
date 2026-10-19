@@ -1,3 +1,5 @@
+import { CONSENT_VERSION } from '@haven/shared';
+import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Kysely } from 'kysely';
 import { ResidentDocumentKindSchema, ResidentMeBodySchema } from '@haven/shared';
@@ -17,6 +19,10 @@ import {
 } from './service.js';
 
 /** SDD §12.5 resident onboarding endpoints (F7, R-02..R-04). */
+
+const SubmitBody = z
+  .object({ consentVersion: z.literal(CONSENT_VERSION), consent: z.literal(true) })
+  .strict();
 
 let policiesRegistered = false;
 export function registerResidentPolicies(): void {
@@ -97,9 +103,17 @@ export async function registerResidentRoutes(
   });
 
   // POST /v1/residents/me/submit — needs phone verified + both documents (SDD §12.5).
-  api.post('/residents/me/submit', { preHandler: requireAuth }, async (request, reply) => {
-    const principal = requireUser(request.principal);
-    await submitForVerification({ db, clock }, { principal, requestId: request.id });
-    reply.status(204).send();
-  });
+  // R-03 "consent": the checkbox's agreement and the notice version (SDD §16.3).
+  api.post(
+    '/residents/me/submit',
+    { schema: { body: SubmitBody }, preHandler: requireAuth },
+    async (request, reply) => {
+      const principal = requireUser(request.principal);
+      await submitForVerification(
+        { db, clock },
+        { principal, requestId: request.id, consentVersion: request.body.consentVersion },
+      );
+      reply.status(204).send();
+    },
+  );
 }

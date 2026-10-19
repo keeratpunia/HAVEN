@@ -1,5 +1,6 @@
+import { CONSENT_VERSION, copyFor } from '@haven/shared';
 import { useEffect, useState } from 'react';
-import { Redirect, useRouter } from 'expo-router';
+import { Link, Redirect, useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { RoomNumberSchema } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
@@ -91,7 +92,7 @@ export default function Onboarding() {
     setError(null);
     setLoading(true);
     try {
-      await api.submitResident();
+      await api.submitResident(CONSENT_VERSION);
       await refresh();
       router.replace('/pending');
     } catch (err) {
@@ -201,6 +202,9 @@ export default function Onboarding() {
               they can verify me. The ID card photo is deleted once the warden decides.
             </Text>
           </Pressable>
+          <Link href="/privacy" style={styles.link}>
+            {copyFor('PRIVACY_CONSENT_LABEL').body}
+          </Link>
           <Button
             label="Submit for verification"
             onPress={submit}
@@ -266,6 +270,7 @@ const styles = StyleSheet.create({
     fontSize: typeTokens.size.body,
     color: color.text,
   },
+  link: { fontSize: typeTokens.size.sm, color: color.primary, textDecorationLine: 'underline' },
   consent: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start', minHeight: 48 },
   box: {
     width: 24,

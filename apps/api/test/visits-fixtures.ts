@@ -1,3 +1,4 @@
+import { CONSENT_VERSION } from '@haven/shared';
 import type { Kysely } from 'kysely';
 import type { Database } from '../src/db/index.js';
 
@@ -66,20 +67,50 @@ export async function makeWarden(db: Kysely<Database>, hostelId: string) {
   return user.id;
 }
 
+/**
+ * A guest. By default their profile is complete — name, 18+, consent to the privacy
+ * notice and a profile photo — as every real guest's is before they can claim, walk in
+ * or check in (FR-02, PROFILE_INCOMPLETE). Pass `{ complete: false }` for a guest who
+ * has only verified their phone.
+ */
 export async function makeVisitor(
   db: Kysely<Database>,
   phone?: string,
   gender: 'female' | 'male' | 'undisclosed' = 'female',
+  opts: { complete?: boolean } = {},
 ) {
+  const complete = opts.complete ?? true;
   const row = await db
     .insertInto('haven.visitors')
     .values({
       phone: phone ?? `+9198765${String(10000 + unique()).padStart(5, '0')}`,
-      full_name: 'Test Guest',
+      full_name: complete ? 'Test Guest' : 'Guest',
       gender,
+      is_adult_confirmed: complete,
+      consent_version: complete ? CONSENT_VERSION : null,
+      consent_at: complete ? new Date('2026-09-01T00:00:00.000Z').toISOString() : null,
     })
     .returning('id')
     .executeTakeFirstOrThrow();
+  if (complete) {
+    const media = await db
+      .insertInto('haven.media')
+      .values({
+        kind: 'visitor_profile',
+        bucket: 'visitor-photos',
+        path: `${row.id}/profile-${unique()}.jpg`,
+        sha256: Buffer.from(`profile-${row.id}`),
+        bytes: 4,
+        owner_visitor_id: row.id,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await db
+      .updateTable('haven.visitors')
+      .set({ profile_media_id: media.id })
+      .where('id', '=', row.id)
+      .execute();
+  }
   return row.id;
 }
 

@@ -15,3 +15,4 @@ export * from './copy/en.js';
 export * from './api/index.js';
 export * from './format.js';
 export * from './scrub.js';
+export * from './consent.js';

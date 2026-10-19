@@ -63,6 +63,12 @@ export default function Login() {
         try {
           await api.claimInvite(token);
         } catch (claimErr) {
+          // F1 step 5: the phone matched but the profile isn't done yet — the profile
+          // screen finishes it and then claims.
+          if (claimErr instanceof api.ApiError && claimErr.code === 'PROFILE_INCOMPLETE') {
+            router.replace({ pathname: '/profile', params: { token } });
+            return;
+          }
           // SDD F1 step 4: "If [the signed-in phone] differs from invited_phone, show
           // error." Other claim failures (already claimed, expired) aren't fatal to
           // sign-in itself — the guest still has an account; only the phone-mismatch

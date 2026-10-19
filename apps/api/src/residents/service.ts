@@ -153,7 +153,7 @@ export async function assertEditableDraft(db: Kysely<Database>, userId: string):
 /** `POST /residents/me/submit` — "needs phone verified + both documents; notifies wardens". */
 export async function submitForVerification(
   deps: { db: Kysely<Database>; clock: Clock },
-  p: { principal: UserPrincipal; requestId: string },
+  p: { principal: UserPrincipal; requestId: string; consentVersion: string },
 ): Promise<void> {
   authorize(p.principal, 'residents.update_self', { userId: p.principal.userId });
   await withTx(deps.db, { principal: p.principal, requestId: p.requestId }, async (trx) => {
@@ -185,6 +185,9 @@ export async function submitForVerification(
       .set({
         status: 'pending',
         submitted_at: now.toISOString(),
+        // §16.3: R-03's consent checkbox, recorded with the notice version it showed.
+        consent_version: p.consentVersion,
+        consent_at: now.toISOString(),
         rejection_reason: null,
         decided_at: null,
         decided_by: null,

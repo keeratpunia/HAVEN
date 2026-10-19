@@ -1,3 +1,4 @@
+import { CONSENT_VERSION } from '@haven/shared';
 import type { FastifyInstance } from 'fastify';
 import supertest from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -61,6 +62,9 @@ async function createInvite(token: string, overrides: Record<string, unknown> = 
     .send(inviteBody(overrides));
 }
 
+// R-03 consent to the privacy notice (SDD §16.3), required on submit since D-05.
+const CONSENT = { consent: true, consentVersion: CONSENT_VERSION };
+
 describe('resident onboarding (SDD F7, FR-04)', () => {
   it('walks R-02 → R-03 → submit → R-04 and notifies wardens with N-RES-SUBMITTED', async () => {
     const hostelId = await makeHostel(db);
@@ -86,7 +90,10 @@ describe('resident onboarding (SDD F7, FR-04)', () => {
     }
 
     // Submitting before the phone is verified (R-02) is refused, naming what's missing.
-    const early = await supertest(app.server).post('/v1/residents/me/submit').set(auth);
+    const early = await supertest(app.server)
+      .post('/v1/residents/me/submit')
+      .set(auth)
+      .send(CONSENT);
     expect(early.status).toBe(400);
     expect(early.body.error.details.missing).toEqual(['phone']);
 
@@ -100,7 +107,10 @@ describe('resident onboarding (SDD F7, FR-04)', () => {
       .send({ phone: '+919999900001', code: '123456', purpose: 'phone_verify' })
       .expect(200);
 
-    const submit = await supertest(app.server).post('/v1/residents/me/submit').set(auth);
+    const submit = await supertest(app.server)
+      .post('/v1/residents/me/submit')
+      .set(auth)
+      .send(CONSENT);
     expect(submit.status).toBe(204);
 
     const me = await supertest(app.server).get('/v1/me').set(auth);
@@ -125,9 +135,9 @@ describe('resident onboarding (SDD F7, FR-04)', () => {
     expect(notif.body).toBe('Priya Sharma, room 214.');
 
     // Duplicate submit and late edits are refused.
-    expect((await supertest(app.server).post('/v1/residents/me/submit').set(auth)).status).toBe(
-      409,
-    );
+    expect(
+      (await supertest(app.server).post('/v1/residents/me/submit').set(auth).send(CONSENT)).status,
+    ).toBe(409);
     expect(
       (
         await supertest(app.server)
@@ -181,16 +191,19 @@ describe('resident onboarding (SDD F7, FR-04)', () => {
       canResubmit: true,
     });
 
-    expect((await supertest(app.server).post('/v1/residents/me/submit').set(auth)).status).toBe(
-      204,
-    );
+    expect(
+      (await supertest(app.server).post('/v1/residents/me/submit').set(auth).send(CONSENT)).status,
+    ).toBe(204);
     // Rejected a second time: no resubmission left.
     await db
       .updateTable('haven.residents')
       .set({ status: 'rejected' })
       .where('user_id', '=', userId)
       .execute();
-    const again = await supertest(app.server).post('/v1/residents/me/submit').set(auth);
+    const again = await supertest(app.server)
+      .post('/v1/residents/me/submit')
+      .set(auth)
+      .send(CONSENT);
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('CONFLICT');
   });
