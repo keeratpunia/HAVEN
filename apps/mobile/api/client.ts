@@ -590,38 +590,45 @@ export function uploadScanSessionPhoto(sessionId: string, nonce: string, photo: 
   });
 }
 
+// ★ gate actions (SDD §9.12): `key` is generated once per user action and reused on
+// retries, so a repeat replays the first answer (E-10).
 export function scanSessionCheckIn(
   sessionId: string,
   nonce: string,
+  key: string,
   params: { visitId: string; photoId: string },
 ) {
   return request<{ visit: VisitDto; result: 'inside' | 'awaiting_host_confirmation' }>(
     `/v1/scan-sessions/${sessionId}/check-in`,
-    { method: 'POST', body: params, headers: { 'X-Scan-Nonce': nonce } },
+    { method: 'POST', body: params, headers: { 'X-Scan-Nonce': nonce }, idempotencyKey: key },
   );
 }
 
 export function scanSessionCheckOut(
   sessionId: string,
   nonce: string,
+  key: string,
   params: { visitId: string; photoId: string },
 ) {
   return request<{ visit: VisitDto }>(`/v1/scan-sessions/${sessionId}/check-out`, {
     method: 'POST',
     body: params,
     headers: { 'X-Scan-Nonce': nonce },
+    idempotencyKey: key,
   });
 }
 
 export function scanSessionWalkIn(
   sessionId: string,
   nonce: string,
+  key: string,
   params: { hostId: string; type: 'day' | 'quick_drop'; durationMinutes: number; photoId: string },
 ) {
   return request<{ visit: VisitDto }>(`/v1/scan-sessions/${sessionId}/walk-in`, {
     method: 'POST',
     body: params,
     headers: { 'X-Scan-Nonce': nonce },
+    idempotencyKey: key,
   });
 }
 

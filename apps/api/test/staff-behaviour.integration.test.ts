@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
@@ -394,6 +395,7 @@ describe('SSE: dashboard sees a gate check-in without reload (FR-50)', () => {
     const scan = await scanAndPhoto(app, clock, { gate: A.gate, bearer: guest });
     const res = await supertest(app.server)
       .post(`/v1/scan-sessions/${scan.sessionId}/check-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${guest}`)
       .set('X-Scan-Nonce', scan.nonce)
       .send({ visitId: visit, photoId: scan.photoId });
@@ -612,6 +614,7 @@ describe('staff actions and their effects', () => {
     const scan = await scanAndPhoto(app, clock, { gate: A.gate, bearer: guest });
     const checkIn = await supertest(app.server)
       .post(`/v1/scan-sessions/${scan.sessionId}/check-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${guest}`)
       .set('X-Scan-Nonce', scan.nonce)
       .send({ visitId: next, photoId: scan.photoId });

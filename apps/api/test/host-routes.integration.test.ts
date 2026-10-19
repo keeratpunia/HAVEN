@@ -224,6 +224,7 @@ describe('host visits routes (SDD §12.6) end to end', () => {
 
     const walkInRes = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/walk-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${visitorToken}`)
       .set('X-Scan-Nonce', 'approve-nonce')
       .send({ hostId, type: 'day', durationMinutes: 60, photoId });
@@ -278,6 +279,7 @@ describe('host visits routes (SDD §12.6) end to end', () => {
 
     const walkInRes = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/walk-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${visitorToken}`)
       .set('X-Scan-Nonce', 'reject-nonce')
       .send({ hostId, type: 'day', durationMinutes: 60, photoId });
@@ -323,6 +325,7 @@ describe('host visits routes (SDD §12.6) end to end', () => {
 
     const walkInRes = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/walk-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${visitorToken}`)
       .set('X-Scan-Nonce', 'cancel-nonce')
       .send({ hostId, type: 'day', durationMinutes: 60, photoId });

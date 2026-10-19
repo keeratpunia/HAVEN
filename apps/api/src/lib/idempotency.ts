@@ -3,6 +3,7 @@ import type { Kysely } from 'kysely';
 import { z } from 'zod';
 import type { Database } from '../db/index.js';
 import { AppError } from './errors.js';
+import { authorize, definePolicy } from '../auth/policy.js';
 
 /**
  * SDD §9.12: "POSTs that change gate or visit state MUST carry Idempotency-Key: <uuid>
@@ -17,6 +18,29 @@ import { AppError } from './errors.js';
  */
 
 const KeySchema = z.string().uuid();
+
+/** A stored answer is replayed only to the principal it was first given to. */
+interface StoredResponse {
+  ownerId: string;
+}
+
+let registered = false;
+export function registerIdempotencyPolicies(): void {
+  if (registered) return;
+  registered = true;
+  definePolicy<StoredResponse>('idempotency.replay', (principal, r) => {
+    const id =
+      principal?.type === 'user'
+        ? principal.userId
+        : principal?.type === 'visitor'
+          ? principal.visitorId
+          : null;
+    return id !== null && id === r.ownerId;
+  });
+}
+export function __resetIdempotencyPoliciesForTests(): void {
+  registered = false;
+}
 
 export interface IdempotentResult {
   status: number;
@@ -59,6 +83,10 @@ export async function runIdempotent(
     .where('route', '=', route)
     .executeTakeFirst();
   if (stored) {
+    // A replay skips the handler (and its own checks: a gate session is consumed by
+    // now), so it is authorized here (SECURITY-AUDIT SA-15).
+    registerIdempotencyPolicies();
+    authorize(principal ?? null, 'idempotency.replay', { ownerId: principalId });
     reply.header('Idempotent-Replayed', 'true').status(stored.status_code).send(stored.response);
     return;
   }

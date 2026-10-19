@@ -350,47 +350,54 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to check in.');
       }
-      await assertVisitorProfileComplete(db, request.principal.visitorId);
-      const nonce = scanNonceFrom(request);
-      const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
-        visitorId: request.principal.visitorId,
-      });
-      const visitDeps = await depsForGate(session.gate_id);
+      const principal = request.principal;
+      // SDD §9.12 / E-10: a retried check-in replays the first answer; the session is
+      // already consumed, so running it again would fail instead (TC-FLOW-10).
+      await runIdempotent(db, request, reply, async () => {
+        await assertVisitorProfileComplete(db, principal.visitorId);
+        const nonce = scanNonceFrom(request);
+        const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
+          visitorId: principal.visitorId,
+        });
+        const visitDeps = await depsForGate(session.gate_id);
 
-      // SDD §12.8: "evaluateEntry -> if gpsOk is false and the visit isn't already
-      // host-confirmed, set result = awaiting_host_confirmation, store the photo on
-      // the session, notify host (N-CONFIRM-LOCATION), return". The visit stays
-      // `approved` and the session is linked to it; the host's confirm-arrival
-      // (`POST /visits/{id}/confirm-arrival`) completes the entry (SDD F3 step 4).
-      if (!session.gps_ok) {
-        const visit = await requestHostLocationConfirmation(visitDeps, {
-          principal: request.principal,
+        // SDD §12.8: "evaluateEntry -> if gpsOk is false and the visit isn't already
+        // host-confirmed, set result = awaiting_host_confirmation, store the photo on
+        // the session, notify host (N-CONFIRM-LOCATION), return". The visit stays
+        // `approved` and the session is linked to it; the host's confirm-arrival
+        // (`POST /visits/{id}/confirm-arrival`) completes the entry (SDD F3 step 4).
+        if (!session.gps_ok) {
+          const visit = await requestHostLocationConfirmation(visitDeps, {
+            principal,
+            requestId: request.id,
+            visitId: request.body.visitId,
+            scanSessionId: session.id,
+            photoMediaId: request.body.photoId,
+          });
+          return {
+            status: 200,
+            body: { visit: visitDto(visit), result: 'awaiting_host_confirmation' },
+          };
+        }
+
+        const updated = await checkIn(visitDeps, {
+          principal,
           requestId: request.id,
           visitId: request.body.visitId,
-          scanSessionId: session.id,
-          photoMediaId: request.body.photoId,
+          gate: {
+            gateId: session.gate_id,
+            scanSessionId: session.id,
+            locationVerified: session.gps_ok,
+            distanceM: session.distance_m,
+            accuracyM: session.accuracy_m,
+            photoMediaId: request.body.photoId,
+          },
+          onEntered: (trx, entered) =>
+            consumeScanSession(trx, session.id, 'check_in', clock.now(), entered.id),
         });
-        reply.send({ visit: visitDto(visit), result: 'awaiting_host_confirmation' });
-        return;
-      }
 
-      const updated = await checkIn(visitDeps, {
-        principal: request.principal,
-        requestId: request.id,
-        visitId: request.body.visitId,
-        gate: {
-          gateId: session.gate_id,
-          scanSessionId: session.id,
-          locationVerified: session.gps_ok,
-          distanceM: session.distance_m,
-          accuracyM: session.accuracy_m,
-          photoMediaId: request.body.photoId,
-        },
-        onEntered: (trx, entered) =>
-          consumeScanSession(trx, session.id, 'check_in', clock.now(), entered.id),
+        return { status: 200, body: { visit: visitDto(updated), result: 'inside' } };
       });
-
-      reply.send({ visit: visitDto(updated), result: 'inside' });
     },
   );
 
@@ -402,30 +409,33 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to check out.');
       }
-      const nonce = scanNonceFrom(request);
-      const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
-        visitorId: request.principal.visitorId,
-      });
-      const visitDeps = await depsForGate(session.gate_id);
+      const principal = request.principal;
+      await runIdempotent(db, request, reply, async () => {
+        const nonce = scanNonceFrom(request);
+        const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
+          visitorId: principal.visitorId,
+        });
+        const visitDeps = await depsForGate(session.gate_id);
 
-      const updated = await checkOut(visitDeps, {
-        principal: request.principal,
-        requestId: request.id,
-        visitId: request.body.visitId,
-        gate: {
-          gateId: session.gate_id,
-          scanSessionId: session.id,
-          locationVerified: session.gps_ok,
-          distanceM: session.distance_m,
-          accuracyM: session.accuracy_m,
-          photoMediaId: request.body.photoId,
-        },
-      });
-      await db
-        .transaction()
-        .execute((trx) => consumeSession(trx, clock, session.id, 'check_out', updated.id));
+        const updated = await checkOut(visitDeps, {
+          principal,
+          requestId: request.id,
+          visitId: request.body.visitId,
+          gate: {
+            gateId: session.gate_id,
+            scanSessionId: session.id,
+            locationVerified: session.gps_ok,
+            distanceM: session.distance_m,
+            accuracyM: session.accuracy_m,
+            photoMediaId: request.body.photoId,
+          },
+        });
+        await db
+          .transaction()
+          .execute((trx) => consumeSession(trx, clock, session.id, 'check_out', updated.id));
 
-      reply.send({ visit: visitDto(updated) });
+        return { status: 200, body: { visit: visitDto(updated) } };
+      });
     },
   );
 
@@ -437,43 +447,46 @@ export async function registerGateRoutes(
       if (!request.principal || request.principal.type !== 'visitor') {
         throw new AppError('AUTH_REQUIRED', 401, 'Sign in as a guest to request a visit.');
       }
-      await assertVisitorProfileComplete(db, request.principal.visitorId);
-      const nonce = scanNonceFrom(request);
-      const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
-        visitorId: request.principal.visitorId,
+      const principal = request.principal;
+      await runIdempotent(db, request, reply, async () => {
+        await assertVisitorProfileComplete(db, principal.visitorId);
+        const nonce = scanNonceFrom(request);
+        const session = await validateAndBindSession(db, clock, request.params.id, nonce, {
+          visitorId: principal.visitorId,
+        });
+        const visitDeps = await depsForGate(session.gate_id);
+
+        const hostResident = await db
+          .selectFrom('haven.residents')
+          .select('hostel_id')
+          .where('user_id', '=', request.body.hostId)
+          .executeTakeFirst();
+        if (!hostResident) throw new AppError('NOT_FOUND', 404, 'Host not found.');
+
+        const now = clock.now();
+        const windowEnd = new Date(now.getTime() + request.body.durationMinutes * 60_000);
+        const visit = await createWalkIn(visitDeps, {
+          principal,
+          requestId: request.id,
+          visitorId: principal.visitorId,
+          hostUserId: request.body.hostId,
+          hostelId: hostResident.hostel_id,
+          hostelGender: visitDeps.rulesConfig.hostel_gender,
+          type: request.body.type,
+          guestGender: null,
+          windowStart: now,
+          windowEnd,
+          locationVerified: session.gps_ok,
+        });
+        // The scan session stays queryable (not deleted) after being marked consumed,
+        // linked to this visit (`visit_id`) — the host's later approval needs its GPS
+        // facts (SDD F2 step 9: "using the scan session's GPS result ... no second scan").
+        await db
+          .transaction()
+          .execute((trx) => consumeSession(trx, clock, session.id, 'walk_in', visit.id));
+
+        return { status: 201, body: { visit: visitDto(visit) } };
       });
-      const visitDeps = await depsForGate(session.gate_id);
-
-      const hostResident = await db
-        .selectFrom('haven.residents')
-        .select('hostel_id')
-        .where('user_id', '=', request.body.hostId)
-        .executeTakeFirst();
-      if (!hostResident) throw new AppError('NOT_FOUND', 404, 'Host not found.');
-
-      const now = clock.now();
-      const windowEnd = new Date(now.getTime() + request.body.durationMinutes * 60_000);
-      const visit = await createWalkIn(visitDeps, {
-        principal: request.principal,
-        requestId: request.id,
-        visitorId: request.principal.visitorId,
-        hostUserId: request.body.hostId,
-        hostelId: hostResident.hostel_id,
-        hostelGender: visitDeps.rulesConfig.hostel_gender,
-        type: request.body.type,
-        guestGender: null,
-        windowStart: now,
-        windowEnd,
-        locationVerified: session.gps_ok,
-      });
-      // The scan session stays queryable (not deleted) after being marked consumed,
-      // linked to this visit (`visit_id`) — the host's later approval needs its GPS
-      // facts (SDD F2 step 9: "using the scan session's GPS result ... no second scan").
-      await db
-        .transaction()
-        .execute((trx) => consumeSession(trx, clock, session.id, 'walk_in', visit.id));
-
-      reply.status(201).send({ visit: visitDto(visit) });
     },
   );
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import supertest from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -38,6 +39,7 @@ async function requestWalkIn(at: string, type: 'day' | 'quick_drop' = 'day') {
   const scan = await scanAndPhoto(app, clock, { gate: w.gate, bearer });
   return supertest(app.server)
     .post(`/v1/scan-sessions/${scan.sessionId}/walk-in`)
+    .set('Idempotency-Key', randomUUID())
     .set('Authorization', `Bearer ${bearer}`)
     .set('X-Scan-Nonce', scan.nonce)
     .send({

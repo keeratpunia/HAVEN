@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import supertest from 'supertest';
 import { sql } from 'kysely';
@@ -90,6 +91,7 @@ async function walkIn(
   });
   const res = await supertest(app.server)
     .post(`/v1/scan-sessions/${scan.sessionId}/walk-in`)
+    .set('Idempotency-Key', randomUUID())
     .set('Authorization', `Bearer ${w.visitorToken}`)
     .set('X-Scan-Nonce', scan.nonce)
     .send({
@@ -127,6 +129,7 @@ async function guestCheckIn(w: World, visitId: string, location?: ReturnType<typ
   const scan = await scanAndPhoto(app, clock, { gate: w.gate, bearer: w.visitorToken, location });
   return supertest(app.server)
     .post(`/v1/scan-sessions/${scan.sessionId}/check-in`)
+    .set('Idempotency-Key', randomUUID())
     .set('Authorization', `Bearer ${w.visitorToken}`)
     .set('X-Scan-Nonce', scan.nonce)
     .send({ visitId, photoId: scan.photoId });

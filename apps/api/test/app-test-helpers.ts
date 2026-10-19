@@ -21,6 +21,7 @@ import { __resetResidentPoliciesForTests } from '../src/residents/routes.js';
 import { __resetAdminPoliciesForTests } from '../src/admin/policy.js';
 import { assertMediaObject, type MediaObject, type MediaStorage } from '../src/gate/media.js';
 import { __resetMediaPoliciesForTests } from '../src/media/routes.js';
+import { __resetIdempotencyPoliciesForTests } from '../src/lib/idempotency.js';
 import type { BotVerifier } from '../src/auth/bot-check.js';
 import type {
   PushMessage,
@@ -156,6 +157,7 @@ export async function buildTestApp(
   __resetResidentPoliciesForTests();
   __resetAdminPoliciesForTests();
   __resetMediaPoliciesForTests();
+  __resetIdempotencyPoliciesForTests();
   registerVisitPolicies();
   registerGatePolicies();
   const env = testEnv(opts.env);

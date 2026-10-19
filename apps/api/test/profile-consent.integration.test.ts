@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import supertest from 'supertest';
@@ -117,6 +118,7 @@ describe('PROFILE_INCOMPLETE (403) is enforced by the API, not just the app', ()
     });
     const res = await supertest(app.server)
       .post(`/v1/scan-sessions/${scan.sessionId}/walk-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', g.auth)
       .set('X-Scan-Nonce', scan.nonce)
       .send({ hostId: w.residentId, type: 'day', durationMinutes: 60, photoId: scan.photoId });

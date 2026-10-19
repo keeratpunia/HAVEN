@@ -175,6 +175,7 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
 
     const checkInRes = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/check-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${accessToken}`)
       .set('X-Scan-Nonce', 'nonce-valid-token')
       .send({ visitId: visit.id, photoId });
@@ -246,6 +247,7 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
 
     const checkInRes = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/check-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${accessToken}`)
       .set('X-Scan-Nonce', 'host-confirm-nonce')
       .send({ visitId: visit.id, photoId });
@@ -457,6 +459,7 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
     const accessToken = await issueToken(clock, { type: 'visitor', id: visitorId });
     const res = await supertest(app.server)
       .post('/v1/scan-sessions/00000000-0000-0000-0000-000000000000/check-in')
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${accessToken}`)
       .set('X-Scan-Nonce', 'whatever')
       .send({
@@ -555,6 +558,7 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
 
     const first = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/check-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${accessToken}`)
       .set('X-Scan-Nonce', 'consume-once')
       .send({ visitId: visit.id, photoId });
@@ -562,6 +566,7 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
 
     const second = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/check-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${accessToken}`)
       .set('X-Scan-Nonce', 'consume-once')
       .send({ visitId: visit.id, photoId });
@@ -591,6 +596,7 @@ describe('gate routes (SDD §9.3, §12.8) end to end', () => {
 
     const res = await supertest(app.server)
       .post(`/v1/scan-sessions/${sessionId}/walk-in`)
+      .set('Idempotency-Key', randomUUID())
       .set('Authorization', `Bearer ${accessToken}`)
       .set('X-Scan-Nonce', 'walkin-nonce')
       .send({ hostId, type: 'day', durationMinutes: 60, photoId });

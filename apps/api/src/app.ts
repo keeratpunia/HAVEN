@@ -41,6 +41,7 @@ import { registerAdminPeopleRoutes } from './admin/people-routes.js';
 import { registerAdminConfigRoutes } from './admin/config-routes.js';
 import { registerAdminChargesRoutes } from './admin/charges-routes.js';
 import { StreamHub } from './stream/hub.js';
+import { registerIdempotencyPolicies } from './lib/idempotency.js';
 import { JobRunner } from './jobs/runner.js';
 import { registerStreamRoutes } from './stream/routes.js';
 import { registerMediaRoutes } from './media/routes.js';
@@ -408,6 +409,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // in later milestones.
   registerVisitPolicies();
   registerGatePolicies();
+  registerIdempotencyPolicies();
   registerNotificationPolicies();
   registerResidentPolicies();
   registerAdminPolicies();

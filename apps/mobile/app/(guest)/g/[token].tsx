@@ -23,6 +23,7 @@ import { useAuth } from '../../../lib/auth-context.js';
 import { useOnline } from '../../../lib/useOnline.js';
 import { captureScanLocation } from '../../../lib/useScanLocation.js';
 import { formatTimeIst } from '../../../lib/formatTime.js';
+import { newActionKey } from '../../../lib/action-key.js';
 
 /**
  * G-06/G-07/G-08/G-09/G-10/G-11/G-12/G-13/G-14/G-15/G-18 (SDD §13.4), the one real
@@ -121,6 +122,9 @@ export default function GateScan() {
   const [cancelling, setCancelling] = useState(false);
 
   const clientNonceRef = useRef<string>(randomClientNonce());
+  // SDD §9.12: one scan session = one gate action, so one Idempotency-Key for it; a
+  // retry of the same submit reuses it and gets the first answer back (E-10).
+  const actionKeyRef = useRef<string>(newActionKey());
 
   const runCreateSession = useCallback(async () => {
     setPhase('locating');
@@ -245,25 +249,30 @@ export default function GateScan() {
       if (resultKind === 'check_in') {
         const visitId = scanActions?.visits[0]?.id;
         if (!visitId) throw new api.ApiError('NOT_FOUND', 404, 'Visit not found.');
-        const res = await api.scanSessionCheckIn(session.scanSessionId, clientNonceRef.current, {
-          visitId,
-          photoId,
-        });
+        const res = await api.scanSessionCheckIn(
+          session.scanSessionId,
+          clientNonceRef.current,
+          actionKeyRef.current,
+          { visitId, photoId },
+        );
         setResultStatus(res.result);
         setPhase('done');
       } else if (resultKind === 'check_out') {
         const visitId = scanActions?.visits[0]?.id;
         if (!visitId) throw new api.ApiError('NOT_FOUND', 404, 'Visit not found.');
-        await api.scanSessionCheckOut(session.scanSessionId, clientNonceRef.current, {
-          visitId,
-          photoId,
-        });
+        await api.scanSessionCheckOut(
+          session.scanSessionId,
+          clientNonceRef.current,
+          actionKeyRef.current,
+          { visitId, photoId },
+        );
         setPhase('done');
       } else {
         if (!hostId) throw new api.ApiError('VALIDATION_FAILED', 400, 'Pick a host first.');
         const { visit } = await api.scanSessionWalkIn(
           session.scanSessionId,
           clientNonceRef.current,
+          actionKeyRef.current,
           {
             hostId,
             type: visitType,
