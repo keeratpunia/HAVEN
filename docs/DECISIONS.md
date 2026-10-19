@@ -1549,6 +1549,31 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** Not needed for the behaviour. The copy needs approval with the other
   proposed strings.
 
+### DEC-023 — In-app browser prompt: where it shows, copy, and "Continue here anyway" (E-03)
+
+- **Date:** 2026-10-19
+- **Context:** E-03 says to detect WhatsApp, Instagram and Facebook in-app browsers by
+  user agent and show "Open in Chrome" (Android intent URL) or "Open in Safari"
+  instructions. The SDD gives no wording and doesn't say whether the guest may carry on
+  regardless.
+- **Decision:**
+  - **Detection.** `detectInAppBrowser(userAgent)` and `chromeIntentUrl(href)` live in
+    `packages/shared/src/in-app-browser.ts` as pure functions. They detect the tokens
+    `Instagram`, `FBAN/` / `FBAV/` / `FB_IAB/` / `FBIOS`, and `WhatsApp`.
+  - **Where it shows.** The guest web layout (`/g/…`, `/i/…`, sign-in, profile, My
+    visits) shows the notice instead of the page. Android gets an "Open in Chrome"
+    button using an `intent://…;package=com.android.chrome;S.browser_fallback_url=…`
+    URL. iOS gets the steps to open the page in Safari.
+  - **Escape hatch.** A "Continue here anyway" button is offered, because detection by
+    user agent can be wrong, and some in-app browsers (WhatsApp's Android Custom Tab)
+    do allow camera and location.
+  - **Copy.** `IN_APP_BROWSER_ANDROID` and `IN_APP_BROWSER_IOS` are **proposed** copy.
+- **Proof:** `in-app-browser.test.ts` covers real UA strings for each app and OS, and
+  normal Chrome, Safari and Samsung. `e2e/tests/in-app-browser.spec.ts` covers an
+  Instagram Android gate link, a Facebook iOS invite link, and a normal browser.
+- **SDD updated?** Not needed for the behaviour. The copy needs approval with the other
+  proposed strings.
+
 Template for a new entry:
 
 ```markdown

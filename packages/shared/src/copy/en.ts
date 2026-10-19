@@ -30,6 +30,16 @@ export const EN_COPY: Record<string, CopyEntry> = {
     title: "You're not at the gate yet",
     body: 'We need you to be at the hostel gate to check in. Walk closer and try again.',
   },
+  // E-03: link opened in WhatsApp / Instagram / Facebook's in-app browser. PROPOSED
+  // copy (the SDD names the two prompts, not their words), DEC-023.
+  IN_APP_BROWSER_ANDROID: {
+    title: 'Open in Chrome',
+    body: "This app's built-in browser often blocks the camera and location that HAVEN needs at the gate. Open this page in Chrome to continue.",
+  },
+  IN_APP_BROWSER_IOS: {
+    title: 'Open in Safari',
+    body: "This app's built-in browser often blocks the camera and location that HAVEN needs at the gate. Tap the ••• or share button, then choose Open in Safari.",
+  },
   // FR-27 / F3: location permission denied. PROPOSED copy (the SDD gives the path, not
   // the words), DEC-022.
   location_denied: {

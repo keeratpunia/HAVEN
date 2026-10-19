@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { detectInAppBrowser } from '@haven/shared';
+import { InAppBrowserNotice } from '../../components/InAppBrowserNotice.js';
 import { Stack } from 'expo-router';
 import { color, space, type as typeTokens } from '@haven/ui';
 import { useAuth } from '../../lib/auth-context.js';
@@ -8,6 +11,13 @@ import { useAuth } from '../../lib/auth-context.js';
 export default function GuestLayout() {
   const router = useRouter();
   const { visitor } = useAuth();
+  // E-03: guest links are mostly opened from WhatsApp; its in-app browser (and
+  // Instagram's, Facebook's) often blocks camera and location.
+  const [inAppBrowser, setInAppBrowser] = useState(() =>
+    Platform.OS === 'web' && typeof navigator !== 'undefined'
+      ? detectInAppBrowser(navigator.userAgent)
+      : null,
+  );
 
   return (
     <View style={styles.root}>
@@ -31,7 +41,15 @@ export default function GuestLayout() {
         ) : null}
       </View>
       <View style={styles.content}>
-        <Stack screenOptions={{ headerShown: false }} />
+        {inAppBrowser ? (
+          <InAppBrowserNotice
+            browser={inAppBrowser}
+            href={typeof window !== 'undefined' ? window.location.href : ''}
+            onContinue={() => setInAppBrowser(null)}
+          />
+        ) : (
+          <Stack screenOptions={{ headerShown: false }} />
+        )}
       </View>
     </View>
   );
