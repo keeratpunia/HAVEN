@@ -24,6 +24,7 @@ import { useOnline } from '../../../lib/useOnline.js';
 import { captureScanLocation } from '../../../lib/useScanLocation.js';
 import { formatTimeIst } from '../../../lib/formatTime.js';
 import { newActionKey } from '../../../lib/action-key.js';
+import { copyKeyForGpsFailure } from '../../../lib/gps-copy.js';
 
 /**
  * G-06/G-07/G-08/G-09/G-10/G-11/G-12/G-13/G-14/G-15/G-18 (SDD §13.4), the one real
@@ -71,9 +72,6 @@ function randomClientNonce(): string {
  * copy table keys the geofence one as `OUT_OF_GEOFENCE` — everything else
  * (`low_accuracy`, `stale_fix`, `no_location`, `gate_not_configured`) matches as-is,
  * or falls through to `copyFor`'s own generic fallback. */
-function copyKeyForGpsFailure(failure: string): string {
-  return failure === 'outside_geofence' ? 'OUT_OF_GEOFENCE' : failure;
-}
 
 function hasSeenLocationExplainer(): boolean {
   if (Platform.OS !== 'web' || typeof localStorage === 'undefined') return true;

@@ -149,10 +149,10 @@ temporary internet link are demo stand-ins.
 
 3. **GPS says no → ask the host.** Phone 1 (checked out after step 1): turn
    **Location off** in the phone's quick settings, scan the gate QR → the app says
-   can't confirm the location. If the browser reports location as *blocked*,
-   **Ask host to confirm** appears straight away; if it reports it as *unavailable*, tap
-   **Try again** twice more and it appears after the third try. Stop there — no need to
-   finish.
+   can't confirm the location: **"We can't pin your location"**. Android reports
+   Location switched off as *unavailable*, so tap **Try again** twice more; after the
+   third try **Ask host to confirm** appears (on a phone where the browser reports
+   location as *blocked*, it appears straight away). Stop there — no need to finish.
    *Say:* "No GPS doesn't mean no entry — the host confirms instead, and that's logged."
    *(Turn Location back on.)*
 
