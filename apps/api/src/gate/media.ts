@@ -15,11 +15,10 @@ import type { Clock } from '../lib/clock.js';
  * metadata; compute SHA-256; reject PHOTO_REUSED if the same hash exists for this
  * visitor; store; insert media row; return { photoId }."
  *
- * Storage: this environment has no reliable Supabase/Docker storage connection
- * (DEC-004's same constraint). `MediaStorage` is the seam a real Supabase Storage
- * client plugs into later; `LocalDiskMediaStorage` is a disclosed local-disk
- * substitute used for dev/test, writing under the same bucket/path layout SDD §9.11
- * specifies so swapping the implementation later needs no path changes.
+ * Storage: `MediaStorage` is the seam. Outside local it is `SupabaseMediaStorage`
+ * (`media/supabase-storage.ts`, private buckets per SDD §9.10); `LocalDiskMediaStorage`
+ * is the local-only stand-in, same bucket/path layout. `media/storage.ts` chooses and
+ * refuses local disk outside APP_ENV=local (DEC-021).
  */
 
 export const MAX_PHOTO_BYTES = 3 * 1024 * 1024;
@@ -47,6 +46,12 @@ export interface MediaStorage {
   get(object: MediaObject): Promise<Buffer | null>;
   /** Removes the object; deleting one that's already gone is not an error. */
   delete(object: MediaObject): Promise<void>;
+  /**
+   * A URL that reads the object directly for `ttlSeconds` (Supabase's signed URL, SDD
+   * §9.10), or null when it no longer exists. Stores without one (local disk, tests)
+   * have their bytes served by `GET /v1/media/:id` itself.
+   */
+  signedUrl?(object: MediaObject, ttlSeconds: number): Promise<string | null>;
 }
 
 // Paths are built from UUIDs (§9.10), so only these characters ever appear.

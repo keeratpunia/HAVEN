@@ -64,6 +64,10 @@ export function testEnv(overrides: Record<string, string> = {}) {
     LOG_LEVEL: process.env.TEST_LOG_LEVEL ?? 'silent',
     API_BASE_URL,
     WEB_BASE_URL,
+    // Required outside local (§9.10); tests inject their own MediaStorage, so these are
+    // never called. Lets a test build a staging/production env to check other guards.
+    SUPABASE_URL: 'http://storage.haven.test',
+    SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
     ...overrides,
   });
 }

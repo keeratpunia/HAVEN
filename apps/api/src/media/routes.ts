@@ -5,7 +5,7 @@ import type { ZodTypeProvider } from '../lib/validation.js';
 import type { Database } from '../db/index.js';
 import { AppError } from '../lib/errors.js';
 import type { MediaBucket, MediaStorage } from '../gate/media.js';
-import type { MediaUrlSigner } from './signing.js';
+import { SIGNED_URL_TTL_SECONDS, type MediaUrlSigner } from './signing.js';
 import { authorize, definePolicy } from '../auth/policy.js';
 
 /** The signature is the credential: only a URL this API minted, unexpired, may read. */
@@ -66,10 +66,16 @@ export async function registerMediaRoutes(
         .executeTakeFirst();
       if (!media || media.deleted_at) throw notFound;
 
-      const bytes = await opts.storage.get({
-        bucket: media.bucket as MediaBucket,
-        path: media.path,
-      });
+      const object = { bucket: media.bucket as MediaBucket, path: media.path };
+      if (opts.storage.signedUrl) {
+        // Supabase: hand the browser a 120 s URL for the private object (SDD §9.10)
+        // instead of streaming it through the API.
+        const url = await opts.storage.signedUrl(object, SIGNED_URL_TTL_SECONDS);
+        if (!url) throw notFound;
+        return reply.header('Cache-Control', 'no-store').redirect(url, 302);
+      }
+
+      const bytes = await opts.storage.get(object);
       if (!bytes) throw notFound;
 
       reply

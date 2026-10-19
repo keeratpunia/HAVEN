@@ -106,9 +106,15 @@ const EnvSchema = z
         message: 'DATA_ENCRYPTION_KEY must decode to exactly 32 bytes (base64)',
       }),
 
-    // Local-disk substitute for Supabase Storage (gate/media.ts's `LocalDiskMediaStorage`
-    // — see that module's comment: this environment has no reliable Supabase/Docker
-    // storage connection, same constraint as DEC-004's embedded-postgres substitute).
+    // Photo storage (SDD §9.10). Outside local: Supabase Storage's private buckets via
+    // the service-role key (server only). Local: `LocalDiskMediaStorage` under
+    // MEDIA_STORAGE_DIR. `media/storage.ts` picks one; local disk outside local is
+    // refused (FINAL-QA-REPORT D-03: Render's disk is ephemeral and per-instance).
+    SUPABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+    SUPABASE_SERVICE_ROLE_KEY: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z.string().min(1).optional(),
+    ),
     MEDIA_STORAGE_DIR: z.string().default('.media-storage'),
 
     // Dev-only resident/staff sign-in bypass (demo milestone, docs/DECISIONS.md DEC-011):
@@ -136,6 +142,17 @@ const EnvSchema = z
     EXPO_ACCESS_TOKEN: z.string().optional(),
   })
   .superRefine((env, ctx) => {
+    if (env.APP_ENV !== 'local') {
+      for (const key of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'] as const) {
+        if (!env[key]) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} is required outside local: photos are stored in Supabase Storage (SDD §9.10)`,
+          });
+        }
+      }
+    }
     if (env.APP_ENV !== 'local' && isPoolerUrl(env.DATABASE_DIRECT_URL)) {
       ctx.addIssue({
         code: 'custom',

@@ -25,7 +25,7 @@ import type { Logger } from './lib/logger.js';
 import { parseDataEncryptionKey } from './lib/crypto.js';
 import { generateRequestId } from './lib/request-id.js';
 import { configureZodValidation, extractZodValidationIssues } from './lib/validation.js';
-import type { MediaStorage } from './gate/media.js';
+import { LocalDiskMediaStorage, type MediaStorage } from './gate/media.js';
 import { NotificationWorker } from './notify/worker.js';
 import { registerNotificationPolicies } from './notify/policy.js';
 import { registerNotificationRoutes } from './notify/routes.js';
@@ -77,7 +77,7 @@ export interface BuildAppOptions {
    */
   googleVerifier?: GoogleIdTokenVerifier;
   /** Where gate/profile photos are written (SDD §9.10). Real callers use
-   * `server.ts`'s `LocalDiskMediaStorage`; tests can inject an in-memory fake. */
+   * `media/storage.ts`'s choice (Supabase outside local); tests inject a fake. */
   mediaStorage: MediaStorage;
   /** SSE ping interval override for tests (SDD §9.9 default: 25 s). */
   streamPingMs?: number;
@@ -133,6 +133,15 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // unless NODE_ENV is also explicitly 'development', so a staging/production deploy
   // that accidentally inherits the flag (a copied .env, a misconfigured pipeline)
   // fails loudly at startup instead of quietly exposing an auth bypass.
+  // DEC-021 / FINAL-QA-REPORT D-03: local disk is ephemeral and per-instance on a host
+  // like Render; photos outside local live in Supabase Storage.
+  if (env.APP_ENV !== 'local' && options.mediaStorage instanceof LocalDiskMediaStorage) {
+    throw new Error(
+      'LocalDiskMediaStorage is for APP_ENV=local only. Refusing to start — configure ' +
+        'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (SDD §9.10).',
+    );
+  }
+
   if (env.DEV_LOGIN_ENABLED && process.env.NODE_ENV !== 'development') {
     throw new Error(
       'DEV_LOGIN_ENABLED=true requires NODE_ENV=development. Refusing to start — ' +

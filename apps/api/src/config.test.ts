@@ -27,6 +27,22 @@ describe('loadEnv', () => {
     expect(env.SMS_PROVIDER).toBe('console');
   });
 
+  const SUPABASE = {
+    SUPABASE_URL: 'https://abc.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'service-role',
+  };
+
+  // FINAL-QA-REPORT D-03, SDD §9.10: photos outside local live in Supabase Storage.
+  it('requires the Supabase storage settings outside local', () => {
+    expect(() => loadEnv({ ...REQUIRED, APP_ENV: 'production' })).toThrow(
+      /SUPABASE_URL is required outside local[\s\S]*SUPABASE_SERVICE_ROLE_KEY is required/,
+    );
+    __resetEnvCacheForTests();
+    expect(loadEnv({ ...REQUIRED, APP_ENV: 'production', ...SUPABASE }).SUPABASE_URL).toBe(
+      'https://abc.supabase.co',
+    );
+  });
+
   // FINAL-QA-REPORT D-04, SDD §9.9/§11.7: LISTEN needs the direct connection.
   it('refuses a pooler DATABASE_DIRECT_URL outside local', () => {
     for (const bad of [
@@ -35,15 +51,16 @@ describe('loadEnv', () => {
       'not a url',
     ]) {
       __resetEnvCacheForTests();
-      expect(() => loadEnv({ ...REQUIRED, APP_ENV: 'staging', DATABASE_DIRECT_URL: bad })).toThrow(
-        /DATABASE_DIRECT_URL must be the direct connection/,
-      );
+      expect(() =>
+        loadEnv({ ...REQUIRED, APP_ENV: 'staging', ...SUPABASE, DATABASE_DIRECT_URL: bad }),
+      ).toThrow(/DATABASE_DIRECT_URL must be the direct connection/);
     }
     __resetEnvCacheForTests();
     expect(
       loadEnv({
         ...REQUIRED,
         APP_ENV: 'staging',
+        ...SUPABASE,
         DATABASE_DIRECT_URL: 'postgres://u:p@db.abc.supabase.co:5432/postgres',
       }).DATABASE_DIRECT_URL,
     ).toBe('postgres://u:p@db.abc.supabase.co:5432/postgres');

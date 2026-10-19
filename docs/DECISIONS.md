@@ -1483,6 +1483,46 @@ Source for all of Part 1: SDD §2.7.
   which follow FR-02 and §16.3. The notice wording needs approval by the warden/legal
   before real data is loaded (NFR-07).
 
+### DEC-021 — Photos in Supabase Storage outside local; `/v1/media` redirects to a 120 s signed URL (FINAL-QA-REPORT D-03)
+
+- **Date:** 2026-10-19
+- **Context:** `server.ts` always used `LocalDiskMediaStorage`. On Render the disk is
+  ephemeral and per-instance, so every check-in, profile and ID photo would be lost on
+  each deploy or restart. SDD §9.10 requires three private Supabase Storage buckets,
+  §9.10 paths, and "Signed URLs ... per API response with a 120 s TTL".
+- **Decision:**
+  - **Storage class.** `SupabaseMediaStorage` (`apps/api/src/media/supabase-storage.ts`)
+    implements `MediaStorage`: upload, authenticated download, delete and
+    `signedUrl(object, 120)`. It calls the Storage REST API with
+    `SUPABASE_SERVICE_ROLE_KEY`, server side only. The buckets are the private ones
+    created by `20261001000002_storage_buckets.sql`, and paths are unchanged
+    (`gatePhotoPath` / `visitorProfilePhotoPath` / `{userId}/{mediaId}.jpg`).
+  - **Choosing a store.** `createMediaStorage(env)` (`media/storage.ts`) uses Supabase
+    whenever it is configured. It uses local disk only when `APP_ENV=local`; otherwise
+    it refuses.
+  - **Config and boot.** `loadEnv` requires `SUPABASE_URL` and
+    `SUPABASE_SERVICE_ROLE_KEY` outside local. As a second, independent gate, `buildApp`
+    refuses a `LocalDiskMediaStorage` outside local.
+  - **Serving photos.** Serializers keep handing out the API's own HMAC-signed
+    `/v1/media/:id?exp&sig` URL (120 s), so they stay synchronous and every photo read
+    still passes `authorize('media.read_signed')`. When the store supports signed URLs,
+    that route answers `302` to a fresh 120 s Supabase signed URL
+    (`Cache-Control: no-store`) instead of streaming bytes through the API. Local disk
+    and test stores still stream.
+- **Alternatives considered:**
+  - Return Supabase signed URLs straight from serializers. Rejected: every serializer
+    would turn async with a network call per photo, and the central read check would
+    be lost.
+  - Keep proxying bytes through the API from Supabase. Rejected: it doubles egress
+    through Render for no privacy gain.
+- **Proof:** `apps/api/test/supabase-storage.contract.test.ts` runs against a fake
+  Storage HTTP server with private buckets, service-role auth and expiring signed tokens.
+  It covers put/get/sign/delete, §9.10 bucket/path layout, the refusal of other buckets
+  and of `..`, errors on outage, store selection, the boot refusal, and the API end to
+  end (profile photo upload → `visitor-photos/{visitorId}/{mediaId}.jpg` → `302` → image).
+  **Verification against a real Supabase bucket is part of the deployment milestone.**
+- **SDD updated?** Not needed: this implements §9.10 as written.
+
 Template for a new entry:
 
 ```markdown

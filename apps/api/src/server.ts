@@ -1,14 +1,14 @@
 import { buildApp } from './app.js';
 import { loadEnv } from './config.js';
 import { createDb } from './db/index.js';
-import { LocalDiskMediaStorage } from './gate/media.js';
+import { createMediaStorage } from './media/storage.js';
 import { createLogger } from './lib/logger.js';
 
 async function main() {
   const env = loadEnv();
   const logger = createLogger(env);
   const db = createDb(env);
-  const mediaStorage = new LocalDiskMediaStorage(env.MEDIA_STORAGE_DIR);
+  const mediaStorage = createMediaStorage(env);
   const app = await buildApp({ env, logger, db, mediaStorage });
 
   const shutdown = async (signal: string) => {
