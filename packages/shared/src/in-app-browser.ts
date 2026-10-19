@@ -39,12 +39,12 @@ export function detectInAppBrowser(userAgent: string | null | undefined): InAppB
  * page itself as the fallback if Chrome isn't installed. Only http(s) URLs.
  */
 export function chromeIntentUrl(href: string): string {
-  const url = new URL(href);
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error('chromeIntentUrl: only http(s) URLs');
-  }
-  const scheme = url.protocol.slice(0, -1);
-  const rest = `${url.host}${url.pathname}${url.search}${url.hash}`;
+  // No `URL` here: this package compiles without DOM types (it also runs on the API).
+  const match = /^(https?):\/\/([^/?#\s]+)([^\s]*)$/i.exec(href);
+  if (!match) throw new Error('chromeIntentUrl: only http(s) URLs');
+  const [, protocol = '', host = '', rest0 = ''] = match;
+  const scheme = protocol.toLowerCase();
+  const rest = `${host}${rest0 || '/'}`;
   return (
     `intent://${rest}#Intent;scheme=${scheme};package=com.android.chrome;` +
     `S.browser_fallback_url=${encodeURIComponent(href)};end`

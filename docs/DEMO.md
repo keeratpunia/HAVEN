@@ -7,6 +7,11 @@ section below).
 
 ## 0. Before you present
 
+Since the QA remediation (2026-10-19), outside `APP_ENV=local` the API refuses to start
+without Supabase Storage (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, DEC-021) and
+with a pooler `DATABASE_DIRECT_URL` (D-04). The demo runs as `local`, so neither
+affects it.
+
 ### 0.1 Start the stack
 
 ```
@@ -151,9 +156,13 @@ Have two guest phones (or a phone + a desktop browser profile) ready: **Guest A*
    purpose-code=` from the API terminal, or (simpler on stage) use one of the
    non-production test numbers `+91 9999900001`–`09` with the fixed code `123456` (SDD
    §9.5) — no server log needed.
-7. First-time guest: fill in name/gender/18+ confirmation, then a live selfie (camera
-   only, no file picker — CLAUDE.md §3.7).
-8. "Your pass is ready."
+7. First-time guest: fill in name/gender/18+ confirmation, tick **I agree to the
+   privacy notice** (not pre-ticked; the full notice is at `/privacy` — SDD §16.3,
+   DEC-020), then a live selfie (camera only, no file picker — CLAUDE.md §3.7). The API
+   itself refuses check-in, walk-in and invite claims until all of this is done
+   (`PROFILE_INCOMPLETE`).
+8. "Your pass is ready." Under **My visits → My profile** the guest can change their
+   name or retake the photo (FR-08).
 
 ### C. Laptop shows the gate display
 
@@ -164,10 +173,14 @@ Have two guest phones (or a phone + a desktop browser profile) ready: **Guest A*
 
 ### D. Guest A scans, GPS check, live photo, checked in
 
-11. Guest A scans the laptop's QR with their phone camera.
+11. Guest A scans the laptop's QR with their phone camera — or opens **My visits** and
+    taps **Scan the gate QR** (the in-app scanner, FR-22). If the link was opened inside
+    WhatsApp/Instagram/Facebook, the app first offers **Open in Chrome** / the Safari
+    steps (E-03).
 12. First-time-only location explainer → **Allow location**.
 13. Server confirms the geofence; app shows **Check in** with the visit summary →
-    tap it → live photo → **Use photo**.
+    tap it → live photo → **Use photo**. If two residents invited the same guest
+    today, the app asks **Which visit is this?** first (E-06).
 14. Green "You're checked in" screen, with the visit's zone and end time.
 
 ### E. Guest A checks out the same way
@@ -213,9 +226,18 @@ Those are worth showing too.
 - **Old/screenshotted QR:** screenshot the gate screen, wait >30 seconds, then try to
   scan the screenshot. The app shows "That code has changed" (`GATE_TOKEN_EXPIRED`)
   and tells the guest to scan the live screen again.
-- **GPS failure:** turn off phone location (or walk out of the geofence radius) before
-  scanning. After 3 failed attempts the app offers **Ask host to confirm** — proceeds
-  to `awaiting_host_confirmation` instead of blocking the guest outright (FR-27).
+- **GPS failure:** walk out of the geofence radius before scanning. After 3 failed
+  attempts the app offers **Ask host to confirm** — proceeds to
+  `awaiting_host_confirmation` instead of blocking the guest outright (FR-27).
+- **Location refused:** deny the browser's location prompt. **Ask host to confirm** is
+  offered straight away, and the refusal doesn't use up one of the 3 attempts (FR-27,
+  DEC-022).
+- **Camera refused:** deny the camera prompt at the photo step. The guest sees
+  **Camera is blocked** with the Chrome and Safari steps and **Try again**; there is no
+  way round the live photo (E-17, G-16).
+- **After 8 pm:** a day walk-in is refused with "Entry has closed for today" — judged at
+  the time of the scan, so a request made at 7:58 pm and approved at 8:03 pm still gets
+  in (BR-02, E-05).
 
 ### H. Warden and office
 

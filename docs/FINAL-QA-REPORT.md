@@ -12,6 +12,10 @@ each requirement was checked in code and tests at commit `b49b994`.
 
 **Date:** 2026-10-19.
 
+**Remediated:** 2026-10-19, commits `2d95a0c`..`29b32bf`. The verdicts and summary
+below are re-verified after remediation; see **Remediation**. "Checks run during this
+audit" and "Critical defects" describe the state at `b49b994`.
+
 **Verdicts:**
 - **PASS:** the implementation meets the requirement as written and a test proves it.
 - **PARTIAL:** implemented but incomplete, or untested.
@@ -23,12 +27,15 @@ each requirement was checked in code and tests at commit `b49b994`.
 
 | Category | Items | PASS | FAIL | PARTIAL | NOT TESTABLE |
 |---|---|---|---|---|---|
-| FR | 50 | 37 | 2 | 11 | 0 |
+| FR | 50 | 47 | 0 | 3 | 0 |
 | NFR | 14 | 2 | 0 | 5 | 7 |
-| BR | 20 | 19 | 1 | 0 | 0 |
-| E | 24 | 11 | 2 | 10 | 1 |
-| TC | 51 | 47 | 1 | 3 | 0 |
-| **All** | **159** | **116** | **6** | **29** | **8** |
+| BR | 20 | 20 | 0 | 0 | 0 |
+| E | 24 | 22 | 0 | 1 | 1 |
+| TC | 51 | 51 | 0 | 0 | 0 |
+| **All** | **159** | **142** | **0** | **9** | **8** |
+
+After remediation (2026-10-19, see **Remediation** below). The audit found 116 PASS /
+6 FAIL / 29 PARTIAL / 8 NOT TESTABLE at `b49b994`.
 
 TC-RULE-01..11 is one row counted as 11 cases (the SDD's §19.2 groups them).
 
@@ -116,6 +123,92 @@ Anything that breaks security, privacy, money or a core flow:
 | 12 | Tests for untested-but-implemented items (FR-20, FR-30, FR-45, FR-56, E-04, E-14, E-17, E-20, E-23, E-24, TC-FLOW-02); F4/F8/F10 e2e | M |
 | 13 | NFR evidence: Lighthouse + load test on staging, Safari/Samsung runs, axe audit | L |
 
+## Remediation (2026-10-19)
+
+The defects above were fixed on `main` after this audit, one commit per item. In every
+row below, the regression test fails on the code before the fix and passes after; that
+was checked by stashing the fix and running the test. The rows above carry the new
+verdicts.
+
+### Critical defects
+
+| Defect | Root cause | Fix commit | Regression test | New verdict |
+|---|---|---|---|---|
+| D-01 walk-ins skip the entry cut-offs (BR-02, E-05, F2 step 9) | `createWalkIn` and `approveWalkIn` ran only `evaluateCreate`; `evaluateEntry` never ran for walk-ins | `2d95a0c` | `apps/api/test/walk-in-cutoffs` (19:59 allowed, 20:00 AFTER_ENTRY_CUTOFF, 19:58→20:03 allowed, after 22:00 AFTER_HARD_CUTOFF + §13.6 copy) | BR-02, E-05 PASS; BR-03 note resolved |
+| D-02 the production API can't start | `@haven/shared` ships TypeScript sources; `tsc` output imported them at runtime | `b506465` (DEC-019) | `pnpm --filter @haven/api run check:prod-start`, also a CI step: `node dist/server.js`, `/health` + `/ready` 200 | NFR-07 still PARTIAL (other items) |
+| D-05 consent not recorded; PROFILE_INCOMPLETE never enforced (FR-02, FR-04, §16.3, §12.2) | no consent UI, columns unused; the API didn't check profile completeness | `f907a2f` (DEC-020) | `apps/api/test/profile-consent` (6 tests, API called directly); e2e golden path ticks the consent box | FR-02 PASS |
+| D-04 SSE LISTEN on the pooler (FR-50, NFR-04) | `new StreamHub(env.DATABASE_URL)` | `3613946` | `stream-direct-connection` (LISTEN runs on the direct URL); `config.test` refuses a pooler URL outside local | FR-50 PASS; NFR-04 still PARTIAL (5 s not measured) |
+| D-03 photos on local disk in production (§9.10) | `server.ts` always built `LocalDiskMediaStorage` | `d04d7e8` (DEC-021) | `supabase-storage.contract.test` against a fake Storage HTTP server (private buckets, §9.10 paths, 120 s signed URLs, delete, boot refusal) | real-bucket check in the deployment milestone |
+
+### Correctness
+
+| Item | Root cause | Fix commit | Regression test | New verdict |
+|---|---|---|---|---|
+| E-10 / TC-FLOW-10 (§9.12) | gate check-in, check-out and walk-in weren't wrapped in `runIdempotent`; a replay also needed its own `authorize()` (SA-15) | `a3c0592` | `gate-idempotency` (identical replay, one gate event / one visit; key required) | E-10, TC-FLOW-10 PASS |
+| E-06 / FR-23 | `executeTakeFirst` on approved visits, with no "today" filter | `35486dd` | `gate-todays-visits` (two hosts, a later-day visit, an ended window, the IST midnight) | E-06, FR-23 PASS |
+| FR-27 permission denied | a denial was handled like a failed fix and counted as an attempt | `1996546` (DEC-022) | `gate-location-denied`; Playwright GPS test now starts with a denied permission | FR-27 PASS |
+| E-03 in-app browsers | no user-agent detection | `691851f` (DEC-023) | `in-app-browser.test` (real user agents); e2e `in-app-browser` | E-03 PASS |
+| CI gates | audit failed on dev tooling; pgTAP and Playwright commented out | `cb85d7f` (DEC-024) | local run of the same steps (below) | CI steps in place |
+
+The first real pgTAP run (`cb85d7f`) found five defects:
+- wrong plan counts in 001 and 002;
+- a `name[]`/`text[]` comparison in 001;
+- a `bigint`/`integer` comparison in 004;
+- a schema bug: `haven.forbid_mutation()` raised 42703 instead of 42501 on `approvals` and `hostel_rules`. Fixed by a migration; regression test `append-only.integration.test`.
+
+### Missing features and tests
+
+| Item | Fix commit | Test | New verdict |
+|---|---|---|---|
+| FR-08 view/edit name, retake photo; resident change logged | `7bcbe92` | `profile-edit` (API); e2e G-17 (guest), `profile-edit` (resident) | PASS |
+| FR-22 guest in-app scanner | `eee2929` | `gate-qr.test`; e2e `guest-scanner` (fake camera plays the gate QR) | PASS |
+| FR-20, FR-30, FR-56 (unit), FR-45 warden flag, E-04, E-14, E-20, E-23, E-24, TC-FLOW-02 | `36d772f` | `qa-gaps.integration.test`; mobile `gate-logic.test` | PASS, except FR-56 PARTIAL (map preview not built) |
+| E-14 banner, E-17, guest's expired walk-in screen, F8 pairing, F10 escalation (e2e) | `29b32bf` (DEC-025) | e2e `gate-pairing`, `late-flows` (injected clock via local-only `/__e2e` controls) | PASS |
+
+Writing these tests found more defects, all fixed in the commits above:
+- **QrScanner (FR-22, R-12):** the first-frame decode was lost because `controls` was in its TDZ inside the callback.
+- **G-16 / E-17:** the gate showed "Something went wrong" when the camera was refused (no `camera_denied` copy).
+- **Rule refusals:** `HOST_DAY_LIMIT`, `TYPE_NOT_ALLOWED_FOR_GENDER` and `VISIT_NOT_APPROVED` had no guest copy, so a guest got the same generic message.
+- **Timestamps:** `gate_events.at` and `visits.created_at` came from the database's `now()` instead of the injected clock (§9.13). This made the BR-12 walk-in timeout and TC-FLOW-02's entry time inconsistent with every other business time.
+- **My visits:** the error state had no scanner.
+
+### Checks after remediation
+
+| Check | Result |
+|---|---|
+| `pnpm typecheck` | 4/4 packages pass |
+| `pnpm lint` | 4/4 packages pass (0 warnings) |
+| `pnpm format:check` | clean |
+| `pnpm test` | API 886/886 (51 files), shared 158/158, ui 1/1, mobile jest 18/18 |
+| Playwright (`bash apps/mobile/e2e/run-ci.sh`, fresh DB) | 31/31 pass (Chromium, plus the `qr-camera` and `late` projects) |
+| pgTAP (`supabase/tests`) | 35/35 (001 15/15, 002 8/8, 003 5/5, 004 7/7). Run locally with pgTAP 1.3.3 on embedded Postgres plus every migration, since there is no Docker here. CI runs `supabase db start` + `supabase test db`. |
+| `pnpm build` | exit 0 |
+| Production start (`check:prod-start`) | `/health` 200, `/ready` 200. One run straight after the test suite hit Windows `EBUSY` removing its temp Postgres directory; the re-run passed. |
+| `pnpm audit --prod --audit-level high` | exit 0: 2 high advisories ignored by GHSA id in Expo's build toolchain, no patched release (DEC-024) |
+
+### Remaining gaps
+
+These are deferred by the remediation brief or not testable here:
+- **NFR measurements:** p95 latency and load (NFR-01, NFR-06), Lighthouse (NFR-02), 5 s dashboard (NFR-04), Safari/Samsung Internet (NFR-10), axe and 200 % text (NFR-11).
+- **F4 host-assisted entry e2e** (FR-28, E-15).
+- **Real providers and devices:**
+  - real Google OAuth (FR-03; FR-06 acceptance);
+  - MSG91 SMS;
+  - Expo push on Android (NFR-03);
+  - Sentry delivery (NFR-13);
+  - the native app.
+- **Deployment-milestone items:**
+  - verifying a real Supabase bucket and the direct connection;
+  - web CSP/HSTS (SA-12);
+  - pinning the Supabase CLI version in CI;
+  - the first green GitHub Actions run of the pgTAP and Playwright steps.
+- **Product gaps:** F8 step 4's map preview (FR-56); G-16's screenshots.
+- **Copy awaiting the warden's or legal sign-off:**
+  - privacy notice (DEC-020);
+  - `location_denied` (DEC-022);
+  - in-app-browser prompts (DEC-023);
+  - `camera_denied` and the three rule refusals (DEC-025).
+
 ## Requirements
 
 ### Functional (FR)
@@ -123,13 +216,13 @@ Anything that breaks security, privacy, money or a core flow:
 | ID | Requirement | Implementation | Test | Verdict | Notes |
 |---|---|---|---|---|---|
 | FR-01 | Guest sign-in by 6-digit SMS OTP, Indian mobiles | `api/src/auth/otp-service.ts` requestOtp/verifyOtp; `auth/phone.ts` | apps/api/test/otp-service, auth-routes; apps/mobile/e2e/tests/golden-path | PASS | Real SMS delivery needs MSG91 (console provider only). |
-| FR-02 | First-time guest: name, gender, 18+, accept privacy notice, live profile selfie | `app/(guest)/profile.tsx`; `PATCH /me`, `POST /me/profile-photo` | apps/mobile/e2e/tests/golden-path | PARTIAL | No consent checkbox; `consent_version`/`consent_at` never stored (§16.3). Server never returns `PROFILE_INCOMPLETE` (§12.2), so an unfinished profile (incl. no 18+ confirmation) can still walk in / check in through the API. |
+| FR-02 | First-time guest: name, gender, 18+, accept privacy notice, live profile selfie | `app/(guest)/profile.tsx`; `PATCH /me`, `POST /me/profile-photo` | apps/api/test/profile-consent; apps/mobile/e2e/tests/golden-path (consent checkbox) | PASS | Remediated (D-05): consent checkbox + privacy summary + /privacy on G-04; consent_version/consent_at stored; PROFILE_INCOMPLETE enforced by the API on claim, check-in, walk-in. Notice wording is proposed (DEC-020). |
 | FR-03 | Residents and staff sign in with Google | `auth/google-service.ts`, `auth/google.ts`; web `GoogleSignInButton.tsx` | apps/api/test/google-service (fake verifier) | PARTIAL | Server logic tested with a fake verifier. Native `@react-native-google-signin` not built. Real Google OAuth NOT TESTABLE here (needs client IDs). |
 | FR-04 | Resident: phone OTP, room, live ID card + selfie, wait | `residents/routes.ts`, `(auth)/phone.tsx`, `onboarding.tsx`, `pending.tsx` | apps/api/test/resident-onboarding-visits; apps/mobile/e2e/tests/resident-app R-01→R-04 | PASS | Resident consent (R-03) not stored — see FR-02 note. |
 | FR-05 | Warden approves/rejects resident; ID card deleted on decision | `admin/people-routes.ts` decide() | apps/api/test/staff-behaviour; apps/mobile/e2e/tests/warden-office | PASS |  |
 | FR-06 | Office/warden invites by email, 48 h, email-bound | `admin/config-routes.ts` staff-invites; `google-service.ts` acceptance | apps/api/test/staff-behaviour (W-10), google-service | PASS | Acceptance in the app needs real Google sign-in (not testable here). |
 | FR-07 | Deactivate staff / mark resident left; sessions end immediately | `admin/effects.ts` endAllSessions | apps/api/test/staff-behaviour FR-07, sessions | PASS |  |
-| FR-08 | View/edit name, retake profile photo; resident photo changes logged | — | — | FAIL | Not built (priority S). PATCH /me edits name for users, but no retake/edit UI and no logged resident photo change. |
+| FR-08 | View/edit name, retake profile photo; resident photo changes logged | — | apps/api/test/profile-edit; apps/mobile/e2e/tests/account-deletion (G-17 guest), profile-edit (R-15) | PASS | Remediated: GET /me returns the own photo (signed); name edit and live-camera retake for guests and residents; a verified resident's selfie change is logged by the residents audit trigger, no re-verification. |
 | FR-09 | Request account deletion (§16.6) | `account/routes.ts`, `account/deletion.ts`; `DeleteAccount.tsx` | apps/api/test/account-deletion; apps/mobile/e2e/tests/account-deletion | PASS |  |
 | FR-10 | Verified host creates pre-invite | `visits/host-routes.ts` POST /visits, `host-actions.ts` | apps/api/test/resident-onboarding-visits, host-routes; apps/mobile/e2e/tests/resident-app | PASS |  |
 | FR-11 | Share invite via share sheet | `components/SharePanel.tsx`; POST /visits/:id/invite-link | apps/mobile/e2e/tests/resident-app R-06→R-07 | PASS | Native share sheet not executed (Android). |
@@ -138,39 +231,39 @@ Anything that breaks security, privacy, money or a core flow:
 | FR-14 | Overnight/guest-room request with quota + charge preview | POST /visits/preview, POST /visits (overnight) | apps/api/test/resident-onboarding-visits; apps/mobile/e2e/tests/resident-app R-11 | PASS |  |
 | FR-15 | Warden approves/rejects; approval creates pending charge | `visits/service.ts` approveOvernight | apps/api/test/visits-service, resident-onboarding-visits; apps/mobile/e2e/tests/warden-office | PASS |  |
 | FR-16 | Host sees all visits with status and charges | GET /me/hosted-visits, /visits/:id, /me/charges | apps/api/test/resident-onboarding-visits | PASS |  |
-| FR-20 | Gate QR (https://<web>/g/<token>) every 10 s, countdown, hostel name, instruction | `app/gate/index.tsx`, `lib/gateToken.ts` | — (no test of the display page) | PARTIAL | Implemented as specified on reading; no automated test. |
+| FR-20 | Gate QR (https://<web>/g/<token>) every 10 s, countdown, hostel name, instruction | `app/gate/index.tsx`, `lib/gateToken.ts` | apps/mobile/test/gate-logic (payload, token = server MAC, countdown); apps/mobile/e2e/tests/gate-pairing (D-02 QR + instruction) | PASS | Remediated: display logic moved to lib/gate-display.ts and unit-tested; D-02 shown in e2e after pairing. |
 | FR-21 | Scan opens guest app; location + token + GPS validated first | `gate/scanSessions.ts`, `(guest)/g/[token].tsx` | apps/api/test/gate-routes; apps/mobile/e2e/tests/golden-path, gate-errors | PASS | Accepted deviation DEC-013 (rescan after mid-scan sign-up). |
-| FR-22 | In-app scanner on the guest home screen | `components/QrScanner.tsx` exists, used only by R-12 | — | FAIL | Not offered to guests (priority S). |
-| FR-23 | Offer Check in (approved visit today) / Check out / Request entry | GET /scan-sessions/:id (`gate/routes.ts`) | apps/api/test/gate-routes; apps/mobile/e2e/tests/golden-path, gate-retry-and-walkin | PARTIAL | Approved visit is not limited to *today* (a future approved visit is offered Check in, then refused TOO_EARLY); only the first approved visit is offered (see E-06). |
+| FR-22 | In-app scanner on the guest home screen | `components/QrScanner.tsx` exists, used only by R-12 | packages/shared gate-qr.test; apps/mobile/e2e/tests/guest-scanner (qr-camera project) | PASS | Remediated: "Scan the gate QR" on My visits; only a gate token is accepted. Also fixed a QrScanner first-frame bug that affected R-12. |
+| FR-23 | Offer Check in (approved visit today) / Check out / Request entry | GET /scan-sessions/:id (`gate/routes.ts`) | apps/api/test/gate-todays-visits; gate-routes | PASS | Remediated: only approved visits for today (IST) whose window hasn't ended, all of them listed. |
 | FR-24 | Live front-camera photo, never a file picker | `components/LiveCamera.tsx`, `gate/media.ts` | apps/api/test/media, gate-routes; Playwright fake camera | PASS | No file input anywhere in the app (grep). |
 | FR-25 | Walk-in: room search (first name + initial), type, duration, live photo | GET /hostels/:id/rooms/:n/residents, POST /scan-sessions/:id/walk-in | apps/api/test/security SA-01, gate-routes; apps/mobile/e2e/tests/gate-retry-and-walkin | PASS | Accepted deviation DEC-013. See BR-02 for the cutoff defect on this path. |
 | FR-26 | Live waiting screen turns green on approval without rescan | `(guest)/g/[token].tsx` waiting phase (3 s poll) | apps/mobile/e2e/tests/resident-app (approval turns guest green) | PASS |  |
-| FR-27 | 3 GPS failures OR permission denied → ask host to confirm | `(guest)/g/[token].tsx`, awaiting_host_confirmation | apps/api/test/gate-routes; apps/mobile/e2e/tests/gate-retry-and-walkin | PARTIAL | 3-failure path works and is tested. Permission denied does NOT offer "Ask host to confirm" immediately — it is treated as one failed attempt. |
+| FR-27 | 3 GPS failures OR permission denied → ask host to confirm | `(guest)/g/[token].tsx`, awaiting_host_confirmation | apps/api/test/gate-location-denied; apps/mobile/e2e/tests/gate-retry-and-walkin (denied first) | PASS | Remediated: permission denied offers "Ask host to confirm" at once and is not counted as an attempt (client and server, DEC-022). |
 | FR-28 | Host-assisted entry/exit from the resident app | POST /scan-sessions/:id/host-assisted-entry\|exit; `(resident)/assist.tsx` | apps/api/test/gate-routes, resident-approvals-notifications | PARTIAL | API tested. R-12 UI has no e2e (fake camera cannot show a QR); native path never executed. |
 | FR-29 | Heartbeat 60 s; warden sees status; alert after 5 min offline | `gate/devices.ts`, `job_gate_offline`, W-01/W-09 | apps/api/test/gate-routes, staff-behaviour, jobs-runner | PASS |  |
-| FR-30 | Gate keeps screen awake and recovers after network loss | `app/gate/index.tsx` (wakeLock, heartbeat backoff) | — | PARTIAL | Implemented; no automated test. |
+| FR-30 | Gate keeps screen awake and recovers after network loss | `app/gate/index.tsx` (wakeLock, heartbeat backoff) | apps/mobile/test/gate-logic (heartbeat backoff, wake lock) | PASS | Remediated at unit level: keepScreenAwake and heartbeatDelayMs are pure and tested. A real network drop on a device is not exercised. |
 | FR-40 | Host push per walk-in with photos, name, type, duration; approve (adjust end) / reject | N-WALKIN; R-08 `walk-in/[id].tsx` | apps/api/test/resident-approvals-notifications; apps/mobile/e2e/tests/resident-app | PASS | Android push delivery not executed. |
 | FR-41 | SMS if push unopened in 60 s | outbox + worker | apps/api/test/notification-worker (59 s/60 s) | PASS | Console SMS only. |
 | FR-42 | Push per check-in with photo compare; Yes / Not my guest for 30 min | N-ARRIVED; R-09 | apps/api/test/resident-approvals-notifications; apps/mobile/e2e/tests/resident-app | PASS |  |
 | FR-43 | Not my guest → disputed, warden push + SMS immediately | POST /visits/:id/dispute | apps/api/test/resident-approvals-notifications (TC-FLOW-06) | PASS |  |
 | FR-44 | Host push on check-out and on overstay | N-LEFT, N-OVERSTAY-HOST | apps/api/test/jobs-runner, templates | PASS |  |
-| FR-45 | Host marks "My guest has left" (logged, flagged to warden) | POST /visits/:id/mark-left; admin flag filter host_marked_left | apps/api/test/resident-approvals-notifications | PARTIAL | Host side tested; the warden-side flag/filter has no test. |
-| FR-50 | Dashboard live counts/lists, updates within 5 s | GET /admin/dashboard; SSE `stream/` | apps/api/test/staff-behaviour (SSE); apps/mobile/e2e/tests/warden-office (≤ 8 s) | PARTIAL | Works locally. In the SDD deployment the SSE LISTEN connection uses DATABASE_URL (the transaction pooler, §11.7) where LISTEN does not work — live updates would silently fall back to 15 s polling (see D-04). |
+| FR-45 | Host marks "My guest has left" (logged, flagged to warden) | POST /visits/:id/mark-left; admin flag filter host_marked_left | apps/api/test/resident-approvals-notifications; qa-gaps (warden flag) | PASS | Remediated: the warden list's host_marked_left flag is tested. |
+| FR-50 | Dashboard live counts/lists, updates within 5 s | GET /admin/dashboard; SSE `stream/` | apps/api/test/staff-behaviour (SSE), stream-direct-connection; apps/mobile/e2e/tests/warden-office | PASS | Remediated (D-04): LISTEN runs on DATABASE_DIRECT_URL; a pooler URL is refused outside local. Verifying on the real Supabase direct connection is part of the deployment milestone. |
 | FR-51 | Emergency roll call, printable/exportable | GET /admin/emergency (JSON/CSV); W-03 | apps/api/test/staff-behaviour | PASS |  |
 | FR-52 | Visit detail timeline with photos, GPS distance, notifications, flags | GET /admin/visits/:id; W-05 | apps/api/test/staff-behaviour, media (warden sees photo) | PASS |  |
 | FR-53 | Force check-out with reason | POST /admin/visits/:id/force-checkout | apps/api/test/visits-service, staff-behaviour; apps/mobile/e2e/tests/warden-office | PASS |  |
 | FR-54 | Ban guest (hostel/all, dated/permanent); suspend hosting until date | `admin/people-routes.ts` | apps/api/test/staff-behaviour; apps/mobile/e2e/tests/warden-office | PASS |  |
 | FR-55 | Rules form; each save a new version | GET/PUT /admin/rules | apps/api/test/staff-behaviour | PASS |  |
-| FR-56 | Pair/revoke devices; set gate location (avg of 5) | `admin/config-routes.ts`; W-09 `gates.tsx` | apps/api/test/staff-permissions | PARTIAL | Averaging untested; F8 step 4 map preview not built; pairing UI flow (D-01) not in e2e. |
+| FR-56 | Pair/revoke devices; set gate location (avg of 5) | `admin/config-routes.ts`; W-09 `gates.tsx` | apps/api/test/staff-permissions; apps/mobile/test/gate-logic (averaging); apps/mobile/e2e/tests/gate-pairing (pairing by code) | PARTIAL | Averaging and the D-01 pairing flow are now tested. Still missing: F8 step 4's map preview. |
 | FR-57 | Search visits; CSV export | GET /admin/visits, /admin/reports/visits.csv | apps/api/test/staff-permissions, staff-behaviour | PASS |  |
 | FR-58 | Audit log filtered by actor/entity/date | GET /admin/audit | apps/api/test/staff-behaviour | PASS |  |
 | FR-59 | Office charges: confirm, mark paid w/ receipt; warden waive/fine | `admin/charges-routes.ts`; O-01 | apps/api/test/staff-behaviour; apps/mobile/e2e/tests/warden-office | PASS |  |
 | FR-60 | Daily 08:00 digest to warden | `haven.job_daily_digest` | apps/api/test/jobs-runner (FR-60) | PASS | N-DIGEST text is a team-approved addition (DEC-016), not SDD §15.2 text. |
-| FR-70 | Walk-ins expire after 10 min; guest and host told | `job_expire_walkins`; guest page expired state | apps/api/test/jobs-runner (BR-12), resident-approvals-notifications | PASS | Guest-side expired screen has no e2e. |
+| FR-70 | Walk-ins expire after 10 min; guest and host told | `job_expire_walkins`; guest page expired state | apps/api/test/jobs-runner (BR-12), resident-approvals-notifications | PASS | Guest-side expired screen now in e2e (late-flows). |
 | FR-71 | Approved never-entered visits expire at window_end | `job_expire_approved` | apps/api/test/jobs-runner (FR-71) | PASS |  |
-| FR-72 | Overstay detection every 5 min; host + guest; warden after 30 min | `job_flag_overstays` | apps/api/test/jobs-runner (BR-13/FR-72) | PASS |  |
+| FR-72 | Overstay detection every 5 min; host + guest; warden after 30 min | `job_flag_overstays` | apps/api/test/jobs-runner (BR-13/FR-72) | PASS | F10 escalation and forced check-out now in e2e (late-flows). |
 | FR-73 | 22:00 night sweep of day/quick guests | `job_night_sweep` | apps/api/test/jobs-runner (TC-JOB-02) | PASS |  |
-| FR-74 | Every state change and admin action in append-only audit log | `audit_row()` triggers; `admin/audit.ts` | apps/api/test/staff-behaviour (audit), retention (append-only) | PARTIAL | Implemented; the trigger/PII-stripping tests are pgTAP files (`supabase/tests`) that no runner executes (CI step commented out). |
+| FR-74 | Every state change and admin action in append-only audit log | `audit_row()` triggers; `admin/audit.ts` | apps/api/test/staff-behaviour, retention, append-only; supabase/tests 002/003 (pgTAP, run) | PASS | Remediated: pgTAP now runs (CI `supabase test db`; 35/35 locally). The first run found forbid_mutation() failing with 42703 on approvals/hostel_rules, fixed by migration (DEC-024). |
 | FR-75 | Personal data purged per §16.5 | `job_retention`, `jobs/media-purge.ts` | apps/api/test/retention | PASS |  |
 
 ### Non-functional (NFR)
@@ -180,10 +273,10 @@ Anything that breaks security, privacy, money or a core flow:
 | NFR-01 | Scan + check-in p95 < 800 ms server; < 2 s on 4G | — | — | NOT TESTABLE | Needs the deployed stack (Supabase pooler, Render) and a 4G device; no load test exists. |
 | NFR-02 | Gate landing interactive < 3 s on midrange Android/4G (Lighthouse) | — | — | NOT TESTABLE | Needs a real midrange Android on 4G. |
 | NFR-03 | N-WALKIN/N-ARRIVED push within 10 s p95 | outbox worker (2 s loop) | — | NOT TESTABLE | Needs real Expo push to a device. |
-| NFR-04 | Dashboard reflects any visit change within 5 s | SSE hub | apps/mobile/e2e/tests/warden-office (asserts ≤ 8 s) | PARTIAL | Not measured at 5 s; in the SDD deployment LISTEN runs over the transaction pooler and cannot receive notifications (D-04). |
+| NFR-04 | Dashboard reflects any visit change within 5 s | SSE hub | apps/mobile/e2e/tests/warden-office (asserts ≤ 8 s) | PARTIAL | D-04 fixed (LISTEN on the direct connection, tested). Still not measured at 5 s in a deployed environment (deferred NFR measurement). |
 | NFR-05 | 99.5 % availability 07:00–23:00 IST | — | — | NOT TESTABLE | Operational metric; needs the pilot. |
 | NFR-06 | 50 scans/min/gate burst; 1,000 visits/day | — | — | NOT TESTABLE | No load test; needs a deployed environment. |
-| NFR-07 | All §16.4 controls before real data | see SECURITY-AUDIT.md | apps/api/test/security, media | PARTIAL | Web CSP/HSTS (SA-12) scheduled for deployment; production cannot start yet (D-02); two-owner/MFA are process items. |
+| NFR-07 | All §16.4 controls before real data | see SECURITY-AUDIT.md | apps/api/test/security, media | PARTIAL | D-02 fixed (the API starts in production mode, CI start check) and D-03 fixed (Supabase Storage, local disk refused outside local). Remaining: web CSP/HSTS (SA-12) at deployment, real-bucket verification, two-owner/MFA process items. |
 | NFR-08 | Retention enforced automatically | job_retention + media purge + JobRunner | apps/api/test/retention, jobs-runner | PASS |  |
 | NFR-09 | Returning guest ≤ 30 s / ≤ 4 taps; first-time ≤ 3 min | — | — | NOT TESTABLE | Needs timed sessions with real users. |
 | NFR-10 | Chrome 100+, Safari iOS 15+, Samsung Internet 18+; Android 9+ app | Expo web, RN | Playwright Chromium only | PARTIAL | Only Chromium is exercised; Safari/Samsung Internet untested; Android app never run. |
@@ -197,8 +290,8 @@ Anything that breaks security, privacy, money or a core flow:
 | ID | Requirement | Implementation | Test | Verdict | Notes |
 |---|---|---|---|---|---|
 | BR-01 | No admission without verified, non-suspended host approval | evaluateCreate/evaluateEntry; visits/service.ts | evaluate-create/entry tests; visits-service | PASS |  |
-| BR-02 | Day and quick drop-off guests must check in before 20:00 | evaluateEntry AFTER_ENTRY_CUTOFF (pre-invite check-in, host-assisted) | evaluate-entry.test; resident-approvals (host-assisted 20:15) | FAIL | Walk-in path never runs evaluateEntry (request uses evaluateCreate, approval uses evaluateCreate). QA probe: a day walk-in requested at 20:30 IST was accepted (201), approved (200) and ended `inside`. (D-01) |
-| BR-03 | No guest checks in at or after 22:00 | evaluateEntry AFTER_HARD_CUTOFF; walk-ins refused by WINDOW_INVALID | evaluate-entry.test; QA probe (quick drop-off 22:30 → 422) | PASS | Walk-ins after 22:00 are refused, but with WINDOW_INVALID, so the guest does not see §13.6 "The hostel is closed to guests". |
+| BR-02 | Day and quick drop-off guests must check in before 20:00 | evaluateEntry AFTER_ENTRY_CUTOFF (pre-invite check-in, host-assisted) | apps/api/test/walk-in-cutoffs | PASS | Remediated (D-01): walk-ins run evaluateEntry at request and at approval, judged at the scan session's time. |
+| BR-03 | No guest checks in at or after 22:00 | evaluateEntry AFTER_HARD_CUTOFF; walk-ins refused by WINDOW_INVALID | evaluate-entry.test; QA probe (quick drop-off 22:30 → 422) | PASS | Walk-ins after 22:00 now get AFTER_HARD_CUTOFF with the §13.6 copy (walk-in-cutoffs). |
 | BR-04 | Day windows within visiting_start..day_visit_latest_end, one date | evaluateCreate WINDOW_INVALID | evaluate-create.test; resident-onboarding-visits | PASS |  |
 | BR-05 | Overnight max 3 nights/host/month (IST) | evaluateCreate QUOTA_EXCEEDED, nights.ts | evaluate-create, nights tests; resident-onboarding-visits | PASS |  |
 | BR-06 | One overnight guest per host at a time | evaluateCreate OVERNIGHT_OVERLAP | evaluate-create (TC-RULE-15) | PASS |  |
@@ -221,30 +314,30 @@ Anything that breaks security, privacy, money or a core flow:
 
 | ID | Requirement | Implementation | Test | Verdict | Notes |
 |---|---|---|---|---|---|
-| E-01 | Gate offline: QR still valid; warden alerted after 5 min | gate page local token generation; job_gate_offline | jobs-runner (offline alert) | PARTIAL | Offline QR generation not tested. |
+| E-01 | Gate offline: QR still valid; warden alerted after 5 min | gate page local token generation; job_gate_offline | apps/api/test/jobs-runner; apps/mobile/test/gate-logic (local token generation) | PASS | Remediated: the gate's local token generation is unit-tested against the server MAC. |
 | E-02 | Guest clock wrong — server decides | gate/token.ts verify with server clock | token tests (TC-TOK) | PASS |  |
-| E-03 | Link opened in WhatsApp/IG/FB in-app browser → "Open in Chrome/Safari" | — | — | FAIL | No user-agent detection or prompt anywhere in the app. |
-| E-04 | Three friends: one token works for all within 30 s | scan sessions per guest; token not single-use | — | PARTIAL | True by construction; no test. |
-| E-05 | Walk-in 19:58 approved 20:03 → allowed (judged at scan session) | approveWalkIn (evaluateCreate only) | — | PARTIAL | "Allowed" holds only because no entry cutoff is applied to walk-ins at all (D-01); F2 step 9 evaluateEntry with the session time is not implemented; no test. |
-| E-06 | Same guest invited by two hosts: gate lists both; one inside | GET /scan-sessions/:id | — | FAIL | Only the first approved visit is returned (`executeTakeFirst`); the guest cannot choose the second. |
+| E-03 | Link opened in WhatsApp/IG/FB in-app browser → "Open in Chrome/Safari" | — | packages/shared in-app-browser.test; apps/mobile/e2e/tests/in-app-browser | PASS | Remediated: WhatsApp/Instagram/Facebook detected by user agent; Android "Open in Chrome" intent URL, iOS Safari steps, "Continue here anyway" (DEC-023, proposed copy). |
+| E-04 | Three friends: one token works for all within 30 s | scan sessions per guest; token not single-use | apps/api/test/qa-gaps | PASS | Remediated: three sessions from one token at 0, 10 and 25 s. |
+| E-05 | Walk-in 19:58 approved 20:03 → allowed (judged at scan session) | approveWalkIn (evaluateCreate only) | apps/api/test/walk-in-cutoffs | PASS | Remediated (D-01): requested 19:58, approved 20:03 → allowed; judged at the scan session. |
+| E-06 | Same guest invited by two hosts: gate lists both; one inside | GET /scan-sessions/:id | apps/api/test/gate-todays-visits | PASS | Remediated: both hosts' visits listed; the guest picks one; only one can be inside. |
 | E-07 | Guest changed phone: host cancels and re-invites | cancel + create | apps/api/test/resident-onboarding-visits | PASS |  |
 | E-08 | Host offline: walk-in expires; pre-invites still check in | job_expire_walkins; check-in independent of host | apps/api/test/jobs-runner, gate-routes | PASS |  |
 | E-09 | Host not in hostel approves: allowed, visible in timeline | approve has no location requirement; approvals row | apps/api/test/resident-approvals-notifications | PASS |  |
-| E-10 | Double tap / drop after commit: Idempotency-Key replays; one gate event | single-use scan session; runIdempotent on host actions and host-assisted only | apps/api/test/resident-approvals (host replay), gate-routes (2nd call SCAN_SESSION_EXPIRED) | PARTIAL | §9.12 requires Idempotency-Key replay on check-in, check-out and walk-in; those gate routes do not implement it (a retry gets SCAN_SESSION_EXPIRED, not the original response). One gate event is still guaranteed. |
+| E-10 | Double tap / drop after commit: Idempotency-Key replays; one gate event | single-use scan session; runIdempotent on host actions and host-assisted only | apps/api/test/gate-idempotency | PASS | Remediated: runIdempotent on gate check-in, check-out and walk-in. |
 | E-11 | Host suspended while guest inside | suspend + cancelFutureVisits | apps/api/test/staff-behaviour BR-10 | PASS |  |
 | E-12 | Guest banned while inside | force-checkout + ban | apps/api/test/staff-behaviour; apps/mobile/e2e/tests/warden-office | PASS |  |
 | E-13 | Rules changed during the day | RulesProvider latest version; visits keep rules_version | apps/api/test/staff-behaviour FR-55/E-13 | PASS |  |
-| E-14 | Gate location not set → GATE_NOT_CONFIGURED; red banner | geofence/scanSessions; W-01/W-09 banner | — | PARTIAL | Implemented; no test. |
+| E-14 | Gate location not set → GATE_NOT_CONFIGURED; red banner | geofence/scanSessions; W-01/W-09 banner | apps/api/test/qa-gaps; apps/mobile/e2e/tests/gate-pairing (red banner) | PASS | Remediated: gate_not_configured and the W-01 banner are tested. |
 | E-15 | No mobile data → host-assisted entry | F4 host-assisted | apps/api/test/gate-routes | PARTIAL | Same as FR-28: UI path untested, native unexecuted. |
 | E-16 | GPS inside geofence but guest in a nearby room | calibration + live photo (documented limitation) | — | NOT TESTABLE | Needs on-site GPS calibration (§19.4). |
-| E-17 | Camera denied → G-16, no check-in without photo | LiveCamera onPermissionDenied | — | PARTIAL | Implemented; no test. |
+| E-17 | Camera denied → G-16, no check-in without photo | LiveCamera onPermissionDenied | apps/mobile/e2e/tests/late-flows | PASS | Remediated: G-16 had no copy ("Something went wrong"); now the Chrome/Safari steps (proposed) and Try again, no file input. G-16 screenshots not built (DEC-025). |
 | E-18 | Resident moves out: future visits cancelled, guests see cancelled | mark-left + cancelFutureVisits | apps/api/test/staff-behaviour FR-07 | PASS |  |
 | E-19 | Overnight across two months: nights split for quota | nights.ts monthsTouched | nights/evaluate-create tests | PASS |  |
-| E-20 | Roommates allowed; warden sees existing verified residents of the room | residents DTO roommates; W-04 | — | PARTIAL | Implemented; no test. |
+| E-20 | Roommates allowed; warden sees existing verified residents of the room | residents DTO roommates; W-04 | apps/api/test/qa-gaps | PASS | Remediated: roommates listed for a pending resident. |
 | E-21 | "Not my guest" by mistake → warden resolves | POST /admin/visits/:id/resolve-dispute | apps/api/test/staff-permissions, staff-behaviour (audit) | PASS |  |
 | E-22 | Never checks out: overstay → escalation → sweep → force check-out | jobs + force-checkout | apps/api/test/jobs-runner, staff-behaviour | PASS |  |
-| E-23 | Two gate devices on one gate both valid | per-gate secret | — | PARTIAL | True by construction; no test. |
-| E-24 | Approved guest at another hostel's gate → only Request entry | scan-session query scoped to gate hostel | — | PARTIAL | Implemented; no test. |
+| E-23 | Two gate devices on one gate both valid | per-gate secret | apps/api/test/qa-gaps | PASS | Remediated: two devices on one gate, one secret. |
+| E-24 | Approved guest at another hostel's gate → only Request entry | scan-session query scoped to gate hostel | apps/api/test/qa-gaps | PASS | Remediated: approved at hostel A, scanning hostel B → Request entry only. |
 
 ### Test cases (TC)
 
@@ -267,7 +360,7 @@ Anything that breaks security, privacy, money or a core flow:
 | TC-GEO-04 | Fix age 61 s → stale_fix | gate/geofence.ts | geofence.test | PASS |  |
 | TC-GEO-05 | 4th location attempt → LOCATION_RETRY_LIMIT | scanSessions retry | gate-routes (retry limit) | PASS |  |
 | TC-FLOW-01 | F1 end to end: inside, 1 gate event, 1 N-ARRIVED | gate + visits | gate-routes; golden-path e2e | PASS |  |
-| TC-FLOW-02 | Walk-in approved: inside, entry time = approval time, session consumed | approveWalkIn | resident-approvals (inside, 1 gate event) | PARTIAL | Entry-time and session-consumed assertions missing. |
+| TC-FLOW-02 | Walk-in approved: inside, entry time = approval time, session consumed | approveWalkIn | apps/api/test/qa-gaps | PASS | Remediated: entry time = approval time, session consumed, one entry event. Found gate_events.at on the DB clock; now the injected clock. |
 | TC-FLOW-03 | Walk-in, no answer 10 min → expired, host notified | job_expire_walkins | jobs-runner BR-12; resident-approvals | PASS |  |
 | TC-FLOW-04 | Location unverified, host confirms → inside, location_unverified | confirm-arrival path | resident-approvals TC-FLOW-04 | PASS |  |
 | TC-FLOW-05 | Overnight steps out mid-stay → approved; re-entry allowed | checkOut | visits-service (stepping out) | PASS |  |
@@ -275,7 +368,7 @@ Anything that breaks security, privacy, money or a core flow:
 | TC-FLOW-07 | Invite opened with another phone → INVITE_PHONE_MISMATCH | claimInvite | invites, auth-routes | PASS |  |
 | TC-FLOW-08 | Same scan session twice → SCAN_SESSION_EXPIRED | consumeScanSession | gate-routes (already-consumed) | PASS |  |
 | TC-FLOW-09 | Wrong nonce → SCAN_SESSION_FORBIDDEN | validateAndBindSession | gate-routes (wrong nonce) | PASS |  |
-| TC-FLOW-10 | Check-in replay with same Idempotency-Key → identical response, one gate event | gate check-in (no runIdempotent) | — | FAIL | Gate check-in does not implement Idempotency-Key replay (§9.12); a repeat returns SCAN_SESSION_EXPIRED. |
+| TC-FLOW-10 | Check-in replay with same Idempotency-Key → identical response, one gate event | gate check-in (no runIdempotent) | apps/api/test/gate-idempotency | PASS | Remediated: identical replay, one gate event. |
 | TC-FLOW-11 | Visitor inside two visits → ALREADY_INSIDE | unique index + check | visits-concurrency | PASS |  |
 | TC-FLOW-12 | Approve vs expiry race → one wins, other 409 | status-guarded updates | visits-concurrency | PASS |  |
 | TC-JOB-01 | Overstay job twice → one host push, one guest SMS | job_flag_overstays | jobs-runner | PASS |  |
@@ -286,8 +379,8 @@ Anything that breaks security, privacy, money or a core flow:
 | TC-SEC-04 | Warden X uses X-Hostel-Id Y → 403 | staffScope | staff-behaviour; media | PASS |  |
 | TC-SEC-05 | Deactivated user's token after 30 s → SESSION_REVOKED | RevocationCache | sessions; staff-behaviour | PASS |  |
 | TC-SEC-06 | Reused refresh token → 401, session revoked | rotateRefreshToken | sessions | PASS |  |
-| TC-SEC-07 | UPDATE gate_events as haven_api → permission error | grants + forbid_mutation | supabase/tests/004 (pgTAP) | PARTIAL | The pgTAP file is never executed (CI step commented out; embedded Postgres has no pgTAP). The trigger part is exercised indirectly (retention test asserts append-only on audit_log). |
-| TC-SEC-08 | Audit row for a visit update has no invited_phone/name | audit_row strip-list | supabase/tests/003 (pgTAP) | PARTIAL | Never executed, as TC-SEC-07. |
+| TC-SEC-07 | UPDATE gate_events as haven_api → permission error | grants + forbid_mutation | supabase/tests/004 (pgTAP) | PASS | pgTAP 004 executed (locally 7/7; CI `supabase test db`). |
+| TC-SEC-08 | Audit row for a visit update has no invited_phone/name | audit_row strip-list | supabase/tests/003 (pgTAP) | PASS | pgTAP 003 executed (locally 5/5; CI `supabase test db`). |
 | TC-SEC-09 | 4th OTP request in 10 min → RATE_LIMITED | requestOtp | otp-service; security | PASS |  |
 | TC-SEC-10 | PNG with EXIF GPS → stored file has no EXIF | gate/media.ts | media | PASS |  |
 | TC-SEC-11 | Same photo twice → PHOTO_REUSED | gate/media.ts + unique index | media | PASS |  |
