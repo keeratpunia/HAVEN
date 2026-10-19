@@ -21,7 +21,7 @@ import { storeGatePhoto, type MediaStorage } from './media.js';
 import { consumeScanSession } from './repository.js';
 import { authorize } from '../auth/policy.js';
 import { assertVisitorProfileComplete } from '../auth/visitor-service.js';
-import { displayName } from '@haven/shared';
+import { displayName, localDateTimeToUtc, plusDays, toLocalDateString } from '@haven/shared';
 import {
   consumeSession,
   createScanSession,
@@ -285,14 +285,26 @@ export async function registerGateRoutes(
         return;
       }
 
-      const approved = await db
+      // FR-23: "an approved visit for today at this hostel" — today in the hostel's
+      // timezone, and not already over. E-06: every such visit is listed (two hosts
+      // can invite the same guest); the guest picks one. Only one can be inside.
+      const { config } = await opts.rules.forHostel(gate.hostel_id);
+      const now = clock.now();
+      const tomorrowStart = localDateTimeToUtc(
+        plusDays(toLocalDateString(now, config.timezone), 1, config.timezone),
+        '00:00',
+        config.timezone,
+      );
+      const approvedToday = await db
         .selectFrom('haven.visits')
         .selectAll()
         .where('visitor_id', '=', request.principal.visitorId)
         .where('hostel_id', '=', gate.hostel_id)
         .where('status', '=', 'approved')
+        .where('window_start', '<', tomorrowStart)
+        .where('window_end', '>', now)
         .orderBy('window_start', 'asc')
-        .executeTakeFirst();
+        .execute();
       const inside = await db
         .selectFrom('haven.visits')
         .selectAll()
@@ -302,8 +314,12 @@ export async function registerGateRoutes(
 
       if (inside) {
         reply.send({ gpsOk: session.gps_ok, actions: ['check_out'], visits: [visitDto(inside)] });
-      } else if (approved) {
-        reply.send({ gpsOk: session.gps_ok, actions: ['check_in'], visits: [visitDto(approved)] });
+      } else if (approvedToday.length > 0) {
+        reply.send({
+          gpsOk: session.gps_ok,
+          actions: ['check_in'],
+          visits: approvedToday.map(visitDto),
+        });
       } else {
         reply.send({ gpsOk: session.gps_ok, actions: ['request_entry'], visits: [] });
       }

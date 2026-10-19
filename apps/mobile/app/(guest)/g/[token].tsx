@@ -116,6 +116,8 @@ export default function GateScan() {
     null,
   );
   const [resultKind, setResultKind] = useState<'check_in' | 'check_out' | 'walk_in'>('check_in');
+  // E-06: with more than one approved visit today the guest picks which one this is.
+  const [chosenVisitId, setChosenVisitId] = useState<string | null>(null);
   const [resultStatus, setResultStatus] = useState<string | null>(null);
   const [walkInVisitId, setWalkInVisitId] = useState<string | null>(null);
   const [walkInStatus, setWalkInStatus] = useState<string | null>(null);
@@ -210,6 +212,7 @@ export default function GateScan() {
       .getScanSession(session.scanSessionId, clientNonceRef.current)
       .then((actions) => {
         setScanActions(actions);
+        setChosenVisitId(actions.visits.length === 1 ? (actions.visits[0]?.id ?? null) : null);
         const primary = actions.actions[0];
         if (primary === 'check_in' || primary === 'check_out') {
           setResultKind(primary);
@@ -247,7 +250,7 @@ export default function GateScan() {
       );
 
       if (resultKind === 'check_in') {
-        const visitId = scanActions?.visits[0]?.id;
+        const visitId = chosenVisitId;
         if (!visitId) throw new api.ApiError('NOT_FOUND', 404, 'Visit not found.');
         const res = await api.scanSessionCheckIn(
           session.scanSessionId,
@@ -398,7 +401,26 @@ export default function GateScan() {
       {phase === 'confirm_action' ? (
         <View style={styles.card}>
           <Text style={styles.title}>{resultKind === 'check_in' ? 'Check in' : 'Check out'}</Text>
-          {scanActions?.visits[0] ? (
+          {resultKind === 'check_in' && (scanActions?.visits.length ?? 0) > 1 ? (
+            <View style={styles.list} accessibilityRole="radiogroup">
+              <Text style={styles.body}>Which visit is this?</Text>
+              {scanActions?.visits.map((v) => (
+                <Pressable
+                  key={v.id}
+                  onPress={() => setChosenVisitId(v.id)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: chosenVisitId === v.id }}
+                  aria-checked={chosenVisitId === v.id}
+                  style={[styles.choice, chosenVisitId === v.id && styles.choiceSelected]}
+                >
+                  <Text style={styles.body}>
+                    Visiting {v.hostFirstName ?? v.hostelName}, {formatTimeIst(v.windowStart)} to{' '}
+                    {formatTimeIst(v.windowEnd)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : scanActions?.visits[0] ? (
             <Text style={styles.body}>
               Visiting {scanActions.visits[0].hostFirstName ?? scanActions.visits[0].hostelName}{' '}
               until {formatTimeIst(scanActions.visits[0].windowEnd)}
@@ -408,6 +430,7 @@ export default function GateScan() {
             <Button
               label={resultKind === 'check_in' ? 'Check in' : 'Check out'}
               onPress={() => setPhase('photo')}
+              disabled={resultKind === 'check_in' && !chosenVisitId}
             />
           </View>
         </View>
@@ -631,6 +654,15 @@ const styles = StyleSheet.create({
     borderColor: color.border,
     borderRadius: shape.radius,
   },
+  choice: {
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: space.sm,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: shape.radius,
+  },
+  choiceSelected: { borderColor: color.primary, borderWidth: 2 },
   typeRow: { flexDirection: 'row', gap: space.xs },
   typeOption: {
     borderWidth: 1,
