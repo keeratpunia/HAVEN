@@ -187,6 +187,11 @@ is backed by a code that's under 30 seconds old — a screenshot can't be reused
 their second visit on, it's one scan." Tip for a smooth demo: have Guest B sign in first
 (open the app → **Sign in**) and then scan, which avoids the second scan entirely.
 
+**Run this before 8 pm IST.** The demo uses the real clock, and day or quick drop-off
+guests can't come in from 20:00 (BR-02); after 22:00 nobody can (BR-03). After 8 pm the
+app shows "Entry has closed for today"; after 10 pm, "The hostel is closed to guests".
+Those are worth showing too.
+
 17. Guest B (no invite) scans the gate QR directly (`/gate` → camera).
 18. Location check → signs in with OTP (or the test-number shortcut) → profile + live
     selfie (first time) → **Find your host** → room `101` → **Priya Sharma** → visit

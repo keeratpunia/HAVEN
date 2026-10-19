@@ -291,6 +291,27 @@ export async function createWalkIn(
         deps.clock.now(),
       );
       const hostActiveDayGuestCount = await countHostActiveDayGuests(trx, params.hostUserId);
+      // BR-02/BR-03: a walk-in is an entry at the gate, so the entry cut-offs apply when
+      // it is requested — judged now, the moment of the scan (SDD F2, E-05). Checked
+      // before the window rules so a late guest hears "the hostel is closed" (§13.6)
+      // rather than a window error (FINAL-QA-REPORT D-01).
+      throwIfDenied(
+        evaluateEntry(
+          {
+            now: deps.clock.now(),
+            type: params.type as RuleVisitType,
+            host,
+            visitorBanned,
+            visitStatus: 'approved',
+            windowStart: params.windowStart,
+            windowEnd: params.windowEnd,
+            visitorAlreadyInsideElsewhere: false,
+            gpsOk: params.locationVerified ?? true,
+            hostActiveDayGuestCount,
+          },
+          deps.rulesConfig,
+        ),
+      );
       const result = evaluateCreate(
         toCreateContext(deps, {
           type: params.type,
@@ -639,6 +660,9 @@ async function runTransition<TExtra>(
 export interface WalkInGateContext {
   gateId: string;
   scanSessionId?: string | null;
+  /** When the guest scanned (the walk-in scan session's created_at): entry cut-offs
+   * are judged at this moment, not at approval (SDD E-05, F2 step 9). */
+  judgedAt?: Date | null;
   locationVerified: boolean;
   distanceM?: number | null;
   accuracyM?: number | null;
@@ -726,6 +750,28 @@ export async function approveWalkIn(
           'This guest is already checked in to another visit.',
         );
       }
+
+      // F2 step 9: "server runs evaluateEntry using the scan session's GPS result";
+      // E-05: "entry cut-offs are judged at the scan session's created_at" — a walk-in
+      // requested at 19:58 and approved at 20:03 is allowed (FINAL-QA-REPORT D-01).
+      throwIfDenied(
+        evaluateEntry(
+          {
+            // No scan session (e.g. a seeded request): judged at approval, by our clock.
+            now: params.gate.judgedAt ?? deps.clock.now(),
+            type: current.type as RuleVisitType,
+            host: await loadHostState(trx, current.host_id),
+            visitorBanned,
+            visitStatus: 'approved',
+            windowStart: current.window_start,
+            windowEnd,
+            visitorAlreadyInsideElsewhere: false,
+            gpsOk: params.gate.locationVerified,
+            hostActiveDayGuestCount: await countHostActiveDayGuests(trx, current.host_id),
+          },
+          deps.rulesConfig,
+        ),
+      );
 
       const now = deps.clock.now();
       const updated = await updateVisitStatus(trx, {

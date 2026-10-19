@@ -398,6 +398,7 @@ export async function registerHostVisitRoutes(
             ? {
                 gateId: session.gate_id,
                 scanSessionId: session.id,
+                judgedAt: session.created_at,
                 locationVerified: session.gps_ok,
                 distanceM: session.distance_m,
                 accuracyM: session.accuracy_m,
