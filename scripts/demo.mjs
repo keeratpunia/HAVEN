@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 /**
- * `pnpm demo` — starts the local demo DB, API and web app together for a live
- * presentation (see docs/DEMO.md for the full script). Plain Node, no build step: this
- * only ever points at the embedded, localhost-only database `apps/api/scripts/demo-db.ts`
- * starts, so there is no way for it to touch staging or production — reinforced here
- * with an explicit refusal if `APP_ENV`/`NODE_ENV` look like a real deployment.
+ * `pnpm demo` — starts the local demo database, API and web app together for a live
+ * presentation (docs/DEMO.md). `pnpm demo:tunnel` runs this behind one cloudflared quick
+ * tunnel for phones. Plain Node, no build step.
+ *
+ * Safety: everything points at the embedded, localhost-only database that
+ * apps/api/scripts/demo-db.ts starts, so this can't touch staging or production —
+ * reinforced by refusing to run if APP_ENV/NODE_ENV look like a real deployment.
  */
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
-
-const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+import { loadDemoConfig, ROOT } from './demo-config.mjs';
 
 for (const varName of ['APP_ENV', 'NODE_ENV']) {
   const value = process.env[varName];
@@ -23,65 +22,74 @@ for (const varName of ['APP_ENV', 'NODE_ENV']) {
   }
 }
 
+let config;
+try {
+  config = loadDemoConfig();
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
+
 const webBaseUrl = process.env.WEB_BASE_URL ?? 'http://localhost:8081';
 const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:8080';
 
-// Two different tunnel hostnames (one per port) break the refresh-token cookie: it's
-// SameSite=Lax, and a background fetch() from the web app's origin to a *different*
-// API origin is cross-site, so the browser correctly refuses to send it — the guest
-// gets signed out every time they open a fresh page (e.g. after scanning the gate QR
-// with their camera app). In a real deployment this doesn't happen because
-// WEB_BASE_URL/API_BASE_URL are subdomains of one shared COOKIE_DOMAIN (same-site);
-// a quick tunnel has no such shared parent domain. Discovered during a live rehearsal
-// (docs/DEMO.md) — when WEB_BASE_URL and API_BASE_URL are the same non-localhost
-// origin, start scripts/demo-proxy.mjs (routes /v1/* to :8080, everything else to
-// :8081) so a single tunnel on :9000 can serve both under one origin.
+// One tunnel, one origin (docs/DEMO.md "Phones"): two tunnel hostnames would be two
+// sites, and the SameSite=Lax refresh cookie would never reach the API. When the web
+// and API URLs are the same non-localhost origin, scripts/demo-proxy.mjs serves both on
+// one port (/v1 → API :8080, everything else → web :8081) and the tunnel points there.
 const usingSharedTunnelOrigin = webBaseUrl === apiBaseUrl && !webBaseUrl.includes('localhost');
 
-/** Prefixes every line of a chunk with `[name]` — a single `data` event can contain
- * several newline-separated lines, and prefixing only the chunk's start left later
- * lines unprefixed in the combined output. */
+/** Prefixes every line with `[name]` (one `data` event can hold several lines). */
 function prefixedWrite(stream, name, buf) {
-  const text = buf.toString();
-  const lines = text.split('\n');
+  const lines = buf.toString().split(/\r?\n/);
   if (lines[lines.length - 1] === '') lines.pop();
   for (const line of lines) stream.write(`[${name}] ${line}\n`);
 }
 
 const children = [];
-function run(name, command, args, opts = {}) {
-  const child = spawn(command, args, {
+/**
+ * `command` is one string: on Windows `pnpm` is `pnpm.cmd`, which Node can only start
+ * through a shell, and passing an args array with `shell: true` is deprecated (DEP0190).
+ * No path is ever part of the command, so a repo folder with spaces is fine (`cwd`).
+ */
+function run(name, command, env = {}) {
+  const child = spawn(command, {
     cwd: ROOT,
     stdio: 'pipe',
-    shell: process.platform === 'win32',
-    env: { ...process.env, ...opts.env },
+    shell: true,
+    env: { ...process.env, ...env },
   });
   children.push(child);
   child.stdout.on('data', (buf) => prefixedWrite(process.stdout, name, buf));
   child.stderr.on('data', (buf) => prefixedWrite(process.stderr, name, buf));
+  child.on('exit', (code) => {
+    if (!shuttingDown && code !== 0 && code !== null) {
+      console.error(
+        `\n[${name}] stopped (exit ${code}). See the lines above; "pnpm demo:reset" clears leftovers.`,
+      );
+      shutdown(1);
+    }
+  });
   return child;
 }
 
-/** Resolves once `pattern` appears in the child's stdout, so the next process only
- * starts once the previous one is genuinely ready (not just "spawned"). */
+/** Resolves with the matching line once `pattern` appears in the child's output. */
 function waitFor(child, pattern) {
   return new Promise((resolve) => {
     const onData = (buf) => {
-      if (pattern.test(buf.toString())) {
+      const m = pattern.exec(buf.toString());
+      if (m) {
         child.stdout.off('data', onData);
-        resolve();
+        resolve(m);
       }
     };
     child.stdout.on('data', onData);
   });
 }
 
-/** `spawn(..., { shell: true })` on Windows wraps each child in an extra cmd.exe
- * layer — `child.kill()` only kills that wrapper, leaving the actual tsx/expo
- * process (and the embedded Postgres under it) running and still holding its port.
- * `taskkill /T` kills the whole process tree instead; on POSIX, `child.kill()` is
- * already enough since there's no such wrapper. */
+/** With `shell: true` the child is a cmd.exe wrapper on Windows: kill the whole tree. */
 function killTree(child) {
+  if (child.exitCode !== null) return;
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
   } else {
@@ -89,65 +97,121 @@ function killTree(child) {
   }
 }
 
-function shutdown() {
+let shuttingDown = false;
+function shutdown(code = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   for (const child of children) killTree(child);
-  process.exit(0);
+  setTimeout(() => process.exit(code), 1500);
 }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => shutdown(0));
+process.on('SIGTERM', () => shutdown(0));
+
+/** Waits for the Expo web server, then requests the app bundle once so the first phone
+ * doesn't wait a minute or more for Metro to build it. */
+async function warmWebBundle() {
+  const deadline = Date.now() + 10 * 60_000;
+  let html = '';
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch('http://127.0.0.1:8081/', { signal: AbortSignal.timeout(5_000) });
+      if (res.ok) {
+        html = await res.text();
+        break;
+      }
+    } catch {
+      // not up yet
+    }
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+  const src = /src="([^"]*bundle[^"]*)"/.exec(html)?.[1]?.replace(/&amp;/g, '&');
+  if (!src) return false;
+  console.log('\nBuilding the web app bundle (first time can take a few minutes)...');
+  try {
+    const res = await fetch(new URL(src, 'http://127.0.0.1:8081/'), {
+      signal: AbortSignal.timeout(10 * 60_000),
+    });
+    await res.arrayBuffer();
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function banner(pairing) {
+  const line = '='.repeat(76);
+  const out = [
+    '',
+    line,
+    'HAVEN demo is up.',
+    `  Open on the laptop and phones:  ${webBaseUrl}`,
+    usingSharedTunnelOrigin
+      ? `  (tunnel → local proxy :${config.proxyPort} → API :8080 + web :8081)`
+      : `  API:  ${apiBaseUrl}`,
+    '',
+    `  Gate screen:  ${webBaseUrl}/gate   pairing code ${pairing ?? '(see [db] above)'}  (valid 10 min)`,
+    '                new code any time:  pnpm demo:pair-code',
+    `  Gate location: ${config.gateLat}, ${config.gateLng} (radius ${config.gateRadiusM} m) — edit demo.config.json`,
+    '',
+    '  Sign in at /sign-in with the email only (dev sign-in, no password):',
+    '    Residents:   priya@haven.demo (room 101), fatima@haven.demo (room 102)',
+    '    Warden:      warden@haven.demo',
+    '    Office:      office@haven.demo',
+    '    Super admin: admin@haven.demo',
+    '',
+    '  Guests: phone 99999 00001 or 99999 00002 (also 03–09), OTP code 123456',
+    '',
+    '  Demo clock:   pnpm demo:clock 13:00 | 20:05 | +11m | reset',
+    '  Jobs:         pnpm demo:job list | overstay <VISIT> | escalate <VISIT>',
+    '  Stop: Ctrl+C.  Leftovers / start clean: pnpm demo:reset.   Script: docs/DEMO.md',
+    line,
+    '',
+  ];
+  console.log(out.join('\n'));
+}
 
 async function main() {
-  console.log('Starting HAVEN demo stack (real clock, embedded local database)...\n');
+  console.log('Starting HAVEN demo stack (embedded local database, dev sign-in)...\n');
 
-  const db = run('db', 'pnpm', ['--filter', '@haven/api', 'run', 'demo:db']);
+  const db = run('db', 'pnpm --filter @haven/api run demo:db', {
+    DEMO_GATE_LAT: String(config.gateLat),
+    DEMO_GATE_LNG: String(config.gateLng),
+    DEMO_GATE_RADIUS_M: String(config.gateRadiusM),
+  });
+  const pairingLine = waitFor(db, /Gate pairing code: ([0-9A-Z]{4}-[0-9A-Z]{4})/);
   await waitFor(db, /Demo database ready\./);
+  const pairing = (
+    await Promise.race([pairingLine, new Promise((r) => setTimeout(r, 2_000))])
+  )?.[1];
 
-  const server = run('api', 'pnpm', ['--filter', '@haven/api', 'run', 'demo:server'], {
-    env: { WEB_BASE_URL: webBaseUrl, API_BASE_URL: apiBaseUrl },
+  const server = run('api', 'pnpm --filter @haven/api run demo:server', {
+    WEB_BASE_URL: webBaseUrl,
+    API_BASE_URL: apiBaseUrl,
+    CORS_ORIGINS:
+      process.env.CORS_ORIGINS ??
+      `${webBaseUrl},http://localhost:8081,http://localhost:${config.proxyPort}`,
+    TRUST_PROXY_HOPS: usingSharedTunnelOrigin ? '1' : '0',
   });
   await waitFor(server, /listening on/);
 
-  run('web', 'pnpm', ['--filter', '@haven/mobile', 'run', 'web'], {
-    env: {
-      EXPO_PUBLIC_API_URL: apiBaseUrl,
-      EXPO_PUBLIC_WEB_URL: webBaseUrl,
-      // Mirrors demo-server.ts's own DEV_LOGIN_ENABLED=true — without this the
-      // resident sign-in screen hides the dev-login form entirely (see
-      // apps/mobile/app/(auth)/sign-in.tsx, R-01), since there's no real Google OAuth
-      // configured for this environment and that's the only way in.
-      EXPO_PUBLIC_DEV_LOGIN_ENABLED: 'true',
-    },
+  run('web', 'pnpm --filter @haven/mobile run web', {
+    EXPO_PUBLIC_API_URL: apiBaseUrl,
+    EXPO_PUBLIC_WEB_URL: webBaseUrl,
+    // The resident/staff sign-in screen only shows the dev sign-in form with this on
+    // (no real Google OAuth in the demo; demo-server.ts enables the API side).
+    EXPO_PUBLIC_DEV_LOGIN_ENABLED: 'true',
+    // Non-interactive: no "press a key" prompts, no browser auto-open.
+    CI: '1',
   });
 
   if (usingSharedTunnelOrigin) {
-    run('proxy', 'node', ['scripts/demo-proxy.mjs']);
-    console.log(
-      '\nWEB_BASE_URL and API_BASE_URL match — starting the local merge proxy on :9000.\n' +
-        'Point your single cloudflared/ngrok tunnel at :9000, not :8080 or :8081.\n',
-    );
+    run('proxy', 'node scripts/demo-proxy.mjs', { PROXY_PORT: String(config.proxyPort) });
   }
 
-  setTimeout(() => {
-    console.log('\n' + '='.repeat(72));
-    console.log('HAVEN demo is up.');
-    console.log(`  Web:  ${webBaseUrl}`);
-    console.log(`  API:  ${apiBaseUrl}`);
-    console.log(
-      '  Resident dev sign-in: priya@haven.demo, fatima@haven.demo (any password-free email)',
-    );
-    console.log(
-      '  Staff dev sign-in: warden@haven.demo (warden), office@haven.demo (office), admin@haven.demo (super admin)',
-    );
-    console.log(
-      '  Guest OTP: read "[otp:dev] ... purpose-code=" above, or use +91 9999900001/02 with code 123456',
-    );
-    console.log('  Gate pairing code: printed above by [db] — regenerate anytime with:');
-    console.log('    pnpm --filter @haven/api run demo:pair-code');
-    console.log(
-      '  See docs/DEMO.md for the full script, tunnel setup, and failure-case walkthroughs.',
-    );
-    console.log('='.repeat(72) + '\n');
-  }, 3000);
+  const warmed = await warmWebBundle();
+  if (!warmed)
+    console.log('\n(The web bundle did not pre-build; the first page load will be slow.)');
+  banner(pairing);
 }
 
 void main();

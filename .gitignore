@@ -55,3 +55,6 @@ apps/api/.media-storage/
 apps/api/.e2e-media/
 apps/api/.demo-pgdata/
 apps/api/.demo-media/
+
+# Local demo settings (the room's real gate coordinates) — copied from demo.config.example.json
+demo.config.json

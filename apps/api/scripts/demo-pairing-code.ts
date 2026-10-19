@@ -11,6 +11,7 @@ import { Client } from 'pg';
 import { sha256 } from '../src/lib/crypto.js';
 import { generatePairingCode, formatPairingCodeForDisplay } from '../src/lib/ids.js';
 import { DEMO_DATABASE_URL, DEMO_GATE_CODE } from './demo-constants.js';
+import { demoNow, formatIst } from './demo-time.js';
 
 const PAIRING_CODE_TTL_MS = 10 * 60_000;
 
@@ -31,7 +32,8 @@ async function main() {
   );
 
   const code = generatePairingCode();
-  const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS);
+  // The API judges the code's age on the demo clock (`pnpm demo:clock` may move it).
+  const expiresAt = new Date((await demoNow()).now.getTime() + PAIRING_CODE_TTL_MS);
   await client.query(
     `insert into haven.gate_pairing_codes (code_hash, gate_id, created_by, expires_at)
      values ($1, $2, $3, $4)`,
@@ -40,7 +42,7 @@ async function main() {
   await client.end();
 
   console.log(
-    `Gate pairing code: ${formatPairingCodeForDisplay(code)} (expires ${expiresAt.toLocaleTimeString()})`,
+    `Gate pairing code: ${formatPairingCodeForDisplay(code)} (expires ${formatIst(expiresAt)})`,
   );
 }
 

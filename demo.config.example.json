@@ -1,0 +1,9 @@
+{
+  "_readme": "Copied to demo.config.json (not committed) the first time you run pnpm demo. Edit demo.config.json, not this file. gate.lat/lng: where the phones will stand during the demo (long-press the spot in Google Maps to copy them). radiusM: how close a phone must be, 10-300 (indoor GPS is rough, so the demo default is generous). proxyPort: the one local port the tunnel exposes.",
+  "gate": {
+    "lat": 12.9716,
+    "lng": 77.5946,
+    "radiusM": 150
+  },
+  "proxyPort": 9000
+}
