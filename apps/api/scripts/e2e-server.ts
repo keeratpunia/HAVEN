@@ -15,6 +15,7 @@
 process.env.NODE_ENV = 'development';
 
 import path from 'node:path';
+import { sql } from 'kysely';
 import { buildApp } from '../src/app.js';
 import { __resetEnvCacheForTests, loadEnv } from '../src/config.js';
 import { createDb } from '../src/db/index.js';
@@ -53,6 +54,36 @@ async function main() {
     clock,
     mediaStorage,
     rateLimit: { max: 1_000, timeWindowMs: 60_000, otpVerifyMaxPer10Min: 1_000 },
+  });
+
+  // ---- E2E-only controls (this script only; never part of buildApp/server.ts) ----
+  // F10 and the expired walk-in screen (FINAL-QA-REPORT item 13) need time to pass:
+  // move the injected clock and run a scheduled job at that time, exactly as JobRunner
+  // would. Outside /v1, unauthenticated, and only on this local test server.
+  const E2E_JOBS = {
+    job_expire_walkins: (now: Date) => sql`select haven.job_expire_walkins(${now})`,
+    job_flag_overstays: (now: Date) => sql`select haven.job_flag_overstays(${now})`,
+  } as const;
+  app.post('/__e2e/clock', async (request) => {
+    const body = (request.body ?? {}) as { at?: string; reset?: boolean };
+    clock.set(body.reset || !body.at ? E2E_FIXED_NOW : new Date(body.at));
+    return { now: clock.now().toISOString() };
+  });
+  app.post('/__e2e/jobs/:name', async (request, reply) => {
+    const { name } = request.params as { name: string };
+    if (!(name in E2E_JOBS)) return reply.code(404).send({ error: 'unknown job' });
+    await E2E_JOBS[name as keyof typeof E2E_JOBS](clock.now()).execute(db);
+    return { ran: name, at: clock.now().toISOString() };
+  });
+  app.get('/__e2e/visits/:code/notifications', async (request) => {
+    const { code } = request.params as { code: string };
+    const rows = await db
+      .selectFrom('haven.notifications')
+      .innerJoin('haven.visits', 'haven.visits.id', 'haven.notifications.visit_id')
+      .select(['haven.notifications.kind'])
+      .where('haven.visits.code', '=', code)
+      .execute();
+    return { kinds: rows.map((r) => r.kind).sort() };
   });
 
   await app.listen({ port: env.PORT, host: '0.0.0.0' });

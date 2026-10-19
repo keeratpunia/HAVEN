@@ -352,6 +352,20 @@ export default function GateScan() {
       />
     );
   }
+  if (phase === 'error' && errorCode === 'camera_denied') {
+    // E-17 / G-16: how to allow the camera, then back to the live photo (no photo, no
+    // check-in — there is never a file picker, §9.4).
+    return (
+      <ErrorState
+        code={errorCode}
+        actionLabel="Try again"
+        onAction={() => {
+          setErrorCode(null);
+          setPhase('photo');
+        }}
+      />
+    );
+  }
   if (phase === 'error' && errorCode) {
     return <ErrorState code={errorCode} onAction={() => router.replace('/visits')} />;
   }

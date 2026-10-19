@@ -312,6 +312,55 @@ async function main() {
     [hostelId, hostId, liveGuest.rows[0].id, windowStart.toISOString(), windowEnd.toISOString()],
   );
 
+  // ---- F10 forgotten check-out (apps/mobile/e2e/tests/late-flows.spec.ts) ----
+  // A guest inside with their own host (Kavya, room 106 — not Priya, whose day-guest
+  // count BR-11 the walk-in specs depend on) whose visit ends 30 min after the frozen
+  // "now"; the test moves the server clock past the overstay grace and the 30-minute
+  // escalation.
+  const overstayRoom = await client.query<{ id: string }>(
+    `insert into haven.rooms (hostel_id, number) values ($1, '106')
+     on conflict (hostel_id, number) do update set number = excluded.number returning id`,
+    [hostelId],
+  );
+  const overstayHost = await client.query<{ id: string }>(
+    `insert into haven.users (google_sub, email, full_name, phone, phone_verified_at, is_active)
+     values ('e2e-overstay-host', 'e2e-overstay-host@haven.test', 'Kavya Mehta', '+919999911106', now(), true)
+     on conflict (google_sub) do update set full_name = excluded.full_name returning id`,
+  );
+  await client.query(
+    `insert into haven.residents (user_id, hostel_id, claimed_room, room_id, status, submitted_at, decided_at)
+     values ($1, $2, '106', $3, 'verified', now() - interval '2 days', now() - interval '1 day')
+     on conflict (user_id) do update set status = 'verified'`,
+    [overstayHost.rows[0].id, hostelId, overstayRoom.rows[0].id],
+  );
+  const overstayGuest = await client.query<{ id: string }>(
+    `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed)
+     values ('+919812300010', 'Overstay Tester', 'female', true)
+     on conflict (phone) do update set full_name = excluded.full_name returning id`,
+  );
+  await client.query(`delete from haven.visits where code = 'VE2E010'`);
+  await client.query(
+    `insert into haven.visits
+       (code, hostel_id, host_id, visitor_id, type, status, origin, zone, window_start, window_end,
+        rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at)
+     values ('VE2E010', $1, $2, $3, 'day', 'inside', 'invite', 'visitors_room', $4, $5, 1, 'user', $2, $4, $4)`,
+    [
+      hostelId,
+      overstayHost.rows[0].id,
+      overstayGuest.rows[0].id,
+      new Date(E2E_FIXED_NOW.getTime() - 60 * 60_000).toISOString(),
+      new Date(E2E_FIXED_NOW.getTime() + 30 * 60_000).toISOString(),
+    ],
+  );
+
+  // E-14: a second gate whose location was never set — W-01 shows the red banner.
+  await client.query(
+    `insert into haven.gates (hostel_id, code, name, secret_enc)
+     values ($1, 'GH8A02', 'Back gate', $2)
+     on conflict (code) do update set lat = null, lng = null`,
+    [hostelId, secretEnc],
+  );
+
   // ---- Account deletion (apps/mobile/e2e/tests/account-deletion.spec.ts, FR-09) ----
   // A guest with a finished visit, signing in as ...06 (otherwise only used as a
   // resident's phone in R-02, so this second OTP request stays inside the limit).

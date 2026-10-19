@@ -108,6 +108,9 @@ export interface InsertVisitParams {
   firstEntryAt?: Date | null;
   lastEntryAt?: Date | null;
   locationUnverified?: boolean;
+  /** From the injected Clock (§9.13): the walk-in timeout (BR-12) and the approved-
+   * expiry jobs measure from it with their own injected `p_now`. */
+  createdAt: Date;
 }
 
 /** Creates a new visit row — the "(new) → X" half of SDD §7.1's table. */
@@ -140,6 +143,7 @@ export async function insertVisit(
         first_entry_at: params.firstEntryAt ? params.firstEntryAt.toISOString() : null,
         last_entry_at: params.lastEntryAt ? params.lastEntryAt.toISOString() : null,
         location_unverified: params.locationUnverified ?? false,
+        created_at: params.createdAt,
       })
       .returningAll()
       .executeTakeFirstOrThrow();

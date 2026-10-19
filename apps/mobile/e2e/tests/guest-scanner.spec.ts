@@ -23,5 +23,7 @@ test('FR-22: scanning the gate QR from My visits opens the gate flow', async ({ 
   const token = generateTestGateToken({});
   await page.waitForURL((url) => url.pathname === `/g/${token}`, { timeout: 30_000 });
   await expect(page.getByText("We can't read this code")).toHaveCount(0);
+  // The refresh token rotated again: pass the session on to late-flows.spec.ts.
+  await context.storageState({ path: WALK_IN_SESSION });
   await context.close();
 });

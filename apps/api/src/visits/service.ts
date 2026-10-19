@@ -225,6 +225,7 @@ export async function createPreInvite(
 
       const inviteToken = randomSecret(16).toString('base64url');
       const visit = await insertVisit(trx, {
+        createdAt: deps.clock.now(),
         code: generateVisitCode(),
         hostelId: params.hostelId,
         hostId: params.hostUserId,
@@ -329,6 +330,7 @@ export async function createWalkIn(
       throwIfDenied(result);
 
       const visit = await insertVisit(trx, {
+        createdAt: deps.clock.now(),
         code: generateVisitCode(),
         hostelId: params.hostelId,
         hostId: params.hostUserId,
@@ -437,6 +439,7 @@ export async function createOvernightRequest(
       throwIfDenied(result);
 
       const visit = await insertVisit(trx, {
+        createdAt: deps.clock.now(),
         code: generateVisitCode(),
         hostelId: params.hostelId,
         hostId: params.hostUserId,
@@ -576,6 +579,7 @@ export async function createHostAssistedEntry(
 
       const now = deps.clock.now();
       const visit = await insertVisit(trx, {
+        createdAt: deps.clock.now(),
         code: generateVisitCode(),
         hostelId: params.hostelId,
         hostId: params.hostUserId,

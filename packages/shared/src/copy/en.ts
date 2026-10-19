@@ -40,6 +40,27 @@ export const EN_COPY: Record<string, CopyEntry> = {
     title: 'Open in Safari',
     body: "This app's built-in browser often blocks the camera and location that HAVEN needs at the gate. Tap the ••• or share button, then choose Open in Safari.",
   },
+  // E-17 / G-16 "Camera/location blocked — steps to enable in Chrome/Safari". PROPOSED
+  // copy (the SDD lists the screen, not its words), DEC-025.
+  camera_denied: {
+    title: 'Camera is blocked',
+    body: 'HAVEN needs your camera for a live photo at the gate. Chrome: tap the icon left of the address, then Permissions → Camera → Allow. Safari: tap aA in the address bar, then Website Settings → Camera → Allow. Then tap Try again.',
+  },
+  // Rule refusals a guest can meet at the gate that had no §13.6 entry, so the guest
+  // saw "Something went wrong" (found by the F10 e2e seed, FINAL-QA-REPORT item 13).
+  // PROPOSED copy, DEC-025. Residents see their own wording (lib/rule-hints.ts).
+  HOST_DAY_LIMIT: {
+    title: 'Your host has too many guests inside',
+    body: 'Hostel rules allow 3 day guests inside per resident at a time. Ask your host, or try again when one of their guests has left.',
+  },
+  TYPE_NOT_ALLOWED_FOR_GENDER: {
+    title: "This visit type isn't allowed here",
+    body: 'Hostel rules allow this guest only in the Visitors’ Room. Ask your host to choose a day visit.',
+  },
+  VISIT_NOT_APPROVED: {
+    title: "This visit isn't approved yet",
+    body: 'Ask your host to approve it, then scan the gate QR again.',
+  },
   // FR-27 / F3: location permission denied. PROPOSED copy (the SDD gives the path, not
   // the words), DEC-022.
   location_denied: {

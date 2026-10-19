@@ -39,7 +39,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: /guest-scanner\.spec\.ts/,
+      testIgnore: /(guest-scanner|late-flows)\.spec\.ts/,
       use: {
         ...devices['Pixel 5'],
         viewport: { width: 360, height: 640 },
@@ -63,6 +63,19 @@ export default defineConfig({
             '--use-fake-device-for-media-stream',
             `--use-file-for-fake-video-capture=${GATE_QR_VIDEO}`,
           ],
+        },
+      },
+    },
+    {
+      // Last: these specs move the E2E server's clock (F10, FR-70) and reset it after.
+      name: 'late',
+      testMatch: /late-flows\.spec\.ts/,
+      dependencies: ['qr-camera'],
+      use: {
+        ...devices['Pixel 5'],
+        viewport: { width: 360, height: 640 },
+        launchOptions: {
+          args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
         },
       },
     },

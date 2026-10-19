@@ -5,7 +5,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
-LOGS="${E2E_LOG_DIR:-$ROOT/apps/mobile/test-results/e2e-logs}"
+# Not under test-results/: Playwright empties that folder when it starts.
+LOGS="${E2E_LOG_DIR:-$ROOT/apps/mobile/e2e-logs}"
 mkdir -p "$LOGS"
 PIDS=()
 cleanup() {

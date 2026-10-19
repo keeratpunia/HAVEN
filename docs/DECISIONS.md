@@ -1619,6 +1619,42 @@ Source for all of Part 1: SDD §2.7.
     `supabase test db` steps themselves are first exercised on GitHub's runner.
 - **SDD updated?** Not needed.
 
+### DEC-025 — G-16 camera copy, guest-facing rule refusals, E2E clock controls, and injected-clock timestamps (FINAL-QA-REPORT item 13)
+
+- **Date:** 2026-10-19
+- **Context:** Writing the item-13 tests turned up three things the SDD doesn't spell
+  out, plus two places where stored timestamps ignored the injected clock.
+- **Decision:**
+  - **G-16 (E-17).** A refused camera on the gate showed "Something went wrong", because
+    `camera_denied` had no copy. The SDD defines G-16 as "Camera/location blocked — steps
+    to enable in Chrome/Safari with screenshots", with a "Try again" action.
+    - `camera_denied` in `copy/en.ts` is **proposed** wording: the Chrome and Safari
+      steps.
+    - "Try again" returns to the live camera; there is still no file picker.
+    - **The screenshots are not built.** This is a remaining gap.
+  - **Guest-facing refusals.** A guest refused at the gate by a rule with no §13.6 entry
+    saw "Something went wrong". **Proposed** copy for the three codes a guest can meet
+    there: `HOST_DAY_LIMIT` (BR-11), `TYPE_NOT_ALLOWED_FOR_GENDER`, `VISIT_NOT_APPROVED`.
+    Residents already get their own wording from `lib/rule-hints.ts`.
+  - **E2E clock controls.**
+    - `apps/api/scripts/e2e-server.ts` (only that local test server, never
+      `buildApp`/`server.ts`) adds three routes:
+      - `POST /__e2e/clock` moves the FakeClock;
+      - `POST /__e2e/jobs/{job_expire_walkins|job_flag_overstays}` runs that job at the
+        clock's time;
+      - `GET /__e2e/visits/{code}/notifications` lists notification kinds.
+    - They live outside `/v1` and need no auth, on a server bound to the local test
+      database.
+    - The Playwright project `late` runs last and resets the clock.
+  - **Injected-clock timestamps.** `gate_events.at` and `visits.created_at` defaulted to
+    the database's `now()`, while every other business time (first/last entry, job
+    `p_now`) uses the injected clock.
+    - They now come from `deps.clock.now()` (§9.13).
+    - In production the two clocks agree. In tests the mismatch made the BR-12 walk-in
+      timeout and TC-FLOW-02's entry time unverifiable.
+- **SDD updated?** No. The copy needs approval with the other proposed strings, and
+  G-16's screenshots are listed as a remaining gap.
+
 Template for a new entry:
 
 ```markdown
