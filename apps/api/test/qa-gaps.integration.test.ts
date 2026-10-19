@@ -257,3 +257,14 @@ describe('TC-FLOW-02: a walk-in approved by the host', () => {
     expect(again.status).toBe(410);
   });
 });
+
+describe('§9.13: every response carries the server clock', () => {
+  it('X-Server-Time is the injected clock, not the machine clock', async () => {
+    clock.set(new Date('2026-10-12T07:30:00.000Z'));
+    const res = await supertest(app.server).get('/v1/hostels');
+    expect(res.headers['x-server-time']).toBe('2026-10-12T07:30:00.000Z');
+    const err = await supertest(app.server).get('/v1/me');
+    expect(err.status).toBe(401);
+    expect(err.headers['x-server-time']).toBe('2026-10-12T07:30:00.000Z');
+  });
+});

@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { noteServerTime } from '../lib/server-time.js';
 import {
   IDEMPOTENCY_HEADER,
   type ChargeDTO,
@@ -99,6 +100,8 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     body:
       options.formData ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
   });
+
+  noteServerTime(res.headers.get('X-Server-Time'));
 
   if (res.status === 401 && !options._retried && options.auth !== false) {
     const refreshed = await tryRefresh();

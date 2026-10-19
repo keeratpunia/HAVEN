@@ -16,6 +16,7 @@ import { Segments } from '../../components/Segments.js';
 import { SharePanel } from '../../components/SharePanel.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { dayVisitHints, localInviteCheck, ruleMessage, RULES } from '../../lib/rule-hints.js';
+import { serverNow } from '../../lib/server-time.js';
 
 /**
  * R-06 Invite guest + R-07 Share invite (SDD §13.4, F1 steps 1-2, FR-10/FR-11).
@@ -30,7 +31,7 @@ const TZ = RULES.timezone;
 
 export default function Invite() {
   const { user } = useAuth();
-  const now = new Date();
+  const now = serverNow();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [type, setType] = useState<'day' | 'quick_drop'>('day');

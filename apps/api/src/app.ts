@@ -189,6 +189,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.addHook('onRequest', (_request, _reply, done) => {
     authorizationContext.run({ authorized: false }, done);
   });
+  // SDD §9.13: clients judge "now" by the server's clock (they only pre-check rules;
+  // the server decides). Every response says what time the server thinks it is.
+  app.addHook('onSend', async (_request, reply, payload) => {
+    reply.header('X-Server-Time', clock.now().toISOString());
+    return payload;
+  });
   app.addHook('onSend', async (request, reply, payload) => {
     const ctx = authorizationContext.getStore();
     if (!ctx || ctx.authorized) return payload;
@@ -232,6 +238,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(cors, {
     origin: env.CORS_ORIGINS,
     credentials: true,
+    exposedHeaders: ['X-Server-Time'],
   });
 
   // --- Cookies (SDD §9.5: haven_rt refresh cookie — plugin only; the auth module sets/clears it) ---

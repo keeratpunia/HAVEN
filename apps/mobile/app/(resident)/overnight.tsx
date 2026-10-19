@@ -15,6 +15,7 @@ import { DateTimeField } from '../../components/DateTimeField.js';
 import { PhoneInput } from '../../components/PhoneInput.js';
 import { Segments } from '../../components/Segments.js';
 import { overnightHints, ruleMessage, RULES } from '../../lib/rule-hints.js';
+import { serverNow } from '../../lib/server-time.js';
 
 /**
  * R-11 Overnight request (SDD §13.4, F6, FR-14): "Guest details, type, dates; nights,
@@ -26,7 +27,7 @@ type Gender = 'female' | 'male' | 'undisclosed';
 
 export default function Overnight() {
   const router = useRouter();
-  const today = toLocalDateString(new Date(), RULES.timezone);
+  const today = toLocalDateString(serverNow(), RULES.timezone);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [gender, setGender] = useState<Gender | null>(null);

@@ -21,6 +21,7 @@ import { VisitCard } from '../../components/VisitCard.js';
 import { newActionKey } from '../../lib/action-key.js';
 import { successHaptic } from '../../lib/haptics.js';
 import { ruleMessage, RULES } from '../../lib/rule-hints.js';
+import { serverNow } from '../../lib/server-time.js';
 import { captureScanLocation } from '../../lib/useScanLocation.js';
 
 /**
@@ -172,7 +173,7 @@ export default function Assist() {
   }
 
   // G-09's duration chips, capped at the day-visit latest end (SDD F2 step 4).
-  const today = toLocalDateString(new Date(), RULES.timezone);
+  const today = toLocalDateString(serverNow(), RULES.timezone);
   const untilEight = Math.floor(
     (localDateTimeToUtc(today, RULES.last_entry_day, RULES.timezone).getTime() - Date.now()) /
       60_000,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatDateShort, toLocalDateString, type VisitDTO } from '@haven/shared';
+import { serverNow } from '../../lib/server-time.js';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import * as api from '../../api/client.js';
 import { Button } from '../../components/Button.js';
@@ -51,7 +52,7 @@ export default function Home() {
 
   const suspendedUntil =
     user?.resident?.status === 'suspended' ? user.resident.hostingSuspendedUntil : null;
-  const today = toLocalDateString(new Date(), 'Asia/Kolkata');
+  const today = toLocalDateString(serverNow(), 'Asia/Kolkata');
   const pending = (upcoming ?? []).filter(needsHost);
   const todayUpcoming = (upcoming ?? []).filter(
     (v) => !needsHost(v) && toLocalDateString(new Date(v.windowStart), 'Asia/Kolkata') === today,
