@@ -8,3 +8,5 @@ pnpm-lock.yaml
 *.md
 supabase/.branches
 supabase/.temp
+# Expo rewrites this file on every start; keep it in Expo's own format.
+apps/mobile/tsconfig.json

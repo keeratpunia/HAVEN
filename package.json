@@ -14,6 +14,10 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "demo": "node scripts/demo.mjs",
+    "demo:smoke": "pnpm --filter @haven/api run demo:smoke",
+    "demo:clock": "pnpm --filter @haven/api run demo:clock --",
+    "demo:job": "pnpm --filter @haven/api run demo:job --",
+    "demo:pair-code": "pnpm --filter @haven/api run demo:pair-code",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "turbo run clean && rm -rf node_modules"

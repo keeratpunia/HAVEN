@@ -19,7 +19,9 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist .turbo"
+    "clean": "rm -rf dist .turbo",
+    "demo:clock": "tsx scripts/demo-clock.ts",
+    "demo:smoke": "tsx scripts/demo-smoke.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",

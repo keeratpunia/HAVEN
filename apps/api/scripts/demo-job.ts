@@ -15,18 +15,22 @@
  * Demo-only: it connects to the embedded, localhost-only demo database and nothing else.
  */
 import path from 'node:path';
-import { sql } from 'kysely';
 import { createDb } from '../src/db/index.js';
-import { SystemClock } from '../src/lib/clock.js';
+import type { Clock } from '../src/lib/clock.js';
 import { LocalDiskMediaStorage } from '../src/gate/media.js';
 import { ExpoPushSender } from '../src/notify/senders.js';
 import { JobRunner, SDD_JOBS, type JobName } from '../src/jobs/runner.js';
 import { DEMO_DATABASE_URL } from './demo-constants.js';
+import { demoNow, formatIst } from './demo-time.js';
 
 const db = createDb({ DATABASE_URL: DEMO_DATABASE_URL, DB_POOL_MAX: 2 });
+// The demo API's clock (`pnpm demo:clock` may have moved it), read once at start: the
+// window moves below and the job itself must agree on what "now" is.
+let now = new Date();
+const clock: Clock = { now: () => new Date(now.getTime()) };
 const runner = new JobRunner({
   db,
-  clock: new SystemClock(),
+  clock,
   mediaStorage: new LocalDiskMediaStorage(path.join(process.cwd(), '.demo-media')),
   push: new ExpoPushSender(),
 });
@@ -46,6 +50,9 @@ async function visitByCode(code: string | undefined): Promise<string> {
 }
 
 async function main() {
+  const current = await demoNow();
+  now = current.now;
+  if (current.running) console.log(`Demo time: ${formatIst(now)}`);
   const [command, arg] = process.argv.slice(2).filter((a) => a !== '--');
   switch (command) {
     case 'run': {
@@ -61,7 +68,7 @@ async function main() {
       await db
         .updateTable('haven.visits')
         .set({
-          window_end: sql<string>`now() - interval '16 minutes'`,
+          window_end: new Date(now.getTime() - 16 * 60_000).toISOString(),
           overstay_since: null,
           overstay_escalated_at: null,
         })
@@ -77,7 +84,7 @@ async function main() {
       await db
         .updateTable('haven.visits')
         .set({
-          overstay_since: sql<string>`now() - interval '31 minutes'`,
+          overstay_since: new Date(now.getTime() - 31 * 60_000).toISOString(),
           overstay_escalated_at: null,
         })
         .where('id', '=', id)
@@ -90,7 +97,7 @@ async function main() {
       // FR-29: silent for more than 5 min → one alert per warden per outage.
       const devices = await db
         .updateTable('haven.gate_devices')
-        .set({ last_seen_at: sql<string>`now() - interval '6 minutes'` })
+        .set({ last_seen_at: new Date(now.getTime() - 6 * 60_000).toISOString() })
         .where('revoked_at', 'is', null)
         .returning('id')
         .execute();

@@ -26,7 +26,7 @@ import { __resetEnvCacheForTests, loadEnv } from '../src/config.js';
 import { createDb } from '../src/db/index.js';
 import { LocalDiskMediaStorage } from '../src/gate/media.js';
 import { createLogger } from '../src/lib/logger.js';
-import { SystemClock } from '../src/lib/clock.js';
+import { formatIst, OffsetClock, parseDemoTime } from './demo-time.js';
 import {
   DEMO_API_PORT,
   DEMO_DATA_ENCRYPTION_KEY,
@@ -52,6 +52,10 @@ async function main() {
     WEB_BASE_URL: webBaseUrl,
     CORS_ORIGINS: corsOrigins,
     COOKIE_DOMAIN: process.env.COOKIE_DOMAIN ?? 'localhost',
+    // Behind `pnpm demo:tunnel` every request arrives via cloudflared → demo-proxy, so
+    // the phone's own IP is the one X-Forwarded-For entry cloudflared adds. Without
+    // this, every phone and the laptop share 127.0.0.1 for the per-IP limits.
+    TRUST_PROXY_HOPS: process.env.TRUST_PROXY_HOPS ?? '0',
     JWT_SECRET: DEMO_JWT_SECRET,
     OTP_PEPPER: DEMO_OTP_PEPPER,
     GOOGLE_CLIENT_IDS: 'demo-unused-client-id',
@@ -64,9 +68,46 @@ async function main() {
   });
   const logger = createLogger(env);
   const db = createDb(env);
-  const clock = new SystemClock();
+  // Real time unless the presenter moves it (`pnpm demo:clock`, docs/DEMO.md step F).
+  const clock = new OffsetClock();
   const mediaStorage = new LocalDiskMediaStorage(path.join(process.cwd(), '.demo-media'));
-  const app = await buildApp({ env, logger, db, clock, mediaStorage });
+  const app = await buildApp({
+    env,
+    logger,
+    db,
+    clock,
+    mediaStorage,
+    // One presenter laptop runs the warden, office, resident and gate screens (each
+    // polling) through one tunnel, so SDD §12.11's 120/min per IP — sized for one
+    // person's phone — is raised for the demo only. Route limits (OTP, scans) stay.
+    rateLimit: { max: 1_000, timeWindowMs: 60_000 },
+  });
+
+  // Demo-only clock control (`pnpm demo:clock`). Outside /v1, loopback callers only:
+  // the tunnel proxy forwards /v1 to this server and everything else to the web app,
+  // so a phone can never reach it.
+  const loopback = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  const clockState = () => ({
+    now: clock.now().toISOString(),
+    offsetMinutes: Math.round(clock.offset / 60_000),
+  });
+  app.get('/__demo/clock', async (request, reply) => {
+    if (!loopback(request.socket.remoteAddress ?? '')) return reply.code(404).send();
+    return clockState();
+  });
+  app.post('/__demo/clock', async (request, reply) => {
+    if (!loopback(request.socket.remoteAddress ?? '')) return reply.code(404).send();
+    const { at } = (request.body ?? {}) as { at?: string };
+    try {
+      const target = parseDemoTime(at ?? 'reset', clock.now());
+      if (target) clock.setNow(target);
+      else clock.reset();
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+    console.log(`[demo clock] now ${formatIst(clock.now())}`);
+    return clockState();
+  });
 
   await app.listen({ port: env.PORT, host: '0.0.0.0' });
   console.log(`HAVEN demo API listening on :${env.PORT} (WEB_BASE_URL=${webBaseUrl})`);
