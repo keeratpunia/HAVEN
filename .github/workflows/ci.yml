@@ -43,6 +43,11 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # FINAL-QA-REPORT D-02: the production entry point must actually start
+      # (node dist/server.js, NODE_ENV=production) and answer /health and /ready.
+      - name: Production start check
+        run: pnpm --filter @haven/api run check:prod-start
+
       # ---- Added once supabase/migrations/ has real migrations (M1) ----
       # - name: Start local Supabase
       #   run: npx supabase start

@@ -1415,6 +1415,33 @@ Source for all of Part 1: SDD §2.7.
     fixes.
 - **SDD updated?** Not needed for 1–6: they implement or follow the SDD as written.
 
+### DEC-019 — The API ships as an esbuild bundle (FINAL-QA-REPORT D-02)
+
+- **Date:** 2026-10-19
+- **Context:** `pnpm build` ran `tsc` for the API, but the output couldn't start:
+  `node dist/server.js` failed with `ERR_MODULE_NOT_FOUND`, because the workspace package
+  `@haven/shared` publishes TypeScript sources (`main: ./src/index.ts`). Every other way
+  of running the API (tests, e2e, demo) went through `tsx`, which hid it.
+- **Options:**
+  - **Build `@haven/shared` to JS.** This needs its own build step, `exports` that point
+    Node at `dist` while Metro, Vitest and tsx keep reading `src`, and turbo ordering.
+    It touches three packages.
+  - **Bundle the API with esbuild.** One script, `apps/api/scripts/build.mjs`, inlines
+    `@haven/shared` and anything only it uses (luxon). The API's declared runtime
+    dependencies stay external (native `sharp`, `pg`, …).
+- **Decision:** bundle the API with esbuild. It's the smaller change: nothing changes
+  for the app, the shared package or dev tooling.
+  - Type checking stays `tsc --noEmit`.
+  - The bundle is ESM with a `createRequire` banner, so inlined CommonJS can still
+    `require`.
+- **Proof:** `pnpm --filter @haven/api run check:prod-start`
+  (`apps/api/scripts/prod-start-check.ts`) starts `node dist/server.js` with
+  `NODE_ENV=production`, `APP_ENV=staging` and every required secret, against a real
+  Postgres with all migrations. It requires `/health` and `/ready` to answer 200. It
+  fails on the old `tsc` output and passes on the bundle, and it runs in CI after the
+  build.
+- **SDD updated?** Not needed: §8.3 says how the API is hosted, not how it is built.
+
 Template for a new entry:
 
 ```markdown
