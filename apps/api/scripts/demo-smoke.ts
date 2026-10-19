@@ -375,7 +375,7 @@ async function main() {
 
   // ---- F. rules in action ----
   const guestC = await guest(GUEST_C, 'Late Visitor');
-  const late = await demoClock('20:05');
+  await demoClock('20:05');
   s = await scan(guestC, gate);
   expectStatus(s.created, 201, 'scan after 20:00');
   const sidC = s.created.body.scanSessionId as string;
