@@ -27,6 +27,33 @@ describe('loadEnv', () => {
     expect(env.SMS_PROVIDER).toBe('console');
   });
 
+  // FINAL-QA-REPORT D-04, SDD §9.9/§11.7: LISTEN needs the direct connection.
+  it('refuses a pooler DATABASE_DIRECT_URL outside local', () => {
+    for (const bad of [
+      'postgres://u:p@db.abc.supabase.co:6543/postgres',
+      'postgres://u:p@aws-0-ap-south-1.pooler.supabase.com:5432/postgres',
+      'not a url',
+    ]) {
+      __resetEnvCacheForTests();
+      expect(() => loadEnv({ ...REQUIRED, APP_ENV: 'staging', DATABASE_DIRECT_URL: bad })).toThrow(
+        /DATABASE_DIRECT_URL must be the direct connection/,
+      );
+    }
+    __resetEnvCacheForTests();
+    expect(
+      loadEnv({
+        ...REQUIRED,
+        APP_ENV: 'staging',
+        DATABASE_DIRECT_URL: 'postgres://u:p@db.abc.supabase.co:5432/postgres',
+      }).DATABASE_DIRECT_URL,
+    ).toBe('postgres://u:p@db.abc.supabase.co:5432/postgres');
+    // Local stacks may point both at one database.
+    __resetEnvCacheForTests();
+    expect(() =>
+      loadEnv({ ...REQUIRED, DATABASE_DIRECT_URL: 'postgres://u:p@localhost:6543/postgres' }),
+    ).not.toThrow();
+  });
+
   it('parses a comma-separated CORS_ORIGINS list', () => {
     const env = loadEnv({
       ...REQUIRED,

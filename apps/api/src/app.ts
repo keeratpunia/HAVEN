@@ -151,7 +151,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const dataEncryptionKey = parseDataEncryptionKey(env.DATA_ENCRYPTION_KEY);
   const mediaSigner = new MediaUrlSigner(env.JWT_SECRET, env.API_BASE_URL, clock);
   const rules = new RulesProvider(db);
-  const hub = new StreamHub(env.DATABASE_URL, logger);
+  // SDD §9.9/§11.7: LISTEN needs a direct connection; the pooler would drop it.
+  const hub = new StreamHub(env.DATABASE_DIRECT_URL, logger);
   revocationCache.onForgetUser((userId) => hub.disconnectUser(userId));
 
   const app = Fastify({
