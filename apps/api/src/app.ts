@@ -190,10 +190,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     authorizationContext.run({ authorized: false }, done);
   });
   // SDD §9.13: clients judge "now" by the server's clock (they only pre-check rules;
-  // the server decides). Every response says what time the server thinks it is.
-  app.addHook('onSend', async (_request, reply, payload) => {
+  // the server decides). Every response says what time the server thinks it is. Set at
+  // the start of the request: an extra async onSend hook made Fastify try to write the
+  // headers twice ("Reply was already sent", logged on every request).
+  app.addHook('onRequest', (_request, reply, done) => {
     reply.header('X-Server-Time', clock.now().toISOString());
-    return payload;
+    done();
   });
   app.addHook('onSend', async (request, reply, payload) => {
     const ctx = authorizationContext.getStore();
