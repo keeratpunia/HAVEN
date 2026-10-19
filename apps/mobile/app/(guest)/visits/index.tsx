@@ -8,6 +8,7 @@ import { StatusChip } from '../../../components/StatusChip.js';
 import { formatDateIst, formatTimeIst } from '../../../lib/formatTime.js';
 import { DeleteAccount } from '../../../components/DeleteAccount.js';
 import { Button } from '../../../components/Button.js';
+import { GateScanButton } from '../../../components/GateScanButton.js';
 import { useAuth } from '../../../lib/auth-context.js';
 
 /**
@@ -46,6 +47,7 @@ export default function MyVisits() {
   if (error) {
     return (
       <View style={styles.center}>
+        <GateScanButton />
         <Text style={styles.body}>
           Couldn't load your visits. Pull to refresh or try again later.
         </Text>
@@ -65,6 +67,7 @@ export default function MyVisits() {
   if (visits.length === 0) {
     return (
       <View style={styles.container}>
+        <GateScanButton />
         <EmptyState message="No visits yet. Open an invite link from your host to get started." />
         {menu}
       </View>
@@ -76,6 +79,7 @@ export default function MyVisits() {
       style={styles.container}
       data={visits}
       keyExtractor={(v) => v.id}
+      ListHeaderComponent={<GateScanButton />}
       ListFooterComponent={menu}
       renderItem={({ item }) => (
         <Pressable

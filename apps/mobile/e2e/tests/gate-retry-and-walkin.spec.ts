@@ -137,5 +137,7 @@ test('DEC-013: a guest back from sign-up on an expired code is told to scan once
   await expect(page.getByText('That code has changed')).toHaveCount(0);
   await page.getByRole('button', { name: 'Go to My visits' }).click();
   await page.waitForURL(/\/visits/);
+  // The refresh token rotated: hand the current session on to guest-scanner.spec.ts.
+  await context.storageState({ path: WALK_IN_SESSION });
   await context.close();
 });

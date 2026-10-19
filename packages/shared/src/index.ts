@@ -17,3 +17,4 @@ export * from './format.js';
 export * from './scrub.js';
 export * from './consent.js';
 export * from './in-app-browser.js';
+export * from './gate-qr.js';

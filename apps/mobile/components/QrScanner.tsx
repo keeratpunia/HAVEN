@@ -25,19 +25,22 @@ export function QrScanner({ onScan, onPermissionDenied }: QrScannerProps) {
       if (cancelled || !videoRef.current) return;
       const reader = new BrowserQRCodeReader();
       try {
+        // The first frame can decode before decodeFromConstraints resolves (a sharp QR
+        // in good light), so the callback must not touch `controls` directly: it stops
+        // the camera through `stop`, or right after the promise resolves.
         const controls = await reader.decodeFromConstraints(
           { video: { facingMode: 'environment' }, audio: false },
           videoRef.current,
           (result) => {
             if (result && !doneRef.current) {
               doneRef.current = true;
-              controls.stop();
+              stop?.();
               onScan(result.getText());
             }
           },
         );
         stop = () => controls.stop();
-        if (cancelled) controls.stop();
+        if (cancelled || doneRef.current) controls.stop();
         else setState('scanning');
       } catch {
         if (!cancelled) {

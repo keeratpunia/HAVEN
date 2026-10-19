@@ -7,6 +7,7 @@ import {
   localDateTimeToUtc,
   toLocalDateString,
   type VisitDTO,
+  gateTokenFromQr,
 } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import * as api from '../../api/client.js';
@@ -42,10 +43,7 @@ type Phase =
   | 'error';
 const MAX_ATTEMPTS = 3;
 
-function tokenFrom(scanned: string): string | null {
-  const match = /\/g\/([^/?#\s]+)/.exec(scanned);
-  return match?.[1] ?? null;
-}
+const tokenFrom = gateTokenFromQr;
 
 function newNonce(): string {
   return newActionKey().replace(/-/g, '');
