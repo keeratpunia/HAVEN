@@ -1,7 +1,7 @@
 -- Structural tests for the HAVEN schema foundation (SDD §11).
 -- Run via `supabase test db` (pgTAP). See docs/DEVELOPMENT.md §5.1.
 begin;
-select plan(14);
+select plan(15);
 
 select has_schema('haven', 'haven schema exists');
 
@@ -19,7 +19,7 @@ select has_table('haven', 'charges', 'charges table exists');
 
 -- visit_status enum has exactly the 8 values from SDD §7
 select is(
-  (select array_agg(e.enumlabel order by e.enumsortorder)
+  (select array_agg(e.enumlabel::text order by e.enumsortorder)
      from pg_enum e join pg_type t on t.oid = e.enumtypid
     where t.typname = 'visit_status' and t.typnamespace = 'haven'::regnamespace),
   array['pending_host','pending_warden','approved','inside','completed','rejected','expired','cancelled'],

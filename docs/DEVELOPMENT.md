@@ -200,7 +200,7 @@ resolving in the SDD text in a future revision.
 
 | Workflow | Trigger | Steps |
 |---|---|---|
-| `ci.yml` | Every push and PR | install (cached) → lint → typecheck → unit tests → `supabase start` → migrations → pgTAP → integration tests → build API and web → Playwright (PR to `main` only) → `pnpm audit --audit-level high` |
+| `ci.yml` | Every push and PR | install → lint → typecheck → format check → unit + integration tests (`pnpm test`, embedded Postgres) → build → production start check (`node dist/server.js`, `/health` + `/ready`) → `supabase db start` → pgTAP (`supabase test db`) → Playwright via `bash apps/mobile/e2e/run-ci.sh` (PR to `main` only) → `pnpm audit --prod --audit-level high` (DEC-024) |
 | `deploy-staging.yml` | Merge to `main` | run migrations on staging → deploy API (Render deploy hook) → deploy web (Vercel) → smoke API `/ready` |
 | `deploy-prod.yml` | Tag `v*` | manual approval → migrations on production → API → web → EAS build APK → attach to GitHub release |
 

@@ -32,7 +32,7 @@ select ok(
 );
 
 select is(
-  (select count(*) from pg_tables where schemaname = 'haven' and rowsecurity = false),
+  (select count(*)::integer from pg_tables where schemaname = 'haven' and rowsecurity = false),
   0,
   'every table in schema haven has row-level security enabled'
 );

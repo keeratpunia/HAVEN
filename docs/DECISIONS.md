@@ -1574,6 +1574,51 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** Not needed for the behaviour. The copy needs approval with the other
   proposed strings.
 
+### DEC-024 — CI gates: production-only audit with two scoped ignores, pgTAP via the Supabase CLI, Playwright on PRs (FINAL-QA-REPORT item 10)
+
+- **Date:** 2026-10-19
+- **Context:** The QA report found CI red on `pnpm audit --audit-level high`, pgTAP never
+  run, and Playwright commented out.
+- **Decision:**
+  - **Audit.**
+    - The step is `pnpm audit --prod --audit-level high`.
+    - Two high advisories remain, both reached only through `expo` → `@expo/cli`, the
+      Expo/Metro build toolchain:
+      - `GHSA-86w9-cpqp-85rv` (node-forge, via `@expo/code-signing-certificates`);
+      - `GHSA-vfj7-8cjw-p6xm` (braces, via `metro-file-map` → micromatch).
+    - Neither runs in the API or ships in the web bundle, and neither has a patched
+      release.
+    - They are ignored **by GHSA id** in root `package.json` `pnpm.auditConfig.ignoreGhsas`,
+      so any other high advisory still fails the build.
+    - Remove each entry when Expo ships a patched dependency (Renovate/Dependabot will
+      surface it).
+  - **pgTAP.** `supabase/setup-cli` → `supabase db start` → `supabase test db`, on
+    every push and PR (DEVELOPMENT.md).
+    - The CLI uses `version: latest`. Pin it to the version the first green run reports.
+    - Running the four files for the first time (locally, see Proof) found five defects,
+      all fixed:
+      - 001's plan count was wrong (14, ran 15);
+      - 002's plan count was wrong (9, ran 8);
+      - 001 compared `name[]` to `text[]`;
+      - 004 compared `bigint` to `integer`;
+      - a real schema bug: `haven.forbid_mutation()` read `old.at` on tables without
+        that column, so UPDATE/DELETE on `approvals` and `hostel_rules` failed with 42703
+        instead of the append-only 42501. Fixed by migration
+        `20261021000004_forbid_mutation_record_fields.sql`, with a vitest regression in
+        `append-only.integration.test.ts`.
+  - **Playwright.** `bash apps/mobile/e2e/run-ci.sh` runs on PRs to main (DEVELOPMENT.md
+    / SDD §19.1). It starts a fresh embedded-Postgres E2E database, the E2E API (frozen
+    clock) and Expo web, warms the bundle, and runs the whole suite. Results are uploaded
+    on failure.
+- **Proof (local, 2026-10-19):**
+  - `pnpm audit --prod --audit-level high` exits 0 ("2 high (2 ignored)").
+  - `bash apps/mobile/e2e/run-ci.sh`: 24 passed.
+  - pgTAP: this machine has no Docker. The same four files ran through pgTAP 1.3.3
+    (installed from its plain-SQL release file) on embedded Postgres with every
+    migration applied: 001 15/15, 002 8/8, 003 5/5, 004 7/7. The `supabase db start` /
+    `supabase test db` steps themselves are first exercised on GitHub's runner.
+- **SDD updated?** Not needed.
+
 Template for a new entry:
 
 ```markdown

@@ -4,7 +4,7 @@
 --   - charges status/receipt/waive-reason consistency
 -- See docs/DEVELOPMENT.md §5.1, CLAUDE.md §3.11.
 begin;
-select plan(9);
+select plan(8);
 
 -- Fixtures: one hostel, one gate, one rules version, one host, one visitor.
 insert into haven.hostels (id, code, name, gender_served) values

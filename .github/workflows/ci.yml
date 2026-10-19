@@ -48,15 +48,33 @@ jobs:
       - name: Production start check
         run: pnpm --filter @haven/api run check:prod-start
 
-      # ---- Added once supabase/migrations/ has real migrations (M1) ----
-      # - name: Start local Supabase
-      #   run: npx supabase start
-      # - name: Run pgTAP tests
-      #   run: npx supabase test db
-      # ---- Added once Playwright specs exist (M2) ----
-      # - name: Playwright E2E (PR to main only)
-      #   if: github.event_name == 'pull_request'
-      #   run: pnpm --filter mobile exec playwright test
+      # Database guarantees (SDD §19.1 "Database: pgTAP via supabase test db"): the real
+      # Supabase Postgres with every migration applied, then supabase/tests/*.sql.
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase database
+        run: supabase db start
+      - name: pgTAP tests
+        run: supabase test db
 
+      # SDD §19.1 / DEVELOPMENT.md: Playwright on PRs to main. Fresh E2E database, the
+      # E2E API (frozen clock) and the Expo web app, then the whole suite.
+      - name: Install Playwright Chromium
+        if: github.event_name == 'pull_request'
+        run: pnpm --filter @haven/mobile exec playwright install --with-deps chromium
+      - name: Playwright E2E
+        if: github.event_name == 'pull_request'
+        run: bash apps/mobile/e2e/run-ci.sh
+      - name: Upload Playwright results
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: apps/mobile/test-results
+          retention-days: 7
+
+      # Production dependencies only; the two GHSAs ignored in package.json's
+      # pnpm.auditConfig are in Expo's build toolchain with no patched release (DEC-024).
       - name: Dependency audit (high severity fails the build)
-        run: pnpm audit --audit-level high
+        run: pnpm audit --prod --audit-level high
