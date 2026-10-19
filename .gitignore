@@ -2,18 +2,19 @@
 node_modules/
 .pnpm-store/
 
-# Env — never commit real secrets
+# Env — never commit real secrets (only the example with safe local values)
 .env
-.env.local
-.env.*.local
-apps/api/.env
-apps/mobile/.env
+.env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 
 # Build outputs
 dist/
 build/
 coverage/
+**/coverage/
 .turbo/
 *.tsbuildinfo
 
@@ -46,15 +47,17 @@ Thumbs.db
 !.vscode/extensions.json
 .idea/
 
-# Test artifacts
+# Test and demo artifacts (throwaway databases, uploaded photos, reports)
 playwright-report/
 test-results/
 e2e-logs/
-apps/api/.e2e-pgdata/
-apps/api/.media-storage/
-apps/api/.e2e-media/
-apps/api/.demo-pgdata/
-apps/api/.demo-media/
+blob-report/
+*.y4m
+**/.e2e-pgdata/
+**/.demo-pgdata/
+**/.e2e-media/
+**/.demo-media/
+**/.media-storage/
 
 # Local demo settings (the room's real gate coordinates) — copied from demo.config.example.json
 demo.config.json
