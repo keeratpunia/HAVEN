@@ -25,6 +25,9 @@ export interface GateEventParams {
   distanceM?: number | null;
   accuracyM?: number | null;
   ruleCodes?: string[];
+  /** From the injected Clock (SDD §9.13 "The server clock decides everything"), so the
+   * event time matches the visit's first/last entry or exit time exactly. */
+  at: Date;
 }
 
 export async function insertGateEvent(
@@ -46,6 +49,7 @@ export async function insertGateEvent(
       distance_m: params.distanceM ?? null,
       accuracy_m: params.accuracyM ?? null,
       rule_codes: params.ruleCodes ?? [],
+      at: params.at,
     })
     .execute();
 }

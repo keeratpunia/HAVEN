@@ -10,6 +10,7 @@ import { useLiveUpdates } from '../../lib/live.js';
 import { captureScanLocation } from '../../lib/useScanLocation.js';
 import { Button } from '../../components/Button.js';
 import { ConfirmSheet } from '../../components/ConfirmSheet.js';
+import { averageGateFixes } from '../../lib/gate-location.js';
 import {
   Card,
   ErrorText,
@@ -28,7 +29,6 @@ import {
 const WEB_URL = process.env.EXPO_PUBLIC_WEB_URL ?? 'http://localhost:8081';
 const FIXES = 5;
 const FIX_GAP_MS = 2000;
-const MAX_FIX_ACCURACY_M = 30;
 
 interface Capture {
   lat: number;
@@ -91,22 +91,15 @@ export default function Gates() {
         setMessage('Turn off fake location apps.');
         return;
       }
-      if (location && location.accuracy <= MAX_FIX_ACCURACY_M) fixes.push(location);
+      if (location) fixes.push(location);
     }
     setCapturing(null);
-    if (fixes.length === 0) {
+    const avg = averageGateFixes(fixes);
+    if (!avg) {
       setMessage('No accurate reading. Stand in the open at the gate and try again.');
       return;
     }
-    const avg = (k: 'lat' | 'lng' | 'accuracy') =>
-      fixes.reduce((s, f) => s + f[k], 0) / fixes.length;
-    setCapture({
-      gateId,
-      lat: avg('lat'),
-      lng: avg('lng'),
-      accuracy: avg('accuracy'),
-      used: fixes.length,
-    });
+    setCapture({ gateId, ...avg });
   }
 
   const radiusOk = /^\d+$/.test(radius) && Number(radius) >= 10 && Number(radius) <= 300;

@@ -600,6 +600,7 @@ export async function createHostAssistedEntry(
       });
 
       await insertGateEvent(trx, {
+        at: now,
         visitId: visit.id,
         hostelId: params.hostelId,
         gateId: params.gateId,
@@ -796,6 +797,7 @@ export async function approveWalkIn(
       });
 
       await insertGateEvent(trx, {
+        at: now,
         visitId: updated.id,
         hostelId: updated.hostel_id,
         gateId: params.gate.gateId,
@@ -1083,6 +1085,7 @@ export async function checkIn(
       });
 
       await insertGateEvent(trx, {
+        at: now,
         visitId: updated.id,
         hostelId: updated.hostel_id,
         gateId: params.gate.gateId,
@@ -1248,6 +1251,7 @@ export async function checkOut(
       const result = evaluateExit(exitCtx, deps.rulesConfig);
 
       await insertGateEvent(trx, {
+        at: deps.clock.now(),
         visitId: current.id,
         hostelId: current.hostel_id,
         gateId: params.gate.gateId,

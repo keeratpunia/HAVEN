@@ -10,16 +10,16 @@ import {
   updateGateOffsetAndSecret,
   type GateStorageState,
 } from '../../lib/gateStorage.js';
+import { currentStep, decodeBase64Secret, generateGateToken } from '../../lib/gateToken.js';
 import {
-  currentStep,
-  decodeBase64Secret,
-  generateGateToken,
-  STEP_MS,
-} from '../../lib/gateToken.js';
+  countdownFraction,
+  gateQrPayload,
+  heartbeatDelayMs,
+  keepScreenAwake,
+  msIntoStep,
+} from '../../lib/gate-display.js';
 
 const QR_RENDER_INTERVAL_MS = 250;
-const HEARTBEAT_INTERVAL_MS = 60_000;
-const HEARTBEAT_BACKOFF_MS = [5_000, 15_000, 60_000];
 
 const WEB_BASE_URL =
   (typeof window !== 'undefined' && window.location?.origin) || 'http://localhost:8081';
@@ -34,7 +34,7 @@ export default function GateDisplay() {
   const router = useRouter();
   const [state, setState] = useState<GateStorageState | null>(null);
   const [, setStep] = useState<bigint | null>(null);
-  const [msIntoStep, setMsIntoStep] = useState(0);
+  const [msIntoStepState, setMsIntoStep] = useState(0);
   const [online, setOnline] = useState(true);
   const [revoked, setRevoked] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -59,7 +59,7 @@ export default function GateDisplay() {
     const tick = async () => {
       if (cancelled) return;
       const nowStep = currentStep(state.offsetMs);
-      const elapsed = (Date.now() + state.offsetMs) % STEP_MS;
+      const elapsed = msIntoStep(Date.now(), state.offsetMs);
       setMsIntoStep(elapsed);
       setStep((prev) => {
         if (prev === nowStep) return prev;
@@ -74,7 +74,7 @@ export default function GateDisplay() {
         gateCode: state.code,
         step: forStep,
       });
-      const qrPayload = `${WEB_BASE_URL}/g/${token}`;
+      const qrPayload = gateQrPayload(WEB_BASE_URL, token);
       if (canvasRef.current) {
         await QRCode.toCanvas(canvasRef.current, qrPayload, {
           errorCorrectionLevel: 'M',
@@ -95,29 +95,7 @@ export default function GateDisplay() {
 
   // Wake lock: on load and whenever the tab becomes visible again (SDD §9.2).
   useEffect(() => {
-    let lock: { release: () => Promise<void> } | null = null;
-    async function requestLock() {
-      try {
-        if ('wakeLock' in navigator) {
-          lock = await (
-            navigator as unknown as {
-              wakeLock: { request: (t: string) => Promise<{ release: () => Promise<void> }> };
-            }
-          ).wakeLock.request('screen');
-        }
-      } catch {
-        // wake lock not available/denied — the page still works, just may sleep
-      }
-    }
-    void requestLock();
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void requestLock();
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible);
-      void lock?.release();
-    };
+    return keepScreenAwake(navigator as Parameters<typeof keepScreenAwake>[0], document);
   }, []);
 
   // Heartbeat every 60s, with backoff (5s/15s/60s) while failing (SDD §9.2).
@@ -144,13 +122,12 @@ export default function GateDisplay() {
         setState((prev) =>
           prev ? { ...prev, offsetMs, secretVersion: result.secretVersion } : prev,
         );
-        schedule(HEARTBEAT_INTERVAL_MS);
+        schedule(heartbeatDelayMs(0));
       } catch {
         if (cancelled) return;
         setOnline(false);
-        const attempt = Math.min(heartbeatFailuresRef.current, HEARTBEAT_BACKOFF_MS.length - 1);
         heartbeatFailuresRef.current += 1;
-        schedule(HEARTBEAT_BACKOFF_MS[attempt] ?? 60_000);
+        schedule(heartbeatDelayMs(heartbeatFailuresRef.current));
       }
     }
 
@@ -190,7 +167,7 @@ export default function GateDisplay() {
     return <View style={styles.container} />;
   }
 
-  const countdownFraction = 1 - msIntoStep / STEP_MS;
+  const countdown = countdownFraction(msIntoStepState);
 
   return (
     <Pressable style={styles.container} onPress={enterFullscreen} accessibilityRole="none">
@@ -200,9 +177,7 @@ export default function GateDisplay() {
       <View style={styles.qrWrap}>{createElement('canvas', { ref: canvasRef })}</View>
 
       <View style={styles.countdownTrack}>
-        <View
-          style={[styles.countdownFill, { width: `${Math.max(0, countdownFraction) * 100}%` }]}
-        />
+        <View style={[styles.countdownFill, { width: `${countdown * 100}%` }]} />
       </View>
 
       <Text style={styles.instruction}>Guests: scan with your phone camera to enter or leave</Text>
