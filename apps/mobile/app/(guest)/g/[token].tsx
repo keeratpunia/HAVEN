@@ -106,6 +106,9 @@ export default function GateScan() {
   );
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [locationAttempts, setLocationAttempts] = useState(0);
+  // FR-27 / F3 step 1: a denied permission goes straight to "Ask host to confirm" and
+  // is not one of the three GPS attempts.
+  const [locationDenied, setLocationDenied] = useState(false);
   const [session, setSession] = useState<api.ScanSessionResult | null>(null);
   const [scanActions, setScanActions] = useState<api.ScanSessionActions | null>(null);
   const [hostId, setHostId] = useState<string | null>(null);
@@ -137,10 +140,15 @@ export default function GateScan() {
         token,
         clientNonce: clientNonceRef.current,
         location,
+        locationError,
       });
       setSession(result);
       if (result.gpsOk) {
         setPhase('resolving_actions');
+      } else if (locationError === 'denied') {
+        setLocationDenied(true);
+        setErrorCode('location_denied');
+        setPhase('location_problem');
       } else {
         setLocationAttempts(1);
         setErrorCode(result.gpsFailure ?? locationError ?? 'no_location');
@@ -173,11 +181,17 @@ export default function GateScan() {
         session.scanSessionId,
         clientNonceRef.current,
         location,
+        locationError,
       );
       setSession(result);
       if (result.gpsOk) {
         setPhase('resolving_actions');
+      } else if (locationError === 'denied') {
+        setLocationDenied(true);
+        setErrorCode('location_denied');
+        setPhase('location_problem');
       } else {
+        setLocationDenied(false);
         const nextAttempt = locationAttempts + 1;
         setLocationAttempts(nextAttempt);
         setErrorCode(result.gpsFailure ?? locationError ?? 'no_location');
@@ -379,15 +393,22 @@ export default function GateScan() {
           <Text style={styles.body}>
             {copyFor(copyKeyForGpsFailure(errorCode ?? 'low_accuracy')).body}
           </Text>
-          <Text style={styles.hint}>
-            Attempt {locationAttempts} of {MAX_LOCATION_ATTEMPTS}
-          </Text>
+          {locationAttempts > 0 ? (
+            <Text style={styles.hint}>
+              Attempt {locationAttempts} of {MAX_LOCATION_ATTEMPTS}
+            </Text>
+          ) : null}
           <View style={styles.action}>
-            {locationAttempts >= MAX_LOCATION_ATTEMPTS ? (
+            {locationAttempts >= MAX_LOCATION_ATTEMPTS || locationDenied ? (
               <Button label="Ask host to confirm" onPress={askHostToConfirm} />
-            ) : (
-              <Button label="Try again" onPress={retryLocation} />
-            )}
+            ) : null}
+            {locationAttempts < MAX_LOCATION_ATTEMPTS ? (
+              <Button
+                label="Try again"
+                onPress={retryLocation}
+                variant={locationDenied ? 'secondary' : 'primary'}
+              />
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -675,5 +696,5 @@ const styles = StyleSheet.create({
   },
   typeOptionSelected: { backgroundColor: color.primary, borderColor: color.primary },
   typeTextSelected: { color: color.onPrimary },
-  action: { marginTop: space.sm },
+  action: { marginTop: space.sm, gap: space.xs },
 });

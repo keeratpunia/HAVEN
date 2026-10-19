@@ -547,6 +547,8 @@ export function createScanSession(params: {
   token: string;
   clientNonce: string;
   location: ScanLocation | null;
+  /** §9.3: why location is null ('denied' is not counted as an attempt, FR-27). */
+  locationError?: string | null;
 }) {
   return request<ScanSessionResult>('/v1/scan-sessions', {
     method: 'POST',
@@ -559,12 +561,13 @@ export function retryScanSessionLocation(
   sessionId: string,
   nonce: string,
   location: ScanLocation | null,
+  locationError: string | null = null,
 ) {
   return request<ScanSessionResult>(`/v1/scan-sessions/${sessionId}/location`, {
     method: 'POST',
     auth: false,
     headers: { 'X-Scan-Nonce': nonce },
-    body: { location },
+    body: { location, locationError },
   });
 }
 

@@ -1523,6 +1523,32 @@ Source for all of Part 1: SDD §2.7.
   **Verification against a real Supabase bucket is part of the deployment milestone.**
 - **SDD updated?** Not needed: this implements §9.10 as written.
 
+### DEC-022 — Location permission denied is not a GPS attempt; proposed copy (FR-27, F3)
+
+- **Date:** 2026-10-19
+- **Context:** FR-27 and F3 step 1 name two separate triggers for "Ask host to
+  confirm": three failed GPS fixes, **or** a denied location permission. §9.3 has the
+  client send `location: null` with `locationError`. The app treated a denial as one
+  failed attempt, so the guest had to fail twice more before getting the host path
+  (FINAL-QA-REPORT item 8). The SDD gives no on-screen wording for a denial.
+- **Decision:**
+  - **Gate screen.** It offers "Ask host to confirm" as soon as permission is denied,
+    with "Try again" alongside. "Attempt n of 3" appears only after a real GPS attempt.
+  - **API.** It reads `locationError` on `POST /scan-sessions` and on
+    `POST /scan-sessions/{id}/location`. With `location: null` and
+    `locationError: 'denied'`, the session's `location_attempts` is not increased, and
+    a session opened with a denial starts at 0. Migration
+    `20261021000003_scan_location_denied.sql` widens the check constraint to 0–3.
+    Every other missing fix (`timeout`, `unavailable`) still counts.
+  - **Copy.** `location_denied` in `copy/en.ts` is **proposed**: "Location is turned off
+    for HAVEN" / "Allow location for this site and try again, or ask your host to
+    confirm you're at the gate."
+- **Why:** this follows the SDD's two triggers. A guest can't game the attempt limit
+  this way: claiming a denial gives `gps_ok = false`, and that only leads to the
+  host-confirmation path.
+- **SDD updated?** Not needed for the behaviour. The copy needs approval with the other
+  proposed strings.
+
 Template for a new entry:
 
 ```markdown

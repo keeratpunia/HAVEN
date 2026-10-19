@@ -31,9 +31,17 @@ export interface CreateScanSessionParams {
   token: string;
   clientNonce: string;
   location: GateLocationInput | null;
+  /** §9.3: "Permission denied, unavailable or timeout -> send location: null with
+   * locationError". Only 'denied' changes anything: it is not counted (FR-27). */
+  locationError?: string | null;
   mocked?: boolean;
   ip: string | null;
   userAgent: string | null;
+}
+
+/** FR-27 / F3: a refused permission isn't a failed GPS fix, so it isn't an attempt. */
+function isPermissionDenial(location: unknown, locationError: string | null | undefined) {
+  return location === null && locationError === 'denied';
 }
 
 export interface ScanSessionResponse {
@@ -116,6 +124,7 @@ export async function createScanSession(
     distanceM: geofence.distanceM,
     gpsOk: geofence.gpsOk,
     gpsFailure: geofence.gpsFailure,
+    locationAttempts: isPermissionDenial(params.location, params.locationError) ? 0 : 1,
     createdAt: now,
     expiresAt,
     ip: params.ip,
@@ -139,6 +148,7 @@ export async function retryScanSessionLocation(
   sessionId: string,
   location: GateLocationInput | null,
   mocked?: boolean,
+  locationError?: string | null,
 ): Promise<ScanSessionResponse> {
   if (mocked === true) {
     throw new AppError('MOCK_LOCATION', 403, 'Turn off fake location apps.');
@@ -179,7 +189,10 @@ export async function retryScanSessionLocation(
       )
     : { gpsOk: false, gpsFailure: 'no_location' as const, distanceM: null };
 
-  const updated = await recordLocationRetry(deps.db, sessionId, session.location_attempts + 1, {
+  const attempts = isPermissionDenial(location, locationError)
+    ? session.location_attempts
+    : session.location_attempts + 1;
+  const updated = await recordLocationRetry(deps.db, sessionId, attempts, {
     lat: location?.lat ?? null,
     lng: location?.lng ?? null,
     accuracyM: location?.accuracy ?? null,

@@ -61,7 +61,11 @@ const CreateScanSessionBody = z.object({
   locationError: z.string().nullable().optional(),
 });
 
-const LocationRetryBody = z.object({ location: LocationSchema, mocked: z.boolean().optional() });
+const LocationRetryBody = z.object({
+  location: LocationSchema,
+  locationError: z.string().nullable().optional(),
+  mocked: z.boolean().optional(),
+});
 
 const SESSION_ID_PARAMS = z.object({ id: z.string().uuid() });
 const RoomResidentsParams = z.object({
@@ -169,6 +173,7 @@ export async function registerGateRoutes(
               fixAgeMs: request.body.location.fixAgeMs,
             }
           : null,
+        locationError: request.body.locationError,
         mocked: request.body.location?.mocked,
         ip: request.ip,
         userAgent: request.headers['user-agent'] ?? null,
@@ -203,6 +208,7 @@ export async function registerGateRoutes(
             }
           : null,
         request.body.location?.mocked ?? request.body.mocked,
+        request.body.locationError,
       );
       reply.send(result);
     },

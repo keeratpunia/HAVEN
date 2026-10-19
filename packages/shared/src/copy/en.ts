@@ -30,6 +30,12 @@ export const EN_COPY: Record<string, CopyEntry> = {
     title: "You're not at the gate yet",
     body: 'We need you to be at the hostel gate to check in. Walk closer and try again.',
   },
+  // FR-27 / F3: location permission denied. PROPOSED copy (the SDD gives the path, not
+  // the words), DEC-022.
+  location_denied: {
+    title: 'Location is turned off for HAVEN',
+    body: "Allow location for this site and try again, or ask your host to confirm you're at the gate.",
+  },
   low_accuracy: {
     title: "We can't pin your location",
     body: 'Turn on GPS / Location, step out from under a roof, and try again.',

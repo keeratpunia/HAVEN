@@ -22,7 +22,7 @@ async function signIn(page: import('@playwright/test').Page, phone: string) {
   await page.getByRole('button', { name: 'Verify' }).click();
 }
 
-test('GPS retry limit: 3 location failures offers "Ask host to confirm", which proceeds to awaiting_host_confirmation', async ({
+test('FR-27: permission denied offers "Ask host to confirm" at once (not an attempt); 3 GPS failures offer it too and it proceeds to awaiting_host_confirmation', async ({
   page,
   context,
 }) => {
@@ -33,14 +33,25 @@ test('GPS retry limit: 3 location failures offers "Ask host to confirm", which p
   await signIn(page, RETRY_TEST_PHONE);
   await page.waitForURL(/\/visits(\?.*)?$/);
 
-  // Outside the geofence for every attempt, including retries.
-  await context.setGeolocation({ latitude: 12.9716 + 1, longitude: 77.5946, accuracy: 10 });
-
+  // FR-27 / F3: the guest first refuses location. "Ask host to confirm" is offered at
+  // once, and the refusal is not one of the three attempts.
+  await context.clearPermissions();
+  await context.grantPermissions(['camera']);
   const token = generateTestGateToken({});
   await page.goto(`/g/${token}`);
   await page.getByRole('button', { name: 'Allow location' }).click();
+  await expect(page.getByText('Location is turned off for HAVEN')).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(page.getByRole('button', { name: 'Ask host to confirm' })).toBeVisible();
+  await expect(page.getByText(/Attempt \d of 3/)).toHaveCount(0);
 
+  // Then allows it, but is outside the geofence for every attempt.
+  await context.grantPermissions(['camera', 'geolocation']);
+  await context.setGeolocation({ latitude: 12.9716 + 1, longitude: 77.5946, accuracy: 10 });
+  await page.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByText('Attempt 1 of 3')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('button', { name: 'Ask host to confirm' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByText('Attempt 2 of 3')).toBeVisible({ timeout: 30_000 });
   await page.getByRole('button', { name: 'Try again' }).click();

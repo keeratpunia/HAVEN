@@ -65,6 +65,8 @@ export interface InsertScanSessionParams {
   distanceM: number | null;
   gpsOk: boolean;
   gpsFailure: GpsFailure | null;
+  /** 1 normally; 0 when the guest denied location permission (FR-27, not an attempt). */
+  locationAttempts: 0 | 1;
   /** From the injected Clock — the scan time cut-offs are judged at (SDD E-05). */
   createdAt: Date;
   expiresAt: Date;
@@ -90,7 +92,7 @@ export async function insertScanSession(
       distance_m: params.distanceM,
       gps_ok: params.gpsOk,
       gps_failure: params.gpsFailure,
-      location_attempts: 1,
+      location_attempts: params.locationAttempts,
       ip: params.ip,
       user_agent: params.userAgent,
       expires_at: params.expiresAt.toISOString(),
