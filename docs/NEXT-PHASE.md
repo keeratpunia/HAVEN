@@ -24,5 +24,9 @@ it and real use at GH-8.
 
 - Host-assisted entry (a resident scanning for a guest without a phone) works and is
   tested at the API level, but has no browser-level test yet.
+- Suggested from the 2026-10-19 rehearsal: when a guest opens an invite, pre-fill the
+  "About you" name and gender from what the resident typed, for the guest to confirm or
+  correct. The 18+ tick, the privacy consent and the live selfie must still come from
+  the guest (SDD FR-02, §16.3), so those stay.
 - Two features from the design are not built: the map preview when the warden sets the
   gate location, and the screenshots on the "camera blocked" help screen.
