@@ -124,12 +124,20 @@ export async function upsertResidentDraft(
 }
 
 /** Records an uploaded ID card / selfie on the draft (`POST /residents/me/documents`). */
+/**
+ * Points the resident row at the new photo. The update goes through the residents
+ * audit trigger, so a verified resident's selfie change is logged (FR-08). Returns the
+ * photo it replaced, for the caller to delete (§16.1: keep the least).
+ */
 export async function attachResidentDocument(
   deps: { db: Kysely<Database> },
   p: { principal: UserPrincipal; requestId: string; kind: 'id_card' | 'selfie'; photoId: string },
-): Promise<void> {
+): Promise<{ replacedMediaId: string | null }> {
   authorize(p.principal, 'residents.update_self', { userId: p.principal.userId });
-  await withTx(deps.db, { principal: p.principal, requestId: p.requestId }, async (trx) => {
+  return withTx(deps.db, { principal: p.principal, requestId: p.requestId }, async (trx) => {
+    const before = await residentRow(trx, p.principal.userId);
+    const previous =
+      (p.kind === 'id_card' ? before?.id_card_media_id : before?.selfie_media_id) ?? null;
     await trx
       .updateTable('haven.residents')
       .set(
@@ -139,7 +147,23 @@ export async function attachResidentDocument(
       )
       .where('user_id', '=', p.principal.userId)
       .execute();
+    return { replacedMediaId: previous && previous !== p.photoId ? previous : null };
   });
+}
+
+/**
+ * Precondition for a document upload: an editable draft, or (FR-08) a verified
+ * resident retaking their selfie. The ID card is never re-uploaded after verification:
+ * it was deleted on the warden's decision (§16.5).
+ */
+export async function assertCanUploadDocument(
+  db: Kysely<Database>,
+  userId: string,
+  kind: 'id_card' | 'selfie',
+): Promise<void> {
+  const row = await residentRow(db, userId);
+  if (row && row.status === 'verified' && kind === 'selfie') return;
+  await assertEditableDraft(db, userId);
 }
 
 /** Precondition shared by the documents upload: an editable draft must exist first. */

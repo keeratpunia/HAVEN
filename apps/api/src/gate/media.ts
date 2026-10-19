@@ -283,6 +283,11 @@ export async function storeResidentDocument(params: {
 export async function storeVisitorProfilePhoto(
   params: StoreVisitorProfilePhotoParams,
 ): Promise<{ photoId: string }> {
+  const previous = await params.db
+    .selectFrom('haven.visitors')
+    .select('profile_media_id')
+    .where('id', '=', params.visitorId)
+    .executeTakeFirst();
   const result = await storePhoto({
     db: params.db,
     storage: params.storage,
@@ -298,6 +303,16 @@ export async function storeVisitorProfilePhoto(
     .set({ profile_media_id: result.photoId })
     .where('id', '=', params.visitorId)
     .execute();
+  // FR-08 retake: the old selfie isn't needed any more (§16.1 "keep the least").
+  const old = previous?.profile_media_id;
+  if (old && old !== result.photoId) {
+    await deleteMedia({
+      db: params.db,
+      storage: params.storage,
+      clock: params.clock,
+      mediaId: old,
+    });
+  }
   return result;
 }
 

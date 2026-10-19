@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import { Button } from '../../components/Button.js';
 import { DeleteAccount } from '../../components/DeleteAccount.js';
+import { ProfileEditor } from '../../components/ProfileEditor.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { availableShells } from '../../lib/resident-route.js';
 import { getPushPermission, registerForPush, type PushPermission } from '../../lib/push.js';
@@ -22,7 +23,7 @@ const PUSH_TEXT: Record<PushPermission, string> = {
 
 export default function Account() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, signOut, refresh } = useAuth();
   const [push, setPush] = useState<PushPermission | null>(null);
 
   useEffect(() => {
@@ -35,6 +36,10 @@ export default function Account() {
       <Text style={styles.title} accessibilityRole="header">
         Profile
       </Text>
+      {/* FR-08: edit the name, retake the selfie (the change is logged). */}
+      {user?.residentStatus === 'verified' ? (
+        <ProfileEditor kind="resident" onSaved={() => void refresh()} />
+      ) : null}
       <View style={styles.card}>
         <Row label="Name" value={user?.fullName ?? '—'} />
         <Row

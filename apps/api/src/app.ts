@@ -424,6 +424,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         mediaStorage: options.mediaStorage,
         botVerifier: options.botVerifier ?? createBotVerifier(env),
         otpVerifyMaxPer10Min: rateLimitConfig.otpVerifyMaxPer10Min ?? 10,
+        mediaSigner,
       });
       await registerVisitRoutes(v1, { db, clock });
       await registerHostVisitRoutes(v1, {

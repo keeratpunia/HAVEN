@@ -215,7 +215,13 @@ describe('local storage keys can’t escape their bucket', () => {
 describe('signed URLs (SDD §9.10: 120 s, per response)', () => {
   it('a URL works until 120 s, then 404; a URL for one photo can’t fetch another', async () => {
     const a = await upload(await solid(300, 300, 10).jpeg().toBuffer());
-    const b = await upload(await solid(300, 300, 250).jpeg().toBuffer());
+    // Another guest's photo: a second upload by the same guest is a retake (FR-08) and
+    // replaces the first.
+    const b = await upload(
+      await solid(300, 300, 250).jpeg().toBuffer(),
+      'photo.jpg',
+      await makeVisitor(db, undefined, 'female', { complete: false }),
+    );
     const signer = new MediaUrlSigner(JWT_SECRET, API_BASE_URL, clock);
     const signed = signer.sign(a.body.photoId);
     const rel = signed.url.replace(API_BASE_URL, '');

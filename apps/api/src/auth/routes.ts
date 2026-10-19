@@ -28,6 +28,7 @@ import { requireAuth } from './authenticate.js';
 import { authorize } from './policy.js';
 import { registerAuthPolicies } from './policy-rules.js';
 import type { BotVerifier } from './bot-check.js';
+import type { MediaUrlSigner } from '../media/signing.js';
 import { storeVisitorProfilePhoto, type MediaStorage } from '../gate/media.js';
 import { loadResidentProfile } from '../residents/service.js';
 import { openDeletionRequest } from '../account/deletion.js';
@@ -42,6 +43,8 @@ export interface AuthRoutesOptions {
   botVerifier: BotVerifier;
   /** SDD §12.11: `POST /auth/otp/verify` 10 per IP per 10 min (SA-06). */
   otpVerifyMaxPer10Min: number;
+  /** FR-08: GET /me shows the caller's own profile photo as a 120 s signed URL. */
+  mediaSigner: MediaUrlSigner;
 }
 
 const PhoneSchema = z.string().min(1);
@@ -326,6 +329,11 @@ export async function registerAuthRoutes(
         .where('id', '=', principal.userId)
         .executeTakeFirstOrThrow();
       const residentStatus = await getResidentStatus(db, principal.userId);
+      const selfie = await db
+        .selectFrom('haven.residents')
+        .select('selfie_media_id')
+        .where('user_id', '=', principal.userId)
+        .executeTakeFirst();
       reply.send({
         type: 'user',
         id: row.id,
@@ -336,6 +344,7 @@ export async function registerAuthRoutes(
         roles: principal.roles,
         residentStatus,
         resident: await loadResidentProfile(db, principal.userId),
+        profilePhoto: opts.mediaSigner.signOrNull(selfie?.selfie_media_id),
         deletionRequest: await openDeletionRequest(db, { type: 'user', id: principal.userId }),
       });
       return;
@@ -368,6 +377,7 @@ export async function registerAuthRoutes(
       isAdultConfirmed: row.is_adult_confirmed,
       consentVersion: row.consent_version,
       hasProfilePhoto: row.profile_media_id !== null,
+      profilePhoto: opts.mediaSigner.signOrNull(row.profile_media_id),
       profileComplete: isProfileComplete(row),
       deletionRequest: await openDeletionRequest(db, { type: 'visitor', id: principal.visitorId }),
     });

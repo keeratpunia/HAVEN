@@ -43,6 +43,8 @@ export interface MeUserDTO {
   roles: { h: string; r: 'super_admin' | 'warden' | 'office' }[];
   residentStatus: ResidentStatus | null;
   resident: ResidentProfileDTO | null;
+  /** FR-08: the resident's selfie as a 120 s signed URL (never kept, §9.10). */
+  profilePhoto?: { url: string; expiresAt: string } | null;
   /** An open account-deletion request (FR-09, SDD §16.6), so the app can show it. */
   deletionRequest?: { status: 'pending'; waitingFor: DeletionWaitingFor | null } | null;
 }

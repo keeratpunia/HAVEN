@@ -7,6 +7,7 @@ import { EmptyState } from '../../../components/EmptyState.js';
 import { StatusChip } from '../../../components/StatusChip.js';
 import { formatDateIst, formatTimeIst } from '../../../lib/formatTime.js';
 import { DeleteAccount } from '../../../components/DeleteAccount.js';
+import { Button } from '../../../components/Button.js';
 import { useAuth } from '../../../lib/auth-context.js';
 
 /**
@@ -18,6 +19,8 @@ export default function MyVisits() {
   const { signOut } = useAuth();
   const menu = (
     <View style={styles.menu}>
+      {/* FR-08: view and edit name, retake the profile photo. */}
+      <Button label="My profile" variant="secondary" onPress={() => router.push('/my-profile')} />
       <DeleteAccount
         kind="guest"
         onSignedOut={async () => {

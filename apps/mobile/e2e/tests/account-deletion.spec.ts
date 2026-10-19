@@ -43,6 +43,22 @@ test('G-17: a guest deletes their account from My visits and is signed out', asy
   await page.getByRole('button', { name: 'Verify' }).click();
   await page.waitForURL(/\/visits(\?.*)?$/, { timeout: 30_000 });
 
+  // FR-08 first (the nine test phones are all taken, so this guest does both): edit the
+  // name and retake the profile photo from "My profile".
+  await page.getByRole('button', { name: 'My profile' }).click();
+  await expect(page.getByRole('img', { name: 'Your profile photo' })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByLabel('Full name').fill('Deleting Guest Renamed');
+  await page.getByRole('button', { name: 'Save name' }).click();
+  await expect(page.getByText('Name saved.')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: 'Retake photo' }).click();
+  await expect(page.getByRole('button', { name: 'Take photo' })).toBeEnabled({ timeout: 30_000 });
+  await page.getByRole('button', { name: 'Take photo' }).click();
+  await page.getByRole('button', { name: 'Use photo' }).click();
+  await expect(page.getByText('Photo updated.')).toBeVisible({ timeout: 30_000 });
+  await page.goto('/visits');
+
   await confirmDeletion(page);
   await expect(page.getByText('Deletion requested')).toBeVisible({ timeout: 15_000 });
   await expect(

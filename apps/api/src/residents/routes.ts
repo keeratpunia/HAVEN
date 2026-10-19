@@ -10,9 +10,9 @@ import { AppError } from '../lib/errors.js';
 import { requireAuth } from '../auth/authenticate.js';
 import type { Principal, UserPrincipal } from '../auth/principal.js';
 import { definePolicy } from '../auth/policy.js';
-import { storeResidentDocument, type MediaStorage } from '../gate/media.js';
+import { deleteMedia, storeResidentDocument, type MediaStorage } from '../gate/media.js';
 import {
-  assertEditableDraft,
+  assertCanUploadDocument,
   attachResidentDocument,
   submitForVerification,
   upsertResidentDraft,
@@ -74,7 +74,6 @@ export async function registerResidentRoutes(
   // POST /v1/residents/me/documents — multipart `photo`, field `kind` (SDD §9.4).
   api.post('/residents/me/documents', { preHandler: requireAuth }, async (request, reply) => {
     const principal = requireUser(request.principal);
-    await assertEditableDraft(db, principal.userId);
     const file = await request.file();
     if (!file) throw new AppError('PHOTO_REQUIRED', 400, 'A photo is required.');
     const kindField = file.fields.kind;
@@ -86,6 +85,7 @@ export async function registerResidentRoutes(
         issues: [{ path: ['kind'], message: 'Expected id_card or selfie' }],
       });
     }
+    await assertCanUploadDocument(db, principal.userId, kind.data);
     const raw = await file.toBuffer();
     const { photoId } = await storeResidentDocument({
       db,
@@ -95,10 +95,13 @@ export async function registerResidentRoutes(
       userId: principal.userId,
       kind: kind.data === 'id_card' ? 'resident_id_card' : 'resident_selfie',
     });
-    await attachResidentDocument(
+    const { replacedMediaId } = await attachResidentDocument(
       { db },
       { principal, requestId: request.id, kind: kind.data, photoId },
     );
+    if (replacedMediaId) {
+      await deleteMedia({ db, storage: opts.mediaStorage, clock, mediaId: replacedMediaId });
+    }
     reply.send({ photoId });
   });
 

@@ -251,6 +251,10 @@ export interface MeVisitor {
   phone: string | null;
   gender: 'male' | 'female' | 'undisclosed';
   isAdultConfirmed: boolean;
+  /** FR-02: name, 18+, consent and a profile photo are all done. */
+  profileComplete?: boolean;
+  /** FR-08: 120 s signed URL — read it fresh, never keep it (§9.10). */
+  profilePhoto?: { url: string; expiresAt: string } | null;
   deletionRequest?: { status: 'pending'; waitingFor: DeletionWaitingFor | null } | null;
 }
 
