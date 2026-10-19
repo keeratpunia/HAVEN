@@ -148,8 +148,8 @@ temporary internet link are demo stand-ins.
    work."
 
 3. **GPS says no → ask the host.** Phone 1 (checked out after step 1): turn
-   **Location off** in the phone's quick settings, scan the gate QR → the app says
-   can't confirm the location: **"We can't pin your location"**. Android reports
+   **Location off** in the phone's quick settings, scan the gate QR → the app can't
+   confirm the location and says **"We can't pin your location"**. Android reports
    Location switched off as *unavailable*, so tap **Try again** twice more; after the
    third try **Ask host to confirm** appears (on a phone where the browser reports
    location as *blocked*, it appears straight away). Stop there — no need to finish.
