@@ -401,6 +401,8 @@ async function main() {
   ok('F. 20:05 walk-in refused; old QR refused; far-away scan → location problem');
 
   // ---- G. jobs: overstay → host → warden escalation; night sweep ----
+  // A seeded visit too: those sit on the real clock, the demo clock may not (rehearsal bug).
+  demoJob('overstay', 'VDEM001');
   demoJob('overstay', visitA.code);
   if (!(await notificationKinds(priya)).includes('N-OVERSTAY-HOST'))
     fail('no N-OVERSTAY-HOST for Priya');

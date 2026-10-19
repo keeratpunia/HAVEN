@@ -65,10 +65,24 @@ async function main() {
     case 'overstay': {
       // BR-13: overstaying from window_end + 15 min. Move the window back, then run.
       const id = await visitByCode(arg);
+      const end = new Date(now.getTime() - 16 * 60_000);
+      // The seeded visits were placed on the real clock; if `pnpm demo:clock` moved the
+      // demo back, the old start can be after the new end (visits_check). Keep the
+      // window at least an hour long, ending 16 minutes ago.
+      const visit = await db
+        .selectFrom('haven.visits')
+        .select('window_start')
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow();
+      const latestStart = new Date(end.getTime() - 60 * 60_000);
       await db
         .updateTable('haven.visits')
         .set({
-          window_end: new Date(now.getTime() - 16 * 60_000).toISOString(),
+          window_start: (visit.window_start < latestStart
+            ? visit.window_start
+            : latestStart
+          ).toISOString(),
+          window_end: end.toISOString(),
           overstay_since: null,
           overstay_escalated_at: null,
         })
