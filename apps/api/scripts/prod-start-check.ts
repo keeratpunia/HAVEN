@@ -16,11 +16,13 @@
  */
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
+import { stopPostgresSafely } from './fs-safe.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const apiDir = path.resolve(here, '..');
@@ -32,7 +34,8 @@ async function startPostgres(): Promise<{ url: string; stop: () => Promise<void>
   if (process.env.CHECK_DATABASE_URL) {
     return { url: process.env.CHECK_DATABASE_URL, stop: async () => {} };
   }
-  const dir = mkdtempSync(path.join(tmpdir(), 'haven-prod-check-pg-'));
+  // A new, not-yet-existing folder: initdb wants it absent or empty.
+  const dir = path.join(tmpdir(), `haven-prod-check-pg-${randomUUID().slice(0, 8)}`);
   const pg = new EmbeddedPostgres({
     databaseDir: dir,
     port: PG_PORT,
@@ -57,10 +60,7 @@ async function startPostgres(): Promise<{ url: string; stop: () => Promise<void>
   await client.end();
   return {
     url: `postgres://postgres:postgres@127.0.0.1:${PG_PORT}/haven_check`,
-    stop: async () => {
-      await pg.stop();
-      rmSync(dir, { recursive: true, force: true });
-    },
+    stop: () => stopPostgresSafely(pg, dir),
   };
 }
 

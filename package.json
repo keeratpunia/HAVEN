@@ -22,7 +22,7 @@
     "demo:pair-code": "pnpm --filter @haven/api run demo:pair-code",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "clean": "turbo run clean && node scripts/clean.mjs node_modules"
   },
   "devDependencies": {
     "turbo": "^2.1.3",

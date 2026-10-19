@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "clean": "rm -rf dist .turbo"
+    "clean": "node ../../scripts/clean.mjs dist .turbo"
   },
   "dependencies": {
     "zod": "^3.23.8",

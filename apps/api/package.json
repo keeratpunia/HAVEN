@@ -19,7 +19,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist .turbo",
+    "clean": "node ../../scripts/clean.mjs dist .turbo",
     "demo:clock": "tsx scripts/demo-clock.ts",
     "demo:smoke": "tsx scripts/demo-smoke.ts"
   },

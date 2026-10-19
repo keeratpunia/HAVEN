@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
+import { clearStaleDataDir, stopPostgresSafely } from '../scripts/fs-safe.js';
 import {
   TEST_PG_DATA_DIR,
   TEST_PG_DB,
@@ -43,6 +44,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     onError: () => {},
   });
 
+  await clearStaleDataDir(TEST_PG_DATA_DIR);
   await pg.initialise();
   await pg.start();
   await pg.createDatabase(TEST_PG_DB);
@@ -60,6 +62,6 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   }
 
   return async () => {
-    await pg.stop();
+    await stopPostgresSafely(pg, TEST_PG_DATA_DIR);
   };
 }

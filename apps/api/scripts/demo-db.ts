@@ -19,6 +19,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import EmbeddedPostgres from 'embedded-postgres';
+import { clearStaleDataDir, stopPostgresSafely } from './fs-safe.js';
 import sharp from 'sharp';
 import { CONSENT_VERSION, GH8_RULES_CONFIG_V1 } from '@haven/shared';
 import { encryptAesGcm, parseDataEncryptionKey, sha256 } from '../src/lib/crypto.js';
@@ -79,6 +80,7 @@ async function main() {
   });
 
   console.log('Starting embedded Postgres for the demo...');
+  await clearStaleDataDir(dataDir);
   await pg.initialise();
   await pg.start();
   await pg.createDatabase(DEMO_PG_DB);
@@ -408,8 +410,9 @@ async function main() {
   );
   console.log('Press Ctrl+C to stop.');
 
-  process.on('SIGINT', () => void pg.stop().then(() => process.exit(0)));
-  process.on('SIGTERM', () => void pg.stop().then(() => process.exit(0)));
+  const stop = () => void stopPostgresSafely(pg, dataDir).finally(() => process.exit(0));
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
 }
 
 void main();
