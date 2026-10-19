@@ -4,11 +4,11 @@
  * the next `pnpm demo` starts clean:
  *   - stops processes LISTENING on the demo ports (API 8080, web 8081, proxy, demo
  *     Postgres 54625) and their child processes,
- *   - stops embedded Postgres processes whose data folder is this repo's
- *     .demo-pgdata, and cloudflared quick tunnels pointed at the proxy port,
+ *   - stops embedded Postgres processes started from this repo's node_modules, and
+ *     cloudflared quick tunnels pointed at the proxy port,
  *   - deletes apps/api/.demo-pgdata and apps/api/.demo-media.
- * It never touches other programs: only those ports, and only Postgres/cloudflared
- * processes whose command line names this demo.
+ * It never touches other programs: only those ports, their children, and Postgres /
+ * cloudflared processes that belong to this checkout.
  *
  *   pnpm demo:reset          the demo only
  *   pnpm demo:reset --all    also the test and Playwright leftovers (ports 54621,
@@ -35,6 +35,7 @@ const dirs = [
     : []),
 ];
 const isWin = process.platform === 'win32';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function sh(file, args) {
   try {
@@ -47,10 +48,13 @@ function sh(file, args) {
 function listeningPids(port) {
   if (isWin) {
     const pids = new Set();
-    for (const line of sh('netstat', ['-ano', '-p', 'TCP']).split(/\r?\n/)) {
-      const cols = line.trim().split(/\s+/);
-      if (cols[0] === 'TCP' && cols[3] === 'LISTENING' && cols[1]?.endsWith(`:${port}`)) {
-        if (cols[4] && cols[4] !== '0') pids.add(cols[4]);
+    // -p TCP lists IPv4 sockets only; Postgres listens on IPv6 too.
+    for (const proto of ['TCP', 'TCPv6']) {
+      for (const line of sh('netstat', ['-ano', '-p', proto]).split(/\r?\n/)) {
+        const cols = line.trim().split(/\s+/);
+        if (cols[0] === 'TCP' && cols[3] === 'LISTENING' && cols[1]?.endsWith(`:${port}`)) {
+          if (cols[4] && cols[4] !== '0') pids.add(cols[4]);
+        }
       }
     }
     return [...pids];
@@ -60,37 +64,55 @@ function listeningPids(port) {
     .filter(Boolean);
 }
 
-/** PIDs of postgres / cloudflared processes that belong to this demo (by command line). */
-function demoProcessPids() {
-  const markers = [
-    '.demo-pgdata',
-    `localhost:${proxyPort}`,
-    ...(all ? ['.e2e-pgdata', 'haven-test-embedded-pg'] : []),
-  ];
+/** Every process as { pid, ppid, cmd }. */
+function processes() {
   if (isWin) {
     const ps = sh('powershell.exe', [
       '-NoProfile',
       '-Command',
-      'Get-CimInstance Win32_Process -Filter "Name=\'postgres.exe\' OR Name=\'cloudflared.exe\'" | ForEach-Object { "$($_.ProcessId)`t$($_.CommandLine)" }',
+      'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name) $($_.CommandLine)" }',
     ]);
     return ps
       .split(/\r?\n/)
-      .map((l) => l.split('\t'))
-      .filter(([pid, cmd]) => pid && cmd && markers.some((m) => cmd.includes(m)))
-      .map(([pid]) => pid.trim());
+      .map((line) => line.split('\t'))
+      .filter(([pid, , cmd]) => pid && cmd)
+      .map(([pid, ppid, cmd]) => ({ pid: pid.trim(), ppid: (ppid ?? '').trim(), cmd }));
   }
-  return sh('ps', ['-eo', 'pid=,args='])
+  return sh('ps', ['-eo', 'pid=,ppid=,args='])
     .split('\n')
-    .filter((l) => /postgres|cloudflared/.test(l) && markers.some((m) => l.includes(m)))
-    .map((l) => l.trim().split(/\s+/)[0]);
+    .map((line) => line.trim().split(/\s+/))
+    .filter((cols) => cols.length >= 3)
+    .map(([pid, ppid, ...rest]) => ({ pid, ppid, cmd: rest.join(' ') }));
+}
+
+const norm = (s) => s.replace(/\\/g, '/').toLowerCase();
+const ourModules = norm(path.join(ROOT, 'node_modules'));
+const testDbMarker = /e2e-pgdata|haven-test-embedded-pg/i;
+
+/**
+ * Leftovers that belong to this demo:
+ * - postgres started from THIS checkout's node_modules (the embedded Postgres). Its
+ *   worker processes ("--forkchild=...") don't name the data folder, and on Windows
+ *   they keep the listening port after their parent is killed;
+ * - cloudflared quick tunnels pointed at the proxy port;
+ * - children of a process that was listening on a demo port.
+ */
+function leftoverPids(listeners) {
+  return processes()
+    .filter(({ ppid, cmd }) => {
+      const isOurPostgres = /postgres/i.test(cmd) && norm(cmd).includes(ourModules);
+      if (isOurPostgres && (all || !testDbMarker.test(cmd))) return true;
+      if (/cloudflared/i.test(cmd) && cmd.includes(`localhost:${proxyPort}`)) return true;
+      return listeners.has(ppid);
+    })
+    .map(({ pid }) => pid)
+    .filter((pid) => pid !== String(process.pid) && !listeners.has(pid));
 }
 
 function kill(pid) {
   if (isWin) spawnSync('taskkill', ['/pid', pid, '/T', '/F'], { stdio: 'ignore' });
   else spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
 }
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Windows keeps a folder locked for a moment after its process dies (EBUSY/EPERM). */
 async function removeDir(dir) {
@@ -108,20 +130,24 @@ async function removeDir(dir) {
   return 'unknown';
 }
 
-let killed = 0;
-for (const port of ports) {
-  for (const pid of listeningPids(port)) {
-    kill(pid);
-    killed++;
-    console.log(`stopped process ${pid} listening on :${port}`);
+// Up to three rounds: Windows can take a moment to release a port after a kill.
+for (let round = 1; round <= 3; round++) {
+  const listeners = new Set();
+  for (const port of ports) {
+    for (const pid of listeningPids(port)) {
+      listeners.add(pid);
+      kill(pid);
+      console.log(`stopped process ${pid} listening on :${port}`);
+    }
   }
+  const leftovers = leftoverPids(listeners);
+  for (const pid of leftovers) {
+    kill(pid);
+    console.log(`stopped leftover demo process ${pid}`);
+  }
+  if (listeners.size === 0 && leftovers.length === 0) break;
+  await sleep(1_500 * round);
 }
-for (const pid of demoProcessPids()) {
-  kill(pid);
-  killed++;
-  console.log(`stopped leftover postgres/cloudflared process ${pid}`);
-}
-if (killed) await sleep(1_500);
 
 for (const dir of dirs) {
   console.log(`${path.relative(ROOT, dir) || dir}: ${await removeDir(dir)}`);

@@ -81,17 +81,17 @@ It prints `9.15.9`.
 pnpm install
 ```
 
-Takes 5–15 minutes. It ends with something like `Done in 4m 12s`. Warnings about
+Takes 2–15 minutes depending on the connection (and Defender). It ends with something like `Done in 1m 17s using pnpm v9.15.9`. Warnings about
 "deprecated" or "peer dependencies" are normal; red `ERR_PNPM_...` lines are not (see
 Troubleshooting).
 
-Then the browser the end-to-end tests use (one time, ~150 MB):
+Then the browser the end-to-end tests use (one time, about 300 MB):
 
 ```powershell
 pnpm --filter @haven/mobile exec playwright install chromium
 ```
 
-It ends with `Chromium ... downloaded`.
+It ends with `Chrome Headless Shell ... downloaded to ...`.
 
 ---
 
@@ -103,7 +103,7 @@ pnpm lint
 pnpm test
 ```
 
-Each ends with `Tasks: N successful, N total`. `pnpm test` takes 5–10 minutes: the API
+Each ends with `Tasks: N successful, N total`. `pnpm test` takes about 5 minutes: the API
 tests start their own small database (the first time, Windows Firewall may ask about
 `postgres.exe` — see Troubleshooting). Expect about 1,000 passing tests and 0 failures.
 
