@@ -65,7 +65,7 @@ jobs:
         run: pnpm --filter @haven/mobile exec playwright install --with-deps chromium
       - name: Playwright E2E
         if: github.event_name == 'pull_request'
-        run: bash apps/mobile/e2e/run-ci.sh
+        run: pnpm e2e
       - name: Upload Playwright results
         if: failure() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
