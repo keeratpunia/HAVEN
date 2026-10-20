@@ -318,13 +318,42 @@ export async function registerGateRoutes(
         .where('status', '=', 'inside')
         .executeTakeFirst();
 
+      // The gate page says "Visiting <host first name> until …" (G-08), as My visits does.
+      const named = async (rows: (typeof approvedToday)[number][]) => {
+        const hostIds = [...new Set(rows.map((r) => r.host_id))];
+        const hostelIds = [...new Set(rows.map((r) => r.hostel_id))];
+        const hosts = hostIds.length
+          ? await db
+              .selectFrom('haven.users')
+              .select(['id', 'full_name'])
+              .where('id', 'in', hostIds)
+              .execute()
+          : [];
+        const hostels = hostelIds.length
+          ? await db
+              .selectFrom('haven.hostels')
+              .select(['id', 'name'])
+              .where('id', 'in', hostelIds)
+              .execute()
+          : [];
+        return rows.map((r) => ({
+          ...visitDto(r),
+          hostFirstName: hosts.find((h) => h.id === r.host_id)?.full_name.split(' ')[0],
+          hostelName: hostels.find((h) => h.id === r.hostel_id)?.name,
+        }));
+      };
+
       if (inside) {
-        reply.send({ gpsOk: session.gps_ok, actions: ['check_out'], visits: [visitDto(inside)] });
+        reply.send({
+          gpsOk: session.gps_ok,
+          actions: ['check_out'],
+          visits: await named([inside]),
+        });
       } else if (approvedToday.length > 0) {
         reply.send({
           gpsOk: session.gps_ok,
           actions: ['check_in'],
-          visits: approvedToday.map(visitDto),
+          visits: await named(approvedToday),
         });
       } else {
         reply.send({ gpsOk: session.gps_ok, actions: ['request_entry'], visits: [] });

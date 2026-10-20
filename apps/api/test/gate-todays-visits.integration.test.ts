@@ -82,6 +82,39 @@ describe('the gate lists every approved visit for today (FR-23, E-06)', () => {
     expect(next.body.visits.map((v) => v.id)).toEqual([second]);
   });
 
+  it("each listed visit names the host and hostel, for check-in and for check-out (G-08 'Visiting <host>')", async () => {
+    // Found in the report screenshots: the gate page read "Visiting  until 4:15pm" because
+    // this response carried the bare VisitDTO without the host's first name.
+    const id = await approved(w.residentId, -1, 2);
+    const host = await db
+      .selectFrom('haven.users')
+      .select('full_name')
+      .where('id', '=', w.residentId)
+      .executeTakeFirstOrThrow();
+    const hostel = await db
+      .selectFrom('haven.hostels')
+      .select('name')
+      .where('id', '=', w.hostelId)
+      .executeTakeFirstOrThrow();
+    const expected = { id, hostFirstName: host.full_name.split(' ')[0], hostelName: hostel.name };
+
+    const { scan, body } = await landing();
+    expect(body.actions).toEqual(['check_in']);
+    expect(body.visits).toEqual([expect.objectContaining(expected)]);
+
+    const res = await supertest(app.server)
+      .post(`/v1/scan-sessions/${scan.sessionId}/check-in`)
+      .set('Authorization', `Bearer ${bearer}`)
+      .set('X-Scan-Nonce', scan.nonce)
+      .set('Idempotency-Key', randomUUID())
+      .send({ visitId: id, photoId: scan.photoId });
+    expect(res.status).toBe(200);
+
+    const next = await landing();
+    expect(next.body.actions).toEqual(['check_out']);
+    expect(next.body.visits).toEqual([expect.objectContaining(expected)]);
+  });
+
   it('an approved visit for a later day is not offered Check in today', async () => {
     await approved(w.residentId, 24, 27); // tomorrow 12:00–15:00 IST
     const { body } = await landing();
