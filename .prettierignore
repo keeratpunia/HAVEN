@@ -10,3 +10,5 @@ supabase/.branches
 supabase/.temp
 # Expo rewrites this file on every start; keep it in Expo's own format.
 apps/mobile/tsconfig.json
+# Report build output (docs/report/build.mjs)
+docs/report/.build

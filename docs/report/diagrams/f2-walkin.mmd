@@ -1,0 +1,9 @@
+%% F2 Walk-in (SDD §6 F2; cut-offs judged at the scan)
+flowchart TD
+  A["Scans gate QR, GPS,<br/>signs in (+ profile)"] --> B["Finds host by room,<br/>visit type, live photo"]
+  B --> C{"Rules at<br/>scan time?"}
+  C -- refused --> X["Rule message"]
+  C -- ok --> D["Host notified<br/>(SMS after 60 s)"]
+  D --> E{"Host decides<br/>within 10 min?"}
+  E -- approves --> F["Inside; guest<br/>screen turns green"]
+  E -- "rejects / timeout" --> Y["Rejected /<br/>expired"]

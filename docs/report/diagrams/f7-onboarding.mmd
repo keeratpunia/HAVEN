@@ -1,0 +1,9 @@
+%% F7 Resident onboarding (SDD §6 F7)
+flowchart TD
+  A["Google sign-in<br/>(dev sign-in in demo)"] --> B["Phone OTP,<br/>hostel and room"]
+  B --> C["Live ID-card photo,<br/>selfie, consent"]
+  C --> D{"Warden<br/>verifies?"}
+  D -- yes --> E["Verified:<br/>can host"]
+  D -- no --> F["Rejected: may<br/>resubmit once"]
+  E --> G["ID-card photo deleted<br/>after the decision"]
+  F --> G

@@ -1,0 +1,8 @@
+%% F6 Overnight request (SDD §6 F6; BR-05..08)
+flowchart TD
+  A["Resident requests:<br/>own room or guest room"] --> B["Preview: nights, charge,<br/>monthly quota (BR-05)"]
+  B --> C{"Warden<br/>decides"}
+  C -- rejects --> X["Rejected"]
+  C -- approves --> D["Approved; pending charge<br/>₹50 or ₹150 a night"]
+  D --> E["Guest checks in<br/>as in F1"]
+  D --> F["Office marks paid<br/>(receipt number)"]

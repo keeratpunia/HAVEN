@@ -1,0 +1,21 @@
+%% Gate token + scan session + check-in (SDD §9.1-§9.3; gate/token.ts, scanSessions.ts, gate/routes.ts)
+sequenceDiagram
+  autonumber
+  participant D as Gate display
+  participant P as Guest phone
+  participant A as API
+  participant DB as Database
+  Note over D: token = code.step.MAC (HMAC-SHA256, 80 bits)
+  D->>D: new QR every 10 s (offline OK)
+  P->>P: scan QR, GPS fix
+  P->>A: POST /scan-sessions (token, nonce, GPS)
+  A->>A: token ≤ 30 s old, MAC valid
+  A->>A: geofence (haversine), fix ≤ 60 s
+  A->>DB: scan_session (10 min)
+  A-->>P: session id, GPS ok?
+  P->>A: GET session (X-Scan-Nonce)
+  A-->>P: allowed actions
+  P->>A: live photo (≤ 3 MB, EXIF removed)
+  P->>A: check-in (Idempotency-Key)
+  A->>DB: one transaction: rules, visit → inside,<br/>gate event, audit, notification
+  A-->>P: "You're checked in"

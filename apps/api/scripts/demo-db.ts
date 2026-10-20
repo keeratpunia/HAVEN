@@ -216,7 +216,11 @@ async function main() {
   );
 
   // ---- Visits for the dashboard, relative to the real "now" ----
-  const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+  // DEMO_SEED_AT (ISO instant, optional) seeds them around another moment instead — the
+  // report's screenshot script sets it to the same midday it sets the demo clock to.
+  const seedNow = process.env.DEMO_SEED_AT ? Date.parse(process.env.DEMO_SEED_AT) : Date.now();
+  if (Number.isNaN(seedNow)) throw new Error('DEMO_SEED_AT must be an ISO date-time');
+  const at = (minutes: number) => new Date(seedNow + minutes * 60_000).toISOString();
   async function guest(phone: string, name: string) {
     const v = await client.query<{ id: string }>(
       `insert into haven.visitors (phone, full_name, gender, is_adult_confirmed)

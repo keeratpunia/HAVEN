@@ -1,0 +1,9 @@
+%% F3 Location unverified (SDD §6 F3; DEC-022)
+flowchart TD
+  A["GPS check fails"] --> B{"3 tries used or<br/>permission denied?"}
+  B -- no --> C["Try again"]
+  C --> A
+  B -- yes --> D["Ask host to confirm,<br/>live photo"]
+  D --> E{"Host confirms<br/>within 10 min?"}
+  E -- yes --> F["Entry flagged<br/>'location unverified'"]
+  E -- no --> G["No entry"]

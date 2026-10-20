@@ -1,0 +1,10 @@
+%% F1 Pre-invite and check-in (SDD §6 F1)
+flowchart TD
+  A["Resident creates invite<br/>(rules checked), shares link"] --> B["Guest opens link,<br/>signs in with phone OTP"]
+  B --> C{"Invited<br/>number?"}
+  C -- no --> X["Refused"]
+  C -- yes --> D["First visit: profile,<br/>consent, live selfie"]
+  D --> E{"Scans gate QR:<br/>fresh + GPS inside?"}
+  E -- "GPS fails" --> F3["Flow F3"]
+  E -- yes --> F["Live photo,<br/>checked in"]
+  F --> G["Host: 'my guest' or<br/>'not my guest' (30 min)"]

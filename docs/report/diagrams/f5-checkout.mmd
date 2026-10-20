@@ -1,0 +1,9 @@
+%% F5 Check-out (SDD §6 F5; BR-17)
+flowchart TD
+  A["Guest inside scans<br/>the same gate QR"] --> B["Check out,<br/>live photo"]
+  B --> C{"GPS<br/>inside?"}
+  C -- no --> C2["Allowed,<br/>flagged"]
+  C -- yes --> D{"Overnight, window<br/>still open?"}
+  C2 --> D
+  D -- yes --> E["Stepped out;<br/>may return"]
+  D -- no --> F["Visit completed;<br/>host told"]

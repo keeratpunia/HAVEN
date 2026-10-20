@@ -1,0 +1,48 @@
+// HAVEN system architecture — matches apps/api/src/app.ts, server.ts, stream/hub.ts,
+// jobs/runner.ts and notify/worker.ts. Rendered by docs/report/scripts/render-diagrams.mjs.
+digraph haven {
+  graph [rankdir=TB, newrank=true, fontname="Times New Roman", fontsize=13, nodesep=0.22, ranksep=0.42, pad=0.1];
+  node  [shape=box, style="filled", fillcolor="#eeeeee", color="#777777", fontname="Times New Roman", fontsize=13, margin="0.1,0.05"];
+  edge  [color="#555555", fontname="Times New Roman", fontsize=11, arrowsize=0.8];
+
+  subgraph cluster_clients {
+    label="Clients — one Expo codebase (web today; Android build planned)"; style=filled; fillcolor="#fafafa"; color="#999999";
+    guest [label="Guest pages\n(phone browser)"];
+    res   [label="Resident\napp"];
+    staff [label="Warden / office\ndashboards"];
+    gated [label="Gate display\n(rotating QR)"];
+  }
+  subgraph cluster_api {
+    label="Fastify API — one Node.js service"; style=filled; fillcolor="#fafafa"; color="#999999";
+    pipe   [label="Request pipeline\n(auth, Zod, authorize)"];
+    sse    [label="SSE hub\n(LISTEN)"];
+    mods   [label="Modules: auth, gate, visits,\nrules, residents, admin, media"];
+    jobs   [label="Job runner\n(11 jobs)"];
+    outbox [label="Outbox worker\n(every 2 s)"];
+  }
+  subgraph cluster_sb {
+    label="Supabase"; style=filled; fillcolor="#fafafa"; color="#999999";
+    db [shape=cylinder, label="PostgreSQL\nschema haven,\n25 tables"];
+    st [shape=cylinder, label="Storage:\n3 private\nbuckets"];
+  }
+  subgraph cluster_ext {
+    label="Delivery"; style=filled; fillcolor="#fafafa"; color="#999999";
+    push [label="Expo push"];
+    sms  [label="SMS (console in demo;\nMSG91 planned)"];
+  }
+
+  {guest res staff gated} -> pipe;
+  pipe -> mods;
+  mods -> db [label=" Kysely,\n one transaction"];
+  mods -> st [label=" photos"];
+  jobs -> db;
+  outbox -> db [dir=both, label=" claim\n rows"];
+  db -> sse [style=dashed, label="NOTIFY"];
+  sse -> staff [style=dashed, label=" SSE"];
+  outbox -> push;
+  outbox -> sms;
+
+  {rank=same; pipe; sse}
+  {rank=same; mods; jobs; outbox}
+  {rank=same; db; st; push; sms}
+}

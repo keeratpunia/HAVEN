@@ -1,0 +1,17 @@
+{
+  "name": "@haven/report",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Builds the HAVEN progress report (docs/report/HAVEN-Progress-Report.docx/.pdf).",
+  "type": "module",
+  "scripts": {
+    "report": "node build.mjs",
+    "diagrams": "node scripts/render-diagrams.mjs",
+    "screenshots": "node scripts/capture-screenshots.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@viz-js/viz": "3.11.0",
+    "mermaid": "11.4.1"
+  }
+}

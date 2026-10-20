@@ -21,6 +21,7 @@
     "demo:clock": "pnpm --filter @haven/api run demo:clock --",
     "demo:job": "pnpm --filter @haven/api run demo:job --",
     "demo:pair-code": "pnpm --filter @haven/api run demo:pair-code",
+    "report": "pnpm --filter @haven/report run report --",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "turbo run clean && node scripts/clean.mjs node_modules"

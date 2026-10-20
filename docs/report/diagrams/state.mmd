@@ -1,0 +1,19 @@
+%% Visit state machine — exactly VISIT_TRANSITIONS in apps/api/src/visits/stateMachine.ts (19 transitions)
+stateDiagram-v2
+  [*] --> pending_host: walk-in
+  [*] --> pending_warden: overnight request
+  [*] --> approved: pre-invite
+  [*] --> inside: host-assisted entry
+  pending_host --> inside: host approves
+  pending_host --> rejected: host rejects
+  pending_host --> expired: 10 min, no answer
+  pending_host --> cancelled: guest cancels
+  pending_warden --> approved: warden approves
+  pending_warden --> rejected: warden rejects
+  pending_warden --> cancelled: host cancels
+  approved --> inside: check in
+  approved --> cancelled: host cancels
+  approved --> expired: window over, never entered
+  approved --> completed: window over after a step-out
+  inside --> approved: step out (overnight)
+  inside --> completed: check out · host marks left · warden forces

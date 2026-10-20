@@ -1,0 +1,44 @@
+// Main tables of schema haven (supabase/migrations) — key columns and foreign keys only.
+// 17 of the 25 tables; omitted: audit_log, sessions, otp_challenges, push_tokens,
+// idempotency_keys, gate_pairing_codes, staff_invites, deletion_requests.
+digraph er {
+  graph [rankdir=LR, nodesep=0.18, ranksep=0.45, pad=0.1];
+  node [shape=plain, fontname="Times New Roman", fontsize=12];
+  edge [color="#666666", arrowhead=crow, arrowtail=tee, dir=both, fontname="Times New Roman", fontsize=10, arrowsize=0.7];
+  hostels [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>hostels</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">code</td></tr><tr><td align="left" port="2">name</td></tr><tr><td align="left" port="3">gender_served</td></tr><tr><td align="left" port="4">timezone</td></tr></table>>];
+  hostel_rules [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>hostel_rules</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">hostel_id FK</td></tr><tr><td align="left" port="2">version</td></tr><tr><td align="left" port="3">config (jsonb)</td></tr></table>>];
+  rooms [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>rooms</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">hostel_id FK</td></tr><tr><td align="left" port="2">number</td></tr><tr><td align="left" port="3">floor</td></tr></table>>];
+  users [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>users</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">google_sub</td></tr><tr><td align="left" port="2">email</td></tr><tr><td align="left" port="3">full_name</td></tr><tr><td align="left" port="4">phone</td></tr></table>>];
+  role_assignments [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>role_assignments</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">user_id FK</td></tr><tr><td align="left" port="2">hostel_id FK</td></tr><tr><td align="left" port="3">role</td></tr><tr><td align="left" port="4">revoked_at</td></tr></table>>];
+  residents [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>residents</b></td></tr><tr><td align="left" port="0">user_id PK, FK</td></tr><tr><td align="left" port="1">hostel_id FK</td></tr><tr><td align="left" port="2">room_id FK</td></tr><tr><td align="left" port="3">status</td></tr><tr><td align="left" port="4">hosting_suspended_until</td></tr></table>>];
+  visitors [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>visitors</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">phone</td></tr><tr><td align="left" port="2">full_name</td></tr><tr><td align="left" port="3">gender</td></tr><tr><td align="left" port="4">profile_media_id FK</td></tr><tr><td align="left" port="5">consent_at</td></tr></table>>];
+  visits [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>visits</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">code</td></tr><tr><td align="left" port="2">host_id FK</td></tr><tr><td align="left" port="3">visitor_id FK</td></tr><tr><td align="left" port="4">type, status, zone</td></tr><tr><td align="left" port="5">window_start, window_end</td></tr><tr><td align="left" port="6">location_unverified</td></tr><tr><td align="left" port="7">host_confirmed_at</td></tr></table>>];
+  gates [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>gates</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">hostel_id FK</td></tr><tr><td align="left" port="2">code</td></tr><tr><td align="left" port="3">lat, lng, radius_m</td></tr><tr><td align="left" port="4">secret_enc (AES-GCM)</td></tr></table>>];
+  gate_devices [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>gate_devices</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">gate_id FK</td></tr><tr><td align="left" port="2">token_hash</td></tr><tr><td align="left" port="3">last_seen_at</td></tr><tr><td align="left" port="4">revoked_at</td></tr></table>>];
+  scan_sessions [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>scan_sessions</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">gate_id FK</td></tr><tr><td align="left" port="2">client_nonce_hash</td></tr><tr><td align="left" port="3">token_step</td></tr><tr><td align="left" port="4">distance_m, gps_ok</td></tr><tr><td align="left" port="5">expires_at, consumed_at</td></tr></table>>];
+  gate_events [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>gate_events</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">visit_id FK</td></tr><tr><td align="left" port="2">kind (entry/exit)</td></tr><tr><td align="left" port="3">photo_media_id FK</td></tr><tr><td align="left" port="4">location_verified</td></tr><tr><td align="left" port="5">at</td></tr></table>>];
+  approvals [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>approvals</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">visit_id FK</td></tr><tr><td align="left" port="2">approver_id FK</td></tr><tr><td align="left" port="3">decision</td></tr><tr><td align="left" port="4">decided_at</td></tr></table>>];
+  charges [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>charges</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">resident_id FK</td></tr><tr><td align="left" port="2">visit_id FK</td></tr><tr><td align="left" port="3">kind, amount_inr</td></tr><tr><td align="left" port="4">status, receipt_no</td></tr></table>>];
+  notifications [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>notifications</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">visit_id FK</td></tr><tr><td align="left" port="2">kind, channel</td></tr><tr><td align="left" port="3">status, attempts</td></tr><tr><td align="left" port="4">next_attempt_at</td></tr></table>>];
+  media [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>media</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">kind, bucket, path</td></tr><tr><td align="left" port="2">delete_after</td></tr><tr><td align="left" port="3">deleted_at</td></tr></table>>];
+  bans [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="3" bgcolor="#fafafa"><tr><td bgcolor="#e4e4e4"><b>bans</b></td></tr><tr><td align="left" port="0">id PK</td></tr><tr><td align="left" port="1">visitor_id FK</td></tr><tr><td align="left" port="2">hostel_id FK</td></tr><tr><td align="left" port="3">ends_at, lifted_at</td></tr></table>>];
+  hostels:0:e -> rooms:1:w;
+  hostels:0:e -> hostel_rules:1:w;
+  hostels:0:e -> gates:1:w;
+  users:0:e -> residents:0:w;
+  users:0:e -> role_assignments:1:w;
+  rooms:0:e -> residents:2:w;
+  hostels:0:e -> residents:1:w;
+  residents:0:e -> visits:2:w;
+  visitors:0:e -> visits:3:w;
+  visitors:0:e -> bans:1:w;
+  gates:0:e -> gate_devices:1:w;
+  gates:0:e -> scan_sessions:1:w;
+  visits:0:e -> gate_events:1:w;
+  visits:0:e -> approvals:1:w;
+  visits:0:e -> charges:2:w;
+  visits:0:e -> notifications:1:w;
+  media:0:e -> gate_events:3:w;
+  media:0:e -> visitors:4:w;
+  residents:0:e -> charges:1:w;
+}
