@@ -1,21 +1,21 @@
 %% Gate token + scan session + check-in (SDD §9.1-§9.3; gate/token.ts, scanSessions.ts, gate/routes.ts)
+%% Step numbers are part of the labels (no autonumber markers over the text).
 sequenceDiagram
-  autonumber
   participant D as Gate display
   participant P as Guest phone
   participant A as API
   participant DB as Database
   Note over D: token = code.step.MAC (HMAC-SHA256, 80 bits)
-  D->>D: new QR every 10 s (offline OK)
-  P->>P: scan QR, GPS fix
-  P->>A: POST /scan-sessions (token, nonce, GPS)
-  A->>A: token ≤ 30 s old, MAC valid
-  A->>A: geofence (haversine), fix ≤ 60 s
-  A->>DB: scan_session (10 min)
-  A-->>P: session id, GPS ok?
-  P->>A: GET session (X-Scan-Nonce)
-  A-->>P: allowed actions
-  P->>A: live photo (≤ 3 MB, EXIF removed)
-  P->>A: check-in (Idempotency-Key)
-  A->>DB: one transaction: rules, visit → inside,<br/>gate event, audit, notification
-  A-->>P: "You're checked in"
+  Note over D: 1. new QR every 10 s (works offline)
+  Note over P: 2. scan QR, GPS fix
+  P->>A: 3. POST /scan-sessions (token, nonce, GPS)
+  Note over A: 4. token ≤ 30 s old, MAC valid
+  Note over A: 5. geofence (haversine), fix ≤ 60 s old
+  A->>DB: 6. scan_session (10 min)
+  A-->>P: 7. session id, GPS ok?
+  P->>A: 8. GET session (X-Scan-Nonce)
+  A-->>P: 9. allowed actions + host's name
+  P->>A: 10. live photo (≤ 3 MB, EXIF removed)
+  P->>A: 11. check-in (Idempotency-Key)
+  A->>DB: 12. one transaction: rules, visit → inside,<br/>gate event, audit, notification
+  A-->>P: 13. "You're checked in"

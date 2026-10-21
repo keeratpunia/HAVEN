@@ -385,7 +385,7 @@ def build(index_pages):
             ["API endpoints / app screens", "86 endpoints / 43 screens"],
             ["Database", "25 tables in schema haven, 20 migrations"],
             ["Background work", "11 scheduled jobs, 20 notification kinds"],
-            ["Automated tests (fresh run, 20 Oct 2026)", "1,068 unit and integration, 31 end-to-end, 35 database (pgTAP) — all passing"],
+            ["Automated tests (fresh run, 21 Oct 2026)", "1,069 unit and integration, 31 end-to-end, 35 database (pgTAP) — all passing"],
             ["Requirement verdicts (final QA)", "142 PASS, 0 FAIL, 9 PARTIAL, 8 NOT TESTABLE of 159"],
             ["Security audit", "33 numbered findings + 4 media findings; all 3 HIGH fixed"],
             ["Recorded design decisions", "25 (DEC-001 to DEC-025)"],
@@ -460,17 +460,18 @@ def build(index_pages):
         "guest's phone number or photo."
     )
     R.table(
-        "Roles",
+        "Roles (SDD §3.3, narrowed where DEC-014 records it)",
         ["Role", "Signs in with", "Main permissions"],
         [
-            ["Guest", "Phone OTP, in the browser", "Own profile and visits; check in and out at the gate; request walk-in entry"],
-            ["Resident (host)", "Google + phone OTP", "After warden verification: invite guests, approve walk-ins, request overnight stays, confirm or dispute arrivals, mark a guest as left"],
-            ["Warden", "Google", "Whole hostel: verify residents, approve overnight stays, edit rules, bans and suspensions, fines, gates, staff, reports, emergency roll call"],
-            ["Office staff", "Google (invited by warden)", "Charges only: confirm, mark paid, waive; no phones or photos"],
-            ["Super admin", "Google (seeded by script)", "All hostels; uses the warden screens"],
+            ["Guest", "Phone OTP, in the browser", "Own profile and visits: request walk-in entry, check in and out at the gate, cancel a pending walk-in"],
+            ["Resident (host)", "Google + phone OTP", "After warden verification: invite guests, approve or reject walk-ins, host-assisted entry, confirm or dispute arrivals, request overnight stays, mark own guest as left; sees own guests' photos and phones"],
+            ["Warden", "Google (seeded in the prototype)", "Own hostel: dashboard, roll call, verify residents, approve overnight stays, force check-out, disputes, rules, bans, suspensions, fines, charges (incl. waive), gates, office staff, reports, audit log"],
+            ["Office staff", "Google (invited by the warden)", "Own hostel's charges only: confirm and mark paid. Cannot waive (only the warden can); never sees guest phones or photos"],
+            ["Super admin", "Google (seeded by script)", "All hostels: search and open any visit; verify residents, suspend hosts, bans, rules, gates, audit log; create hostels, invite wardens. Not the warden's day-to-day screens (dashboard, roll call, overnight approvals, reports) or force check-out (DEC-014)"],
             ["Gate device", "Device token from pairing", "Shows the rotating QR; holds no personal data"],
         ],
-        [78, 113, 260],
+        [70, 101, 280],
+        size=10,
     )
     R.heading("Visit Types")
     R.table(
@@ -519,7 +520,7 @@ def build(index_pages):
     R.para(
         "The SDD defines eleven flows (F1–F11, §6). Figures 1 to 6 show the six that guests and residents "
         "meet most; Section 4.2 summarises the others. Every rule check in these flows is judged by the "
-        "server's clock, never the phone's."
+        "server's clock, never the phone's. Section 9.1 lists which flows have end-to-end browser tests."
     )
     R.heading("Guest Flows")
     fw = 8.6
@@ -549,11 +550,11 @@ def build(index_pages):
     R.heading("Resident, Warden and Gate Flows")
     R.bullets(
         [
-            "**F4 Host-assisted entry** — for a guest without a smartphone, the host scans the gate QR on their own phone, enters the guest's details and takes the guest's photo. Built and tested at the API level; no browser-level test yet.",
+            "**F4 Host-assisted entry** — for a guest without a smartphone, the host scans the gate QR on their own phone, enters the guest's details and takes the guest's photo. Built and tested at the API level; no end-to-end browser test yet.",
             "**F6 Overnight request** and **F7 Resident onboarding** — Figures 5 and 6.",
             "**F8 Gate pairing and location** — the warden creates a one-time pairing code, the gate phone enters it and starts showing the QR; the warden records the gate's position from several GPS readings.",
             "**F9 Dispute** — a host who taps \"Not my guest\" within 30 minutes alerts the warden, who resolves it.",
-            "**F10 Forgotten check-out** — the host can mark a guest as left; overstays are flagged after 15 minutes and escalated to the warden.",
+            "**F10 Forgotten check-out** — the host taps \"My guest has left\"; otherwise an overstay is flagged 15 minutes after the window ends and escalated to the warden, who can force a check-out.",
             "**F11 Staff invite** — the warden invites office staff by e-mail; they accept with Google sign-in.",
         ],
         size=11.5,
@@ -696,7 +697,7 @@ def build(index_pages):
     R.para(
         "Guests and residents see a short privacy notice and tick an explicit consent box before giving any "
         "data beyond the phone number; the consent version and time are stored. Guests confirm they are 18 "
-        "or older. There are no analytics: data is used only for hostel entry security. Users can see their "
+        "or older. There are no analytics or tracking tools: data is used only for hostel entry security. Users can see their "
         "own data, correct their name and delete their account; deletion waits for an ongoing visit, then "
         "deletes photos and anonymises the person while keeping the visit record. Retention is enforced by a "
         "nightly job (Table 6.3). All the privacy wording is proposed text that still needs the warden's sign-off.",
@@ -720,49 +721,55 @@ def build(index_pages):
     # ------------------------------------------------------------------ 7
     R.chapter_start(CHAPTERS[6])
     R.para(
-        "The stack is fixed by the SDD (§8.4) and pinned in lockfiles; changing any part of it needs a "
-        "recorded decision. Everything is TypeScript in strict mode."
+        "The stack is fixed by the SDD (§8.4), pinned in lockfiles and written in strict TypeScript."
     )
     R.table(
         "Technology stack",
         ["Layer", "Technology", "Why"],
         [
-            ["Client", "Expo 57, React Native 0.86, React Native Web, Expo Router", "One code base for Android and web; guests need only a browser"],
-            ["Camera, QR, GPS", "expo-camera / getUserMedia, @zxing/browser, expo-location / Geolocation API", "Live camera only, no file picker; in-browser QR scanning"],
-            ["API", "Node.js, Fastify 5, Zod, fastify-type-provider-zod", "Fast, schema-first routes; one validation library everywhere"],
-            ["Database", "PostgreSQL (Supabase), Kysely, pg, SQL migrations", "Constraints, triggers and jobs in the database; typed, parameterised queries"],
-            ["Auth", "jose (JWT HS256), phone OTP, Google Identity Services", "Short-lived tokens; Gmail sign-in for residents and staff"],
-            ["Photos", "sharp, Supabase Storage (private buckets)", "Resize and strip metadata; signed, short-lived links"],
-            ["Time", "luxon", "Business rules compare times in the hostel's time zone (IST)"],
-            ["Notifications", "Database outbox, expo-server-sdk, SMS gateway", "Retries and auditing; delivery after commit"],
-            ["Live updates", "Server-Sent Events, PostgreSQL LISTEN/NOTIFY", "Simple one-way stream to dashboards"],
-            ["Observability", "pino (with redaction), Sentry", "Structured logs without personal data; error tracking"],
-            ["Hosting (planned)", "Render (API), Vercel (web), Supabase", "Free tiers sufficient for a pilot"],
+            ["Client", "Expo 57, React Native 0.86, React Native Web, Expo Router", "One code base; guests need only a browser"],
+            ["Camera, QR, GPS", "expo-camera / getUserMedia, @zxing/browser, expo-location / Geolocation API", "Live camera only; QR scanning in the browser"],
+            ["API", "Node.js, Fastify 5, Zod, luxon", "Schema-first routes; times compared in IST"],
+            ["Database", "PostgreSQL (Supabase), Kysely, pg, SQL migrations", "Constraints and triggers; typed, safe SQL"],
+            ["Auth", "jose (JWT HS256), phone OTP, Google Identity Services", "Short-lived tokens; Gmail sign-in"],
+            ["Photos", "sharp, Supabase Storage (private buckets)", "Metadata stripped; 120 s signed links"],
+            ["Notifications", "Database outbox, expo-server-sdk, SMS gateway", "Retries; sent only after commit"],
+            ["Live updates, logs", "SSE (LISTEN/NOTIFY); pino with redaction; Sentry", "Live dashboards; logs without PII"],
+            ["Hosting (planned)", "Render (API), Vercel (web), Supabase", "Free tiers suffice for a pilot"],
         ],
-        [78, 190, 183],
+        [78, 215, 158],
         size=10,
     )
     R.para(
-        "Three libraries named in the SDD's stack list are not used in the current code: TanStack Query and "
-        "React Hook Form (screens use plain React state and a small fetch helper) and the native Google "
+        "Not used yet, although the SDD lists them: TanStack Query, React Hook Form and the native Google "
         "sign-in library (needed only for the planned Android build).",
-        size=11.5,
+        size=11,
     )
     R.table(
         "Development and testing tools",
         ["Tool", "Use"],
         [
-            ["pnpm 9.15.9 workspaces, Turborepo", "Monorepo, cached builds and tests"],
-            ["ESLint, Prettier, TypeScript (strict)", "Lint, format and type checks on every change"],
-            ["Vitest; Jest (jest-expo); Supertest", "Unit, integration and contract tests"],
-            ["embedded-postgres; pgTAP", "Real PostgreSQL for tests without Docker; database-level tests"],
-            ["Playwright", "End-to-end tests with a fake camera and fake GPS; the screenshots in Chapter 8"],
-            ["GitHub Actions", "CI: lint, types, tests, build, production start check, pgTAP, Playwright, dependency audit"],
-            ["Cloudflare quick tunnel", "Reaching the laptop demo from real phones over HTTPS"],
-            ["Mermaid, Graphviz", "The diagrams in this report, kept as source files in the repository"],
+            ["pnpm 9.15.9, Turborepo; ESLint, Prettier", "Monorepo with cached builds; lint, format and strict type checks"],
+            ["Vitest, Jest (jest-expo), Supertest, pgTAP", "Unit, integration, contract and database tests on real PostgreSQL (embedded-postgres)"],
+            ["Playwright", "End-to-end tests with fake camera and GPS; Chapter 8's screenshots"],
+            ["GitHub Actions", "CI: checks, tests, build, start check, pgTAP, Playwright, audit"],
+            ["Cloudflare tunnel; Mermaid, Graphviz", "Demo on real phones over HTTPS; this report's diagrams (sources in the repository)"],
+            ["AI-assisted coding tools", "Implementation from the SDD, reviewed by the team (Chapter 10)"],
         ],
         [170, 281],
         size=10.5,
+    )
+    R.table(
+        "Hardware requirements (current)",
+        ["Who / what", "Hardware"],
+        [
+            ["Guests, residents", "Any smartphone with a browser, camera, GPS and data (resident Android app planned)"],
+            ["Gate display", "Any phone or tablet browser, kept charged at the gate; no scanner or kiosk"],
+            ["Warden, office", "A laptop or desktop browser"],
+            ["Server", "Planned: one small API server and a hosted database; the demo runs on one laptop"],
+        ],
+        [100, 351],
+        size=10,
     )
 
     # ------------------------------------------------------------------ 8
@@ -770,12 +777,14 @@ def build(index_pages):
     R.para(
         "All screenshots below were captured automatically from the running prototype by a Playwright script "
         "(docs/report/scripts/capture-screenshots.mjs) on the seeded demo data: every person is fictitious "
-        "and phone numbers are the SDD's test numbers. The browser's fake camera supplies the photos, which "
-        "is why they show green test shapes instead of faces, and the GPS is faked at a placeholder location. "
-        "The demo clock was set to 13:00 IST. Phone screens are 360 × 640, the size the SDD designs for.",
+        "and phone numbers are the SDD's test numbers. Chromium's fake camera was fed a synthetic, illustrated "
+        "face for each guest (drawn by scripts/fake_faces.py; not a photo of anyone), so the live photos "
+        "look like photos without showing a real person. The GPS is faked at a placeholder location and the "
+        "demo clock was set to 13:00 IST (20:05 for Figure 17(a)). Phone screens are 360 × 640, the size "
+        "the SDD designs for.",
         size=11.5,
     )
-    pw, cw = 132, 150
+    pw, cw = 122, 140
 
     def phones(items, title):
         R.grid([(SHOTS / f"{f}.png", pw, lab, None) for f, lab in items], cw, caption=title)
@@ -789,19 +798,41 @@ def build(index_pages):
         [("g04-scan-check-in", "(a) After scanning the gate QR"), ("g05-checked-in", "(b) Checked in"), ("g06-walk-in-waiting", "(c) Walk-in waiting for host")],
         "Guest: scanning at the gate",
     )
-    phones(
-        [("g07-walk-in-approved", "(a) Walk-in approved (guest)"), ("r01-resident-home", "(b) Resident home"), ("r02-create-invite", "(c) Creating an invite")],
-        "Walk-in approved, and the resident app",
-    )
     R.heading("Resident")
     phones(
-        [("r03-walk-in-approval", "(a) Walk-in with live photo"), ("r04-arrival-confirm", "(b) Confirming an arrival"), ("r05-overnight-request", "(c) Overnight request")],
-        "Resident: approving, confirming and requesting",
+        [("r01-resident-home", "(a) Home"), ("r02-create-invite", "(b) Creating an invite"), ("r03-walk-in-approval", "(c) Walk-in with live photo")],
+        "Resident: home, invite and walk-in approval",
+    )
+    R.grid(
+        [
+            (BUILD / "r04-arrival-confirm.png", pw, "(a) Confirming an arrival", None),
+            (BUILD / "r05-overnight-request.png", pw, "(b) Overnight request", None),
+        ],
+        cw + 30,
+        caption="Resident: confirming an arrival and requesting an overnight stay",
+    )
+    R.heading("Rules and Security in Action")
+    R.para(
+        "Figure 17 shows four refusals from the same demo run: a day walk-in after the 20:00 cut-off "
+        "(BR-02), a QR code two minutes old (the 30-second token window), a phone about 1 km from the "
+        "gate after three GPS attempts (F3), and a guest the warden had banned (BR-09).",
+        size=11.5,
+    )
+    R.grid(
+        [
+            (BUILD / "s01-entry-closed.png", 106, "(a) Walk-in at 20:05", None),
+            (BUILD / "s02-code-changed.png", 106, "(b) Old QR code", None),
+            (BUILD / "s03-ask-host.png", 106, "(c) GPS failed 3 times", None),
+            (BUILD / "s04-banned.png", 106, "(d) Banned guest", None),
+        ],
+        112,
+        caption="Rules and security in action (guest's phone)",
+        label_size=9,
     )
     R.heading("Gate, Warden and Office")
     R.para(
         "Desktop screens were captured at 1280 × 800 and are shown cropped to their content; the warden's "
-        "navigation menu appears in Figure 18 only.",
+        "navigation menu appears only in the dashboard figure.",
         size=11.5,
     )
 
@@ -809,7 +840,7 @@ def build(index_pages):
         """Full-width desktop crops stacked in one figure: items = (file, label)."""
         for i, (name, label, *w) in enumerate(items):
             p = R.doc.add_paragraph()
-            p.add_run().add_picture(str(BUILD / f"{name}.png"), width=Pt(w[0] if w else TEXT_W - 20))
+            p.add_run().add_picture(str(BUILD / f"{name}.png"), width=Pt(w[0] if w else TEXT_W - 120))
             fmt(p, WD_ALIGN_PARAGRAPH.CENTER, 4, 1, keep=True)
             if label:
                 lp = R.doc.add_paragraph()
@@ -818,34 +849,39 @@ def build(index_pages):
                 lp.paragraph_format.keep_with_next = True
         R._caption(R.doc, title)
 
-    R.grid([(BUILD / "d01-gate-display.png", 190, None, None)], 200, caption="Gate display: the rotating QR, no personal data")
+    R.grid(
+        [(BUILD / "d01-gate-display.png", 150, None, None)],
+        160,
+        caption="Gate display: rotating QR, 10-second countdown bar and the instruction; no personal data",
+    )
     p = R.doc.add_paragraph()
-    p.add_run().add_picture(str(SHOTS / "w01-warden-dashboard.png"), width=Pt(TEXT_W - 20))
+    p.add_run().add_picture(str(SHOTS / "w01-warden-dashboard.png"), width=Pt(TEXT_W - 90))
     fmt(p, WD_ALIGN_PARAGRAPH.CENTER, 4, 1, keep=True)
     R._caption(R.doc, "Warden dashboard: counts, gate status and latest events (live)")
     desk([("w02-inside-now", None)], "Warden: everyone inside now, with flags")
-    desk([("w03-visit-photos", "(a) Visit detail: live photo at the gate beside the profile photo", 300), ("w04-visit-timeline", "(b) Timeline of the same visit")], "Warden: one visit")
+    desk([("w03-visit-photos", "(a) Visit detail: live photo at the gate beside the profile photo", 200), ("w04-visit-timeline", "(b) Timeline of the same visit")], "Warden: one visit")
     desk([("w05-approvals", None)], "Warden: overnight approvals with host history and charge")
-    desk([("w06-rules", "(a) Rules editor (part)"), ("w07-gates", "(b) Gate with its location and paired screen")], "Warden: rules and gates")
+    desk([("w06-rules", "(a) Rules editor: times and limits"), ("w07-gates", "(b) Gate with its location and paired screen")], "Warden: rules and gates")
     desk([("o01-office-charges", None)], "Office: charges awaiting confirmation and payment")
 
     # ------------------------------------------------------------------ 9
     R.chapter_start(CHAPTERS[8])
     R.heading("Strategy")
     R.para(
-        "Testing follows the SDD's plan (§19). The rules engine and state machine are tested exhaustively "
-        "with plain objects; API tests use a real PostgreSQL database and an injected clock, so time rules "
+        "Testing follows the SDD's plan (§19). The rules engine and state machine are tested with plain "
+        "objects; API tests use a real PostgreSQL database and an injected clock, so time rules "
         "are tested at exact boundaries (19:59 allowed, 20:00 refused); pgTAP tests check constraints and "
-        "triggers; Playwright drives the real app with a fake camera that can show the gate QR. Table 9.1 "
-        "gives the counts from a fresh, uncached run on 20 October 2026; all passed.",
+        "triggers. Playwright drives the real app in Chromium with fake GPS and a fake camera: the camera "
+        "supplies the live photos, and one test project plays a video of the gate QR into it to test the "
+        "in-app scanner (FR-22). Table 9.1 gives the counts from a fresh, uncached run; all passed.",
         size=11.5,
     )
     R.table(
-        "Automated tests by level (fresh run, 20 October 2026)",
+        "Automated tests by level (fresh run, 21 October 2026)",
         ["Level", "Files", "Tests"],
         [
             ["API unit (incl. 270 state-machine cases)", "22", "409"],
-            ["API integration and contract (real PostgreSQL)", "30", "479"],
+            ["API integration and contract (real PostgreSQL)", "30", "480"],
             ["Shared package (rules engine, QR, copy)", "13", "158"],
             ["App unit (jest-expo) and UI package", "6", "22"],
             ["Database (pgTAP)", "4", "35"],
@@ -854,6 +890,19 @@ def build(index_pages):
         [260, 80, 111],
         size=10.5,
         align_center=False,
+    )
+    R.para(
+        "**Flows with end-to-end browser tests:** F1, F2 and F7 in full; F3, F5, F6, F8 (pairing), F9 and "
+        "F10 (overstay, escalation, forced check-out) in part, with the remaining steps tested at the API level; F4 (host-assisted entry) and F11 "
+        "(staff invite, which needs real Google sign-in) at the API level only.",
+        size=11.5,
+    )
+    R.para(
+        "**Continuous integration.** GitHub Actions ran on the pushed repository on 19 October 2026 "
+        "(commit 24aaa59) and passed every step: checks, all unit and integration tests, build, start check, "
+        "pgTAP via the Supabase CLI (35/35) and the audit. Playwright runs only on pull requests, so it was "
+        "skipped there; it passes locally.",
+        size=11.5,
     )
     R.heading("Requirement Coverage")
     R.para(
@@ -880,25 +929,63 @@ def build(index_pages):
         align_center=True,
     )
     R.para(
-        "Most NFRs need a deployed system or real devices: response time, load, the 5-second dashboard "
-        "update, push delivery, other browsers and accessibility are **not yet measured**, and no "
-        "performance figures are claimed in this report.",
+        "NFRs such as response time, load, the 5-second dashboard update, push delivery, other browsers "
+        "and accessibility need a deployed system or real devices and are **not yet measured**.",
         size=11.5,
     )
     R.heading("Notable Defects Found and Fixed")
-    R.bullets(
-        [
-            "Walk-ins skipped the entry cut-offs, so a day guest could enter at 20:30 (BR-02).",
-            "The production API build could not start; it now ships as one bundle that CI starts.",
-            "Guest consent was not recorded, and incomplete profiles were not refused.",
-            "Live updates used a pooled connection; photos would have gone to temporary disk.",
-            "pgTAP found a trigger with the wrong error code; the rehearsal found headers written twice.",
-        ],
+    R.para(
+        "Walk-ins skipped the entry cut-offs, so a day guest could enter at 20:30 (BR-02); the production "
+        "build could not start; consent was not recorded; live updates used a pooled connection and photos "
+        "would have gone to temporary disk; a trigger raised the wrong error code (found by pgTAP); the API "
+        "wrote response headers twice (found in the rehearsal); and the gate's check-in card did not name "
+        "the host (found in this report's screenshots). Each was fixed with a regression test.",
         size=11.5,
     )
 
     # ------------------------------------------------------------------ 10
     R.chapter_start(CHAPTERS[9])
+    R.heading("Progress Against the Previous Development Plan")
+    R.para(
+        "Table 10.1 checks the four phases planned in our previous report against what exists today. "
+        "\"Changed\" means the deliverable was replaced by a different design (Chapter 2); \"Dropped\" "
+        "means it was removed on purpose.",
+        size=11.5,
+    )
+    R.table(
+        "Previous development plan (Phases 1–4) and current status",
+        ["Phase", "Planned deliverable", "Status", "Note"],
+        [
+            ["1 Core and invites", "Database schema (users, hostels, rooms, visits, tokens)", "Changed", "25 tables; no token table, as tokens are no longer stored"],
+            ["", "OTP registration for visitors", "Done", "Test numbers only; real SMS planned"],
+            ["", "Walk-in request and resident approval", "Done", "Host decides within 10 minutes (F2)"],
+            ["", "Visit state management", "Done", "8 states, 19 transitions"],
+            ["", "Login and walk-in approval screens", "Done", "Residents use Google sign-in (dev sign-in in the demo)"],
+            ["", "Pre-invite with a shareable token", "Done", "Invite link (F1)"],
+            ["2 QR, GPS, check-out", "QR token, 15 s rotation, single use", "Changed", "10 s rotation, accepted up to 30 s, not single-use"],
+            ["", "Geofence with Turf.js", "Changed", "Haversine in the API"],
+            ["", "Check-in with QR scanning", "Done", "Phone camera or in-app scanner"],
+            ["", "Separate check-out QR and endpoint", "Changed", "One QR; the server offers check-out"],
+            ["", "Gate display page", "Done", "Paired by code; works offline"],
+            ["", "Location event collection", "Dropped", "Location is read only at a scan (privacy)"],
+            ["", "Automatic check-out engine", "Changed", "No automatic check-out: overstays flagged, night sweep, host or warden checks out (F10)"],
+            ["3 Dashboards, rules, alerts", "Security dashboard (Supabase Realtime)", "Changed", "No security role; warden dashboard over SSE"],
+            ["", "Warden dashboard, occupancy, history", "Done", "Inside now, search, roll call"],
+            ["", "Rules engine: visiting hours, limits", "Done", "Versioned rules, BR-01 to BR-20"],
+            ["", "Visitor alerts; Firebase messaging", "Partly", "Outbox and Expo push built; push on real phones planned"],
+            ["", "Deployable to a real hostel", "Planned", "Not yet deployed (Chapter 11)"],
+            ["4 Analytics, hardening, polish", "Rate limiting; complete audit log", "Done", "Plus audited reads and an independent audit"],
+            ["", "Analytics page (peak hours, return rates)", "Dropped", "DPDP purpose limitation; counts and CSV export only"],
+            ["", "Digital visitor pass (screen or PDF)", "Changed", "Invite link and My visits instead; no PDF"],
+            ["", "Unit tests for the token service", "Done", "Plus integration, database and end-to-end tests"],
+            ["", "Dark mode", "Planned", "Not built (light theme only)"],
+            ["", "Resident onboarding", "Done", "Warden verifies each resident (F7)"],
+            ["", "Deployed production", "Planned", "Render, Vercel, Supabase"],
+        ],
+        [80, 150, 52, 169],
+        size=9.5,
+        keep_together=False,
+    )
     R.heading("Methodology")
     R.para(
         "The team first studied how GH-8's visitor process works in practice and wrote the SDD v3, which "
@@ -958,6 +1045,7 @@ def build(index_pages):
             "DEC-013: a first-time walk-in guest scans the QR a second time; it may be revisited.",
             "An outsider who simply walks in without scanning is not stopped (threat T1); HAVEN detects and records, it does not lock the gate.",
             "Suggested in the rehearsal: pre-fill the invited guest's name and gender from the invite.",
+            "A photo refused as a duplicate (PHOTO_REUSED) shows the guest only \"Something went wrong\"; the SDD gives no wording for it.",
         ],
         size=11.5,
     )
@@ -1050,18 +1138,30 @@ def prepare():
     # "Published …" line and the timeline crop ends above the "Approved" row: both were written
     # by the database's own now(), which shows the real time, not the 13:00 demo clock.
     crops = {
-        "d01-gate-display": (740, 40, 1820, 800),
+        "d01-gate-display": (820, 100, 1740, 1500),  # QR, countdown bar and instruction
         "w02-inside-now": (450, 80, 2560, 1270),
         "w03-visit-photos": (450, 190, 2560, 1600),
         "w04-visit-timeline": (450, 800, 2560, 1310),
         "w05-approvals": (450, 80, 2560, 900),
-        "w06-rules": (450, 300, 2560, 1100),
-        "w07-gates": (450, 80, 2560, 560),
+        "w06-rules": (450, 300, 2560, 1215),
+        "w07-gates": (450, 80, 2560, 690),
         "o01-office-charges": (160, 100, 2400, 960),
     }
-    for name, box in crops.items():
+    # Two resident screens scroll inside the app, so a heading sits half-hidden under the top
+    # bar; drop those few pixel rows (between the bar and the first whole element).
+    for name, cut in (("r04-arrival-confirm", (97, 145)), ("r05-overnight-request", (97, 128))):
         with Image.open(SHOTS / f"{name}.png") as im:
-            im.crop(box).save(BUILD / f"{name}.png")
+            out = Image.new(im.mode, (im.width, im.height - (cut[1] - cut[0])))
+            out.paste(im.crop((0, 0, im.width, cut[0])), (0, 0))
+            out.paste(im.crop((0, cut[1], im.width, im.height)), (0, cut[0]))
+            out.save(BUILD / f"{name}.png")
+    # Refusal screens: only the top of the phone has content.
+    for name in ("s01-entry-closed", "s02-code-changed", "s03-ask-host", "s04-banned"):
+        crops[name] = (0, 0, 720, 800)
+    for name, box in crops.items():
+        if (SHOTS / f"{name}.png").exists():
+            with Image.open(SHOTS / f"{name}.png") as im:
+                im.crop(box).save(BUILD / f"{name}.png")
 
 
 def main():

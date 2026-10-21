@@ -1,7 +1,8 @@
 # Facts behind the progress report
 
-Every number in `HAVEN-Progress-Report.pdf` and where it comes from. Repository state:
-`main` at `24aaa59` (19 October 2026), before the report's own commit. Commands are run
+Every number in `HAVEN-Progress-Report.pdf` and where it comes from. Repository counts
+(section A) are taken at `24aaa59` (19 October 2026), the last commit before work on the
+report began; later commits only add the report and the FR-23 fix (`caa7d50`). Commands are run
 from the repository root.
 
 ## A. Counted from the repository
@@ -35,18 +36,18 @@ from the repository root.
 | SDD length | 123 pages | `docs/HAVEN — Software Design Document v3.pdf` (page count) |
 | Requirement totals 50 FR, 14 NFR, 20 BR, 24 E, 51 TC | item counts used by the QA review | `docs/FINAL-QA-REPORT.md`, Summary (TC-RULE-01..11 counted as 11) |
 
-## B. From test runs (20 October 2026, Windows, local)
+## B. From test runs (21 October 2026, Windows, local, after the FR-23 fix)
 
 | Number | Value | Command |
 |---|---|---|
-| API tests | 52 files, 888 tests, all passed | `pnpm test -- --force` (no Turbo cache) |
+| API tests | 52 files, 889 tests, all passed | `pnpm test -- --force` (no Turbo cache) |
 | — of which unit | 22 files, 409 tests (incl. 270 state-machine cases) | files under `apps/api/src` (`*.test.ts`) in the same run |
-| — of which integration/contract | 30 files, 479 tests | files under `apps/api/test` in the same run |
+| — of which integration/contract | 30 files, 480 tests (479 on 20 Oct + the FR-23 regression test) | files under `apps/api/test` in the same run |
 | Shared package | 13 files, 158 tests | same run |
 | App (jest-expo) / UI package | 5 suites, 21 tests / 1 file, 1 test | same run |
 | End-to-end | 31 passed (Chromium, incl. `qr-camera` and `late` projects) | `pnpm e2e` |
 | Database (pgTAP) | 4 files, 35/35 (001: 15, 002: 8, 003: 5, 004: 7) | local pgTAP harness on embedded PostgreSQL with every migration (as in FINAL-QA-REPORT); CI uses `supabase test db` |
-| Total "1,068 unit and integration" | 888 + 158 + 21 + 1 | sum of the rows above |
+| Total "1,069 unit and integration" | 889 + 158 + 21 + 1 | sum of the rows above |
 
 ## C. From the audit reports
 
@@ -71,7 +72,12 @@ own Summary rows mark nine LOW findings fixed. The report uses the per-finding r
 | DEC-013 accepted deviation (second scan) | `docs/DECISIONS.md` DEC-013 |
 | Map preview (FR-56) and G-16 screenshots not built; F4 has no browser-level test | NEXT-PHASE.md "Also known"; FINAL-QA-REPORT |
 | TanStack Query, React Hook Form, native Google sign-in library not used | no dependency in `apps/*/package.json`, `packages/*/package.json` |
-| CI steps (lint, types, tests, build, prod start, pgTAP, Playwright, audit) | `.github/workflows/ci.yml` (not yet run on GitHub: the repository has not been pushed) |
+| CI passed on GitHub, 19 Oct 2026, commit `24aaa59` (run 39300456508): every step succeeded; pgTAP `Files=4, Tests=35, Result: PASS`; Playwright steps skipped (they run only on pull requests) | `gh run list`, `gh run view 39300456508 --json jobs`, job log |
+| Table 3.1 permissions | SDD §3.3 matrix, narrowed by DEC-014; checked against `apps/api/src/admin/policy.ts` (e.g. `admin.charges.waive: warden` only; super admin: visits read, residents verify/suspend, bans, rules, gates, audit, hostels, warden invites; no dashboard, emergency, approvals, reports, force check-out) |
+| Table 10.1 (old Phases 1–4) | the old plan: `docs/report/previous-report.pdf` §8.2–8.5; status from Chapter 2's sources, `docs/NEXT-PHASE.md`; "Dark mode: not built" from `packages/ui/src/tokens.ts` (light theme only) |
+| Table 7.3 hardware | SDD §2.5–2.6, §20 (hosting), NEXT-PHASE.md; the demo setup (`pnpm demo`) |
+| End-to-end flow coverage (Chapter 9) | FINAL-QA-REPORT "Flow coverage", updated by its Remediation (F8 `gate-pairing.spec.ts`, F10 `late-flows.spec.ts`, F3 `gate-retry-and-walkin.spec.ts` FR-27 test) |
+| PHOTO_REUSED shows "Something went wrong" | no `PHOTO_REUSED` key in `packages/shared/src/copy/en.ts`, so `copyFor` falls back to the generic text; seen during the screenshot capture |
 
 ## E. Screenshots and diagrams
 
@@ -79,7 +85,16 @@ own Summary rows mark nine LOW findings fixed. The report uses the per-finding r
   resets and starts `pnpm demo` with the gate forced to the placeholder location
   12.9716, 77.5946 (radius 150 m), sets the demo clock to 13:00 IST and seeds the demo
   visits around that time (`DEMO_SEED_AT`). Seeded, fictitious people only; SDD test
-  phone numbers; Chromium's fake camera and fake GPS.
+  phone numbers; fake GPS. Chromium's fake camera plays a synthetic illustrated face per
+  guest (`scripts/fake_faces.py`, flat shapes, not a photo of anyone) through
+  `--use-file-for-fake-video-capture`; every frame differs slightly so the API's duplicate-photo
+  check (PHOTO_REUSED) does not refuse it. Captured 21 October 2026.
+- Figure 17: (a) the demo clock moved to 20:05 for a walk-in (BR-02); (b) a gate token 12
+  steps (2 minutes) old; (c) GPS placed about 1 km from the gate, three attempts; (d) a guest
+  banned by the warden in the same run, then refused at the gate.
+- Figure 18 (gate display) is cropped to the QR, countdown bar and instruction; they are in
+  `apps/mobile/app/gate/index.tsx`, covered by `test/gate-logic.test.ts` (countdown) and
+  `e2e/tests/gate-pairing.spec.ts` (instruction text).
 - Two desktop screenshots are cropped (`scripts/build_report.py`, `prepare()`) above
   timestamps written by the database's own `now()` — the visit's "Approved" row and the
   rules' "Published" line — because they show the real time of the run, not the 13:00
