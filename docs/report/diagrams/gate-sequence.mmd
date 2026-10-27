@@ -5,17 +5,17 @@ sequenceDiagram
   participant P as Guest phone
   participant A as API
   participant DB as Database
-  Note over D: token = code.step.MAC (HMAC-SHA256, 80 bits)
+  Note over D: code = gate + time step + 80-bit signature
   Note over D: 1. new QR every 10 s (works offline)
   Note over P: 2. scan QR, GPS fix
-  P->>A: 3. POST /scan-sessions (token, nonce, GPS)
-  Note over A: 4. token ≤ 30 s old, MAC valid
-  Note over A: 5. geofence (haversine), fix ≤ 60 s old
-  A->>DB: 6. scan_session (10 min)
+  P->>A: 3. send code, one-time number, GPS
+  Note over A: 4. code ≤ 30 s old, signature valid
+  Note over A: 5. within the gate circle? GPS ≤ 60 s old?
+  A->>DB: 6. save scan session (10 min)
   A-->>P: 7. session id, GPS ok?
-  P->>A: 8. GET session (X-Scan-Nonce)
+  P->>A: 8. ask what is allowed (one-time number)
   A-->>P: 9. allowed actions + host's name
-  P->>A: 10. live photo (≤ 3 MB, EXIF removed)
-  P->>A: 11. check-in (Idempotency-Key)
-  A->>DB: 12. one transaction: rules, visit → inside,<br/>gate event, audit, notification
+  P->>A: 10. live photo (≤ 3 MB, details removed)
+  P->>A: 11. check in (safe to resend)
+  A->>DB: 12. one transaction: rules, visit → inside,<br/>gate event, audit record, notification
   A-->>P: 13. "You're checked in"

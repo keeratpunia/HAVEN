@@ -6,39 +6,39 @@ digraph haven {
   edge  [color="#555555", fontname="Times New Roman", fontsize=11, arrowsize=0.8];
 
   subgraph cluster_clients {
-    label="Clients — one Expo codebase (web today; Android build planned)"; style=filled; fillcolor="#fafafa"; color="#999999";
+    label="Apps — one Expo code base (web today; Android app planned)"; style=filled; fillcolor="#fafafa"; color="#999999";
     guest [label="Guest pages\n(phone browser)"];
     res   [label="Resident\napp"];
     staff [label="Warden / office\ndashboards"];
     gated [label="Gate display\n(rotating QR)"];
   }
   subgraph cluster_api {
-    label="Fastify API — one Node.js service"; style=filled; fillcolor="#fafafa"; color="#999999";
-    pipe   [label="Request pipeline\n(auth, Zod, authorize)"];
-    sse    [label="SSE hub\n(LISTEN)"];
-    mods   [label="Modules: auth, gate, visits,\nrules, residents, admin, media"];
+    label="Server: Fastify API — one Node.js program"; style=filled; fillcolor="#fafafa"; color="#999999";
+    pipe   [label="Request checks\n(sign-in, input, permission)"];
+    sse    [label="Live-update\nhub"];
+    mods   [label="Modules: sign-in, gate, visits,\nrules, residents, admin, media"];
     jobs   [label="Job runner\n(11 jobs)"];
-    outbox [label="Outbox worker\n(every 2 s)"];
+    outbox [label="Message sender\n(every 2 s)"];
   }
   subgraph cluster_sb {
     label="Supabase"; style=filled; fillcolor="#fafafa"; color="#999999";
-    db [shape=cylinder, label="PostgreSQL\nschema haven,\n25 tables"];
-    st [shape=cylinder, label="Storage:\n3 private\nbuckets"];
+    db [shape=cylinder, label="PostgreSQL\ndatabase,\n25 tables"];
+    st [shape=cylinder, label="Photo storage:\n3 private\nbuckets"];
   }
   subgraph cluster_ext {
     label="Delivery"; style=filled; fillcolor="#fafafa"; color="#999999";
     push [label="Expo push"];
-    sms  [label="SMS (console in demo;\nMSG91 planned)"];
+    sms  [label="SMS (shown on laptop in demo;\nMSG91 planned)"];
   }
 
   {guest res staff gated} -> pipe;
   pipe -> mods;
-  mods -> db [label=" Kysely,\n one transaction"];
+  mods -> db [label=" saved in one\n transaction"];
   mods -> st [label=" photos"];
   jobs -> db;
-  outbox -> db [dir=both, label=" claim\n rows"];
-  db -> sse [style=dashed, label="NOTIFY"];
-  sse -> staff [style=dashed, label=" SSE"];
+  outbox -> db [dir=both, label=" picks up\n messages"];
+  db -> sse [style=dashed, label="change\nsignal"];
+  sse -> staff [style=dashed, label=" live\n updates"];
   outbox -> push;
   outbox -> sms;
 

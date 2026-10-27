@@ -1,5 +1,7 @@
 %% Visit state machine — exactly VISIT_TRANSITIONS in apps/api/src/visits/stateMachine.ts (19 transitions)
 stateDiagram-v2
+  state "waiting for host" as pending_host
+  state "waiting for warden" as pending_warden
   [*] --> pending_host: walk-in
   [*] --> pending_warden: overnight request
   [*] --> approved: pre-invite

@@ -101,3 +101,33 @@ own Summary rows mark nine LOW findings fixed. The report uses the per-finding r
   demo clock. In a real deployment both clocks agree (DEC-025).
 - Diagrams: sources in `docs/report/diagrams/*.mmd` (Mermaid 11.4.1) and `*.dot`
   (Graphviz via `@viz-js/viz`), drawn from the code paths named in each file's header.
+
+## F. Plain-language version (27 October 2026)
+
+The report is now written to be read on its own, without the design document or the
+repository. Internal codes were replaced by plain words; the facts behind them are
+unchanged. This table maps the report's wording back to the records above.
+
+| Report wording | Source / code it replaces |
+|---|---|
+| "159 items: 50 features, 14 quality targets, 20 hostel rules, 24 unusual situations, 51 test scenarios" (Table 1.1, 9.2) | 50 FR, 14 NFR, 20 BR, 24 E, 51 TC (FINAL-QA-REPORT Summary) |
+| "a detailed design document" (1.1, the only mention) and "Design document authoring" (Table 10.2, wording set by the team) | SDD v3 |
+| Key decisions, 2.2: arriving early; demo sign-in; second scan for new walk-ins; office staff; background work; security review; deployment; privacy; small cases | DEC-006; DEC-011; DEC-013; DEC-014; DEC-015/016; DEC-018; DEC-019/021; DEC-020; DEC-022/023/025 |
+| Table 2.1 reasons | SDD §2.3, §2.5, §2.7 (D2, D4–D8, D10, D11), §4, §16.3 |
+| Table 3.1 super admin row ("the team kept … with the warden only") | DEC-014 items 3–5; `apps/api/src/admin/policy.ts` |
+| Table 6.1 threats (in order) | T2, T3/T4, T5, T7, T10, T11, T13, T15, T1 (SDD §16.1) |
+| Table 6.2 "Not fixed": web security settings; notification sign-up case; developer-only tools; false alarm | SA-12; SA-18; SA-23; SA-22 |
+| "Photo handling" row in Table 6.2 | SA-M1..M4 |
+| Table 6.3 "deleted automatically every night" | `job_retention()` at 03:00 |
+| 5.4 "any other move is refused" | 409 `INVALID_TRANSITION`, `apps/api/src/visits/stateMachine.ts` |
+| 5.5 "one-time random number", "safe to resend" | scan nonce (`X-Scan-Nonce`); `Idempotency-Key` |
+| 5.7 "eight run inside the database and three in the server" | 8 SQL jobs (pg_cron on Supabase, otherwise the API's job runner) + `media_purge`, `push_receipts`, `account_deletion` |
+| 9.1 "Journeys with end-to-end tests" | flows F1–F11, named in words with their Chapter 4 codes |
+| 9.1 CI run on 19 October 2026 | run 39300456508, commit `24aaa59` (section D) |
+| 11 "a photo refused as a duplicate … 'Something went wrong'" | `PHOTO_REUSED` has no guest wording (section D) |
+| Diagram labels in plain words (Figures 5, 7, 8, 9, 10, 12) | same steps as before; e.g. "check sign-in pass" = JWT check, "permission check" = `authorize()`, "waiting for host" = `pending_host` |
+
+Figure 11 (database tables) still shows the real table and column names, because it is a
+picture of the database itself; the text around it explains what it shows.
+
+Table 2.2 (Key Terms) is new; its values (10 s / 30 s code, 10-minute scan session, 50 m circle, 6-digit OTP) are from section A.

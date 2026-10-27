@@ -3,8 +3,8 @@ digraph pipeline {
   graph [rankdir=TB, newrank=true, nodesep=0.3, ranksep=0.3, pad=0.1];
   node  [shape=box, style="filled,rounded", fillcolor="#eeeeee", color="#777777", fontname="Times New Roman", fontsize=13, margin="0.1,0.05", width=1.25];
   edge  [color="#555555", arrowsize=0.7];
-  a [label="1 Request ID,\nserver time"]; b [label="2 Rate limit"]; c [label="3 Authenticate\n(JWT)"]; d [label="4 Zod\nvalidation"]; e [label="5 Handler"];
-  f [label="6 authorize()"]; g [label="7 Service +\nrules engine"]; h [label="8 Repository\n(Kysely, 1 tx)"]; i [label="9 Role-based\nserializer"];
+  a [label="1 Request ID,\nserver time"]; b [label="2 Rate limit"]; c [label="3 Check sign-in\npass"]; d [label="4 Validate\ninput"]; e [label="5 Route to the\nright function"];
+  f [label="6 Permission\ncheck"]; g [label="7 Apply hostel\nrules"]; h [label="8 Save in one\ntransaction"]; i [label="9 Reply with\nallowed data only"];
   {rank=same; a; b; c; d; e}
   {rank=same; f; g; h; i}
   a -> b -> c -> d -> e;

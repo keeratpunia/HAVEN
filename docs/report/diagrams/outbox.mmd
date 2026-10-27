@@ -1,11 +1,11 @@
 %% Notification outbox and scheduled jobs (notify/worker.ts, jobs/runner.ts)
 flowchart LR
   subgraph TX["Same database transaction"]
-    S["State change<br/>(visit, charge…)"] --> N["INSERT notifications"]
-    S --> AU["audit_log row<br/>(trigger)"]
+    S["State change<br/>(visit, charge…)"] --> N["Add message<br/>to outbox"]
+    S --> AU["Audit record<br/>(automatic)"]
   end
   JOBS["Job runner — 11 jobs<br/>walk-in expiry 1 min · approved expiry,<br/>overstay, gate offline 5 min · sessions 60 min<br/>· night sweep 22:00 · retention 03:00 · digest 08:00<br/>· media purge · push receipts · account deletion"] --> N
   N --> W["Outbox worker<br/>(every 2 s, 50 at a time)"]
   W --> PU["Expo push"]
   W --> SM["SMS (fallback 60 s<br/>if push not opened)"]
-  N --> IA["In-app list<br/>(GET /me/notifications)"]
+  N --> IA["In-app list"]
