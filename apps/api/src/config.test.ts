@@ -43,27 +43,30 @@ describe('loadEnv', () => {
     );
   });
 
-  // FINAL-QA-REPORT D-04, SDD §9.9/§11.7: LISTEN needs the direct connection.
-  it('refuses a pooler DATABASE_DIRECT_URL outside local', () => {
+  // FINAL-QA-REPORT D-04, SDD §9.9/§11.7: LISTEN needs a session connection, never the
+  // transaction pooler. The session pooler (5432) is allowed since DEC-028.
+  it('refuses a transaction-pooler DATABASE_DIRECT_URL outside local', () => {
     for (const bad of [
       'postgres://u:p@db.abc.supabase.co:6543/postgres',
-      'postgres://u:p@aws-0-ap-south-1.pooler.supabase.com:5432/postgres',
+      'postgres://u:p@aws-0-ap-south-1.pooler.supabase.com:6543/postgres',
+      'postgres://u:p@pooler.example.com:5432/postgres?pgbouncer=true',
       'not a url',
     ]) {
       __resetEnvCacheForTests();
       expect(() =>
         loadEnv({ ...REQUIRED, APP_ENV: 'staging', ...SUPABASE, DATABASE_DIRECT_URL: bad }),
-      ).toThrow(/DATABASE_DIRECT_URL must be the direct connection/);
+      ).toThrow(/DATABASE_DIRECT_URL must be a session connection/);
     }
-    __resetEnvCacheForTests();
-    expect(
-      loadEnv({
-        ...REQUIRED,
-        APP_ENV: 'staging',
-        ...SUPABASE,
-        DATABASE_DIRECT_URL: 'postgres://u:p@db.abc.supabase.co:5432/postgres',
-      }).DATABASE_DIRECT_URL,
-    ).toBe('postgres://u:p@db.abc.supabase.co:5432/postgres');
+    for (const good of [
+      'postgres://u:p@db.abc.supabase.co:5432/postgres',
+      'postgres://u.abc:p@aws-0-ap-south-1.pooler.supabase.com:5432/postgres',
+    ]) {
+      __resetEnvCacheForTests();
+      expect(
+        loadEnv({ ...REQUIRED, APP_ENV: 'staging', ...SUPABASE, DATABASE_DIRECT_URL: good })
+          .DATABASE_DIRECT_URL,
+      ).toBe(good);
+    }
     // Local stacks may point both at one database.
     __resetEnvCacheForTests();
     expect(() =>

@@ -54,6 +54,8 @@ import { findVisitById, type VisitRow } from './repository.js';
 import { visitDto } from './routes.js';
 import type { RulesProvider } from '../rules/provider.js';
 import { findWalkInSessionForVisit } from '../gate/scanSessions.js';
+import type { Env } from '../config.js';
+import { assertPhoneAllowedHere } from '../auth/test-phones.js';
 
 /**
  * Host-facing visits routes (SDD §12.6) plus the resident's quota and charges
@@ -70,6 +72,8 @@ export interface HostVisitRoutesOptions {
   signer: MediaUrlSigner;
   webBaseUrl: string;
   rules: RulesProvider;
+  /** Staging takes invites to the SDD §9.5 test numbers only (DEC-028). */
+  appEnv?: Env['APP_ENV'];
 }
 
 function requireUser(principal: Principal | null | undefined): UserPrincipal {
@@ -174,6 +178,7 @@ export async function registerHostVisitRoutes(
         .executeTakeFirstOrThrow();
       const hostelGender = hostel.gender_served as 'male' | 'female';
       const body = request.body;
+      if (opts.appEnv) assertPhoneAllowedHere({ APP_ENV: opts.appEnv }, body.guest.phone);
 
       if (body.kind === 'invite') {
         const { visit, inviteToken } = await createPreInvite(deps, {

@@ -20,7 +20,9 @@ export function refreshCookieOptions(
     secure: env.APP_ENV !== 'local',
     sameSite: 'lax',
     path: '/v1/auth',
-    domain: env.APP_ENV === 'local' ? undefined : `.${env.COOKIE_DOMAIN}`,
+    // Host-only when COOKIE_DOMAIN is unset (Phase 1: API behind the web app's own
+    // origin, DEC-028); `.<domain>` otherwise, as SDD §9.5 specifies.
+    domain: env.APP_ENV === 'local' || !env.COOKIE_DOMAIN ? undefined : `.${env.COOKIE_DOMAIN}`,
   };
 }
 

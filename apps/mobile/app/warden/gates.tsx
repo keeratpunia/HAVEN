@@ -11,6 +11,7 @@ import { captureScanLocation } from '../../lib/useScanLocation.js';
 import { Button } from '../../components/Button.js';
 import { ConfirmSheet } from '../../components/ConfirmSheet.js';
 import { averageGateFixes } from '../../lib/gate-location.js';
+import { IS_TEST_VERSION } from '../../lib/app-env.js';
 import {
   Card,
   ErrorText,
@@ -38,7 +39,10 @@ interface Capture {
 }
 
 export default function Gates() {
-  const { hostel } = useStaff();
+  const { hostel, can } = useStaff();
+  // DEC-028: the test version lets the admin move the gate to wherever the demo is.
+  const canMoveForTest = IS_TEST_VERSION && can('super_admin');
+  const [moving, setMoving] = useState<string | null>(null);
   const [gates, setGates] = useState<GateDTO[] | null>(null);
   const [pairing, setPairing] = useState<{
     gateId: string;
@@ -102,6 +106,34 @@ export default function Gates() {
     setCapture({ gateId, ...avg });
   }
 
+  async function moveGateHere(gateId: string) {
+    if (!hostelId) return;
+    setMoving(gateId);
+    setMessage(null);
+    try {
+      const { location, locationError } = await captureScanLocation();
+      if (locationError === 'mocked') {
+        setMessage('Turn off fake location apps.');
+        return;
+      }
+      if (!location) {
+        setMessage("Couldn't get your location. Allow location for this site and try again.");
+        return;
+      }
+      await staffApi.setGateTestLocation(hostelId, gateId, {
+        lat: location.lat,
+        lng: location.lng,
+        accuracyM: location.accuracy,
+      });
+      setMessage(`Gate moved to your position (about ±${Math.round(location.accuracy)} m).`);
+      await load();
+    } catch (err) {
+      setMessage(err instanceof api.ApiError ? err.message : "Couldn't move the gate.");
+    } finally {
+      setMoving(null);
+    }
+  }
+
   const radiusOk = /^\d+$/.test(radius) && Number(radius) >= 10 && Number(radius) <= 300;
 
   return (
@@ -153,6 +185,16 @@ export default function Gates() {
               onPress={() => void captureLocation(g.id)}
             />
           </View>
+
+          {canMoveForTest ? (
+            <Button
+              label="Set gate location to my current position"
+              variant="secondary"
+              loading={moving === g.id}
+              accessibilityLabel="Test version: set gate location to my current position"
+              onPress={() => void moveGateHere(g.id)}
+            />
+          ) : null}
 
           {pairing?.gateId === g.id ? (
             <View style={styles.pairing} accessibilityLabel={`Pairing code ${pairing.code}`}>

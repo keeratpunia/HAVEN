@@ -39,11 +39,16 @@ const EnvSchema = z
 
     // Pooler connection (port 6543) — used for normal queries (SDD §11.7).
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
-    // Direct connection (port 5432) — the SSE hub's LISTEN connection (SDD §9.9, §11.7:
-    // "use the direct connection for LISTEN"). A transaction pooler hands each statement
-    // to whichever server connection is free, so LISTEN there silently receives nothing.
-    // Outside local it must not be a pooler URL (checked below).
+    // A session connection (port 5432) — the SSE hub's LISTEN connection (SDD §9.9,
+    // §11.7). A transaction pooler hands each statement to whichever server connection is
+    // free, so LISTEN there silently receives nothing; outside local a transaction-pooler
+    // URL is refused (checked below). Supabase's direct host or the Supavisor pooler in
+    // session mode (port 5432) both work; the free plan's direct host may be IPv6-only,
+    // which Render can't reach, so the session pooler is the Phase 1 choice (DEC-028).
     DATABASE_DIRECT_URL: z.string().min(1, 'DATABASE_DIRECT_URL is required'),
+    // PEM of the CA that signs the database's certificate. Unset = the pinned Supabase
+    // root (`db/ssl.ts`) for Supabase hosts, Node's trust store for anything else.
+    DATABASE_CA_CERT: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
     DB_POOL_MAX: z.coerce.number().int().positive().default(10),
 
     API_BASE_URL: z.string().url().default('http://localhost:8080'),
@@ -64,7 +69,10 @@ const EnvSchema = z
     TURNSTILE_SECRET: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
     // Error reporting (SDD §8.4, NFR-13). Unset = Sentry is a no-op.
     SENTRY_DSN: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
-    COOKIE_DOMAIN: z.string().default('localhost'),
+    // Refresh-cookie `Domain` (SDD §9.5: `.<domain>`). Unset = a host-only cookie: Phase 1
+    // serves the API under the web app's own origin through a Vercel rewrite, and a
+    // shared host like *.vercel.app can't be a cookie domain anyway (DEC-028).
+    COOKIE_DOMAIN: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
 
     // HS256 access/refresh JWT signing key (SDD §9.5). 32+ random bytes, base64 — same
     // format convention as DATA_ENCRYPTION_KEY, validated the same way.
@@ -153,29 +161,30 @@ const EnvSchema = z
         }
       }
     }
-    if (env.APP_ENV !== 'local' && isPoolerUrl(env.DATABASE_DIRECT_URL)) {
+    if (env.APP_ENV !== 'local' && isTransactionPoolerUrl(env.DATABASE_DIRECT_URL)) {
       ctx.addIssue({
         code: 'custom',
         path: ['DATABASE_DIRECT_URL'],
         message:
-          'DATABASE_DIRECT_URL must be the direct connection (port 5432), not the pooler — LISTEN does not work through a transaction pooler (SDD §9.9, §11.7)',
+          'DATABASE_DIRECT_URL must be a session connection (port 5432: the direct host or the session pooler), not the transaction pooler — LISTEN does not work through a transaction pooler (SDD §9.9, §11.7)',
       });
     }
   });
 
 /**
- * True for a Supabase pooler URL: the transaction-pooler port 6543 or a
- * `*.pooler.supabase.com` host (Supavisor). Unparseable URLs count as poolers so a
- * typo fails closed.
+ * True for a transaction-pooler URL, where LISTEN can't work: Supavisor's (and
+ * PgBouncer's usual) transaction port 6543, or `pgbouncer=true`. The session pooler on
+ * port 5432 keeps one server connection per client, so it is allowed (DEC-028).
+ * Unparseable URLs count as transaction poolers so a typo fails closed.
  */
-export function isPoolerUrl(connectionString: string): boolean {
+export function isTransactionPoolerUrl(connectionString: string): boolean {
   let url: URL;
   try {
     url = new URL(connectionString);
   } catch {
     return true;
   }
-  return url.port === '6543' || /(^|\.)pooler\.supabase\.com$/i.test(url.hostname);
+  return url.port === '6543' || url.searchParams.get('pgbouncer') === 'true';
 }
 
 export type Env = z.infer<typeof EnvSchema>;

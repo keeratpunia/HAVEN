@@ -1,0 +1,68 @@
+# Render Blueprint — Phase 1 test version API (DEC-026, DEC-028; docs/DEPLOY-TEST.md).
+# Free plan, Singapore (SDD §8.3). It sleeps after 15 minutes without requests; the first
+# request after that takes about a minute (accepted for Phase 1). An open gate screen
+# sends a heartbeat every minute, which keeps it awake.
+#
+# Only variable NAMES live here. Every value marked `sync: false` is typed into the
+# Render dashboard by an owner, never committed (CLAUDE.md §4, §6).
+services:
+  - type: web
+    name: haven-test-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    autoDeploy: true
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @haven/api run build
+    startCommand: node apps/api/dist/server.js
+    # Liveness only: /ready also checks the database and would restart the API on a
+    # database blip.
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.4.1
+      - key: NODE_ENV
+        value: production
+      # The test version: test phones and code 123456 work; real numbers are refused.
+      - key: APP_ENV
+        value: staging
+      # Exactly one instance runs the notification worker and API-side jobs (SDD §9.7).
+      - key: WORKER_ENABLED
+        value: 'true'
+      # Phase 1 sends no SMS (DEC-026 D-01); codes are never needed for test numbers.
+      - key: SMS_PROVIDER
+        value: console
+      # Phone → Vercel edge → Render's proxy → API: two proxies (SECURITY-AUDIT SA-10).
+      - key: TRUST_PROXY_HOPS
+        value: '2'
+      - key: LOG_LEVEL
+        value: info
+      # No Google sign-in in Phase 1 (residents and staff use test numbers); the API
+      # still requires a value.
+      - key: GOOGLE_CLIENT_IDS
+        value: unused-in-phase-1
+      - key: DB_POOL_MAX
+        value: '5'
+      # --- Typed into the dashboard (see docs/DEPLOY-TEST.md, step 4) ---
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_DIRECT_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: OTP_PEPPER
+        sync: false
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+      - key: TURNSTILE_SECRET
+        sync: false
+      - key: API_BASE_URL
+        sync: false
+      - key: WEB_BASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false

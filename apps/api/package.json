@@ -21,7 +21,9 @@
     "test": "vitest run",
     "clean": "node ../../scripts/clean.mjs dist .turbo",
     "demo:clock": "tsx scripts/demo-clock.ts",
-    "demo:smoke": "tsx scripts/demo-smoke.ts"
+    "demo:smoke": "tsx scripts/demo-smoke.ts",
+    "staging": "tsx scripts/staging.ts",
+    "staging:smoke": "tsx scripts/staging-smoke.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",

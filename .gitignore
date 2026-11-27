@@ -77,3 +77,5 @@ docs/screenshots-mobile/**/*.png
 !docs/screenshots-mobile/resident/account.android-360.png
 !docs/screenshots-mobile/guest/profile-new.android-360.png
 !docs/screenshots-mobile/office/charges.iphone-390.png
+!docs/screenshots-mobile/test-version/sign-in.iphone-390.png
+!docs/screenshots-mobile/test-version/gate-landscape.android-360.png

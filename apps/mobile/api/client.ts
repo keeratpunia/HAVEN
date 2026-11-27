@@ -227,6 +227,16 @@ export function verifyResidentPhone(phone: string, code: string) {
 
 /** Dev-only resident/staff sign-in bypass (docs/DECISIONS.md DEC-011) — only reachable
  * when the API registered the route (DEV_LOGIN_ENABLED=true, NODE_ENV=development). */
+/** Phase 1 test version: residents and staff sign in by test number (DEC-028). */
+export function testSignIn(phone: string, code: string) {
+  return request<{
+    accessToken: string;
+    expiresAt: string;
+    refreshToken?: string;
+    principal: { type: 'user'; id: string; roles: { h: string; r: string }[] };
+  }>('/v1/auth/test-sign-in', { method: 'POST', auth: false, body: { phone, code } });
+}
+
 export function devLogin(email: string) {
   return request<{
     accessToken: string;
@@ -758,6 +768,12 @@ export const staffApi = {
     id: string,
     body: { lat: number; lng: number; radiusM: number; maxAccuracyM: number },
   ) => admin<GateDTO>(h, `/gates/${id}/location`, { method: 'PUT', body }),
+  /** Staging only, super admin (DEC-028): the gate moves to this phone's position. */
+  setGateTestLocation: (
+    h: string,
+    id: string,
+    body: { lat: number; lng: number; accuracyM: number },
+  ) => admin<GateDTO>(h, `/gates/${id}/test-location`, { method: 'POST', body }),
   pairingCode: (h: string, gateId: string) =>
     admin<{ code: string; expiresAt: string }>(h, `/gates/${gateId}/pairing-codes`, {
       method: 'POST',

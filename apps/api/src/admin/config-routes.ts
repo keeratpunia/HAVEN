@@ -5,6 +5,7 @@ import {
   AuditQuerySchema,
   CreateHostelBodySchema,
   GateLocationBodySchema,
+  GateTestLocationBodySchema,
   GH8_RULES_CONFIG_V1,
   localDateTimeToUtc,
   PublishRulesBodySchema,
@@ -44,6 +45,8 @@ export interface ConfigRoutesOptions {
   dataEncryptionKey: Buffer;
   webBaseUrl: string;
   cache: RevocationCache | null;
+  /** The staging-only test location action is refused in production (DEC-028). */
+  appEnv?: 'local' | 'staging' | 'production';
 }
 
 export async function registerAdminConfigRoutes(
@@ -232,6 +235,40 @@ export async function registerAdminConfigRoutes(
           .execute();
         await audit(trx, request, 'admin.gates.set_location', 'gates', gate.id, {
           radiusM: request.body.radiusM,
+        });
+      });
+      const dto = (await gateDtos(request.hostelId)).find((g) => g.id === gate.id);
+      reply.send(dto);
+    },
+  );
+
+  // POST /v1/admin/gates/:id/test-location — DEC-028, the Phase 1 test version only: the
+  // admin's phone position becomes the gate's, so the demo works wherever the warden is.
+  // Refused in production; the warden's averaged F8 capture (PUT .../location) is the
+  // real way to set a gate.
+  api.post(
+    '/admin/gates/:id/test-location',
+    { schema: { params: ID, body: GateTestLocationBodySchema }, preHandler: staffScope },
+    async (request, reply) => {
+      authorize(request.principal, 'admin.gates.test_location', { hostelId: request.hostelId });
+      if (opts.appEnv !== 'staging' && opts.appEnv !== 'local') {
+        throw new AppError('TEST_ONLY', 403, 'This is only available in the test version.');
+      }
+      const gate = await scopedGate(request, request.params.id);
+      const user = staffUser(request);
+      await withTx(db, { principal: request.principal, requestId: request.id }, async (trx) => {
+        await trx
+          .updateTable('haven.gates')
+          .set({
+            lat: request.body.lat,
+            lng: request.body.lng,
+            location_set_by: user.userId,
+            location_set_at: clock.now().toISOString(),
+          })
+          .where('id', '=', gate.id)
+          .execute();
+        await audit(trx, request, 'admin.gates.set_test_location', 'gates', gate.id, {
+          accuracyM: Math.round(request.body.accuracyM),
         });
       });
       const dto = (await gateDtos(request.hostelId)).find((g) => g.id === gate.id);

@@ -18,6 +18,9 @@ import {
 import { CONSENT_VERSION } from '@haven/shared';
 import { signInWithGoogle, getResidentStatus } from './google-service.js';
 import { devLogin } from './dev-login.js';
+import { testSignIn } from './test-sign-in.js';
+import { TEST_PHONES_ONLY_MESSAGE } from './test-phones.js';
+import { isTestPhone, TEST_OTP_CODE } from './otp.js';
 import { issueTokensForUser, issueTokensForVisitor, type IssuedTokens } from './tokens.js';
 import { rotateRefreshToken, revokeSession } from './sessions.js';
 import { loadUserRoles } from './principal-loader.js';
@@ -66,6 +69,7 @@ const GoogleSignInBody = z.object({
   staffInviteToken: z.string().min(1).optional(),
 });
 const DevLoginBody = z.object({ email: z.string().email() });
+const TestSignInBody = z.object({ phone: PhoneSchema, code: z.string().length(6) });
 // §12.4 POST /me/consent { version, isAdult: true } → 204 (§16.3 consent record).
 const ConsentBody = z
   .object({ version: z.literal(CONSENT_VERSION), isAdult: z.literal(true) })
@@ -271,6 +275,55 @@ export async function registerAuthRoutes(
         },
       });
     });
+  }
+
+  // Resident/staff sign-in by test phone number (DEC-028): the Phase 1 test version has no
+  // Google sign-in. Never registered in production, and refused there again below.
+  if (env.APP_ENV !== 'production') {
+    api.post(
+      '/auth/test-sign-in',
+      {
+        schema: { body: TestSignInBody },
+        config: { rateLimit: { max: opts.otpVerifyMaxPer10Min, timeWindow: '10 minutes' } },
+      },
+      async (request, reply) => {
+        authorize(request.principal ?? null, 'auth.sign_in', {});
+        if (env.APP_ENV === 'production') throw new AppError('NOT_FOUND', 404, 'Not found.');
+        const phone = normalizePhone(request.body.phone);
+        if (!isTestPhone(phone)) {
+          throw new AppError('TEST_PHONES_ONLY', 403, TEST_PHONES_ONLY_MESSAGE);
+        }
+        if (request.body.code !== TEST_OTP_CODE) {
+          throw new AppError('OTP_INVALID', 400, 'That code is incorrect.');
+        }
+        const result = await withTx(db, { principal: null, requestId: request.id }, async (trx) => {
+          const signIn = await testSignIn(trx, clock, phone);
+          const residentStatus = await getResidentStatus(trx, signIn.userId);
+          const issued = await issueTokensForUser(
+            trx,
+            {
+              userId: signIn.userId,
+              roles: signIn.roles,
+              client: clientFromHeader(request),
+              userAgent: request.headers['user-agent'] ?? null,
+              ip: requestIp(request),
+            },
+            env.JWT_SECRET,
+            clock,
+          );
+          return { issued, signIn, residentStatus };
+        });
+
+        sendTokens(request, reply, env, result.issued, {
+          principal: {
+            type: 'user',
+            id: result.signIn.userId,
+            roles: result.signIn.roles,
+            residentStatus: result.residentStatus,
+          },
+        });
+      },
+    );
   }
 
   api.post('/auth/refresh', { schema: { body: RefreshBody } }, async (request, reply) => {

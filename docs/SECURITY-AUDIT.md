@@ -47,7 +47,7 @@ the end.
 | SA-09 | MEDIUM | No 64 KB JSON body limit (§16.4 Input); Fastify's default is 1 MB | Fixed `782a8cc` |
 | SA-10 | MEDIUM | Behind the hosting proxy every client shares the proxy's IP, so per-IP limits apply to everyone at once | Fixed `782a8cc` (config; set per environment) |
 | SA-11 | MEDIUM | Reading residents' ID-card and selfie photos (W-04/W-08) writes no `read.*` audit row (T15) | Fixed `782a8cc` |
-| SA-12 | MEDIUM | The web app has no CSP / `frame-ancestors` / HSTS headers configured anywhere (§16.4 Headers) | Scheduled: deployment milestone (DEC-018) |
+| SA-12 | MEDIUM | The web app has no CSP / `frame-ancestors` / HSTS headers configured anywhere (§16.4 Headers) | Fixed for the Phase 1 deployment: `apps/mobile/vercel.json` (DEC-028); check the headers on the live site (docs/DEPLOY-TEST.md) |
 | SA-13 | MEDIUM | Sentry is not wired (NFR-13, §9.7 "logged to Sentry") | Fixed `91b0218` (API + web; Android no-op) |
 | SA-14 | LOW | The console OTP line logs the full phone number (§16.4: phones masked only) | Fixed `782a8cc` |
 | SA-15 | LOW | Some handlers enforce access by principal type or scan-session binding, not `authorize()` (CLAUDE.md §3.10 consistency) | Fixed (DEC-018): runtime enforcement; found SA-31..33 |

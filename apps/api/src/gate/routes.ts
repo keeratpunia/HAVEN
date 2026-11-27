@@ -30,6 +30,8 @@ import {
   validateAndBindSession,
   type GateDeps,
 } from './scanSessions.js';
+import type { Env } from '../config.js';
+import { assertPhoneAllowedHere } from '../auth/test-phones.js';
 
 /**
  * HTTP routes for the gate subsystem (SDD §12.8, §12.9's gate-device rows): scan
@@ -133,6 +135,8 @@ export interface GateRoutesOptions {
   mediaStorage: MediaStorage;
   webBaseUrl?: string;
   rules: RulesProvider;
+  /** Staging registers guests with the SDD §9.5 test numbers only (DEC-028). */
+  appEnv?: Env['APP_ENV'];
 }
 
 export async function registerGateRoutes(
@@ -565,6 +569,9 @@ export async function registerGateRoutes(
         // is answered by the rules engine (HOST_NOT_VERIFIED / HOST_SUSPENDED, 422).
         if (!hostResident) throw new AppError('FORBIDDEN', 403, 'Only residents can host guests.');
 
+        if (opts.appEnv && request.body.guest.phone) {
+          assertPhoneAllowedHere({ APP_ENV: opts.appEnv }, request.body.guest.phone);
+        }
         const now = clock.now();
         const windowEnd = new Date(now.getTime() + request.body.durationMinutes * 60_000);
         const visit = await createHostAssistedEntry(visitDeps, {

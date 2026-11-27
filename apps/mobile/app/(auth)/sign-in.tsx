@@ -7,6 +7,8 @@ import { Button } from '../../components/Button.js';
 import { GoogleSignInButton, googleSignInAvailable } from '../../components/GoogleSignInButton.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { routeForUser } from '../../lib/resident-route.js';
+import { IS_TEST_VERSION } from '../../lib/app-env.js';
+import { PhoneInput } from '../../components/PhoneInput.js';
 
 const DEV_LOGIN_ENABLED = process.env.EXPO_PUBLIC_DEV_LOGIN_ENABLED === 'true';
 
@@ -20,6 +22,8 @@ export default function SignIn() {
   const router = useRouter();
   const { refresh } = useAuth();
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +50,21 @@ export default function SignIn() {
     [finish],
   );
 
+  // Phase 1 test version (DEC-028): no Google sign-in; residents and staff use a test
+  // number and the fixed code. The API refuses this outside the test version.
+  async function testNumberSignIn() {
+    setError(null);
+    setLoading(true);
+    try {
+      await api.acceptSession(await api.testSignIn(`+91${phone}`, code.trim()));
+      await finish();
+    } catch (err) {
+      setError(err instanceof api.ApiError ? err.message : 'Could not sign in. Try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function devSignIn() {
     setError(null);
     setLoading(true);
@@ -71,8 +90,41 @@ export default function SignIn() {
         </Text>
       </View>
 
+      {IS_TEST_VERSION ? (
+        <View style={styles.dev}>
+          <Text style={styles.devTitle}>Sign in with a test number</Text>
+          <Text style={styles.hint}>
+            This is a test version with dummy data. Residents: 99999 00005 or 00006. Warden: 00007.
+            Office: 00008. Admin: 00009. Any other 99999 0000x number starts as a new resident. The
+            code is always 123456.
+          </Text>
+          <PhoneInput value={phone} onChange={setPhone} />
+          <Text style={styles.label} nativeID="test-code-label">
+            Code
+          </Text>
+          <TextInput
+            value={code}
+            onChangeText={setCode}
+            placeholder="123456"
+            placeholderTextColor={color.textMuted}
+            keyboardType="number-pad"
+            maxLength={6}
+            autoComplete="one-time-code"
+            style={styles.input}
+            accessibilityLabel="Code"
+            accessibilityLabelledBy="test-code-label"
+          />
+          <Button
+            label="Sign in with test number"
+            onPress={testNumberSignIn}
+            loading={loading}
+            disabled={phone.length !== 10 || code.trim().length !== 6}
+          />
+        </View>
+      ) : null}
+
       <GoogleSignInButton onIdToken={onGoogle} />
-      {!googleSignInAvailable && !DEV_LOGIN_ENABLED ? (
+      {!googleSignInAvailable && !DEV_LOGIN_ENABLED && !IS_TEST_VERSION ? (
         <Text style={styles.body}>Google sign-in isn't set up in this build.</Text>
       ) : null}
 

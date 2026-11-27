@@ -6,6 +6,7 @@ import { AppError } from '../lib/errors.js';
 import type { Env } from '../config.js';
 import { generateOtpCode, hashOtpCode, isTestPhone, otpCodeMatches, TEST_OTP_CODE } from './otp.js';
 import type { BotVerifier } from './bot-check.js';
+import { assertPhoneAllowedHere } from './test-phones.js';
 
 /**
  * Guest phone OTP (SDD §9.5): 6-digit code, `HMAC_SHA256(OTP_PEPPER, phone + '|' +
@@ -64,6 +65,8 @@ export async function requestOtp(
   clock: Clock,
   bot: BotVerifier,
 ): Promise<RequestOtpResult> {
+  // Phase 1 test version: test numbers only, before any limit or code (DEC-028).
+  assertPhoneAllowedHere(env, params.phone);
   const now = clock.now();
 
   // One transaction, serialised per phone and per IP with advisory locks (always phone
@@ -171,6 +174,7 @@ export async function verifyOtp(
   env: Pick<Env, 'APP_ENV' | 'OTP_PEPPER'>,
   clock: Clock,
 ): Promise<void> {
+  assertPhoneAllowedHere(env, params.phone);
   if (env.APP_ENV !== 'production' && isTestPhone(params.phone) && params.code === TEST_OTP_CODE) {
     return;
   }

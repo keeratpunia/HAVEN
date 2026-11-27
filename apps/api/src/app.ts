@@ -161,8 +161,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const dataEncryptionKey = parseDataEncryptionKey(env.DATA_ENCRYPTION_KEY);
   const mediaSigner = new MediaUrlSigner(env.JWT_SECRET, env.API_BASE_URL, clock);
   const rules = new RulesProvider(db);
-  // SDD §9.9/§11.7: LISTEN needs a direct connection; the pooler would drop it.
-  const hub = new StreamHub(env.DATABASE_DIRECT_URL, logger);
+  // SDD §9.9/§11.7: LISTEN needs a session connection; the transaction pooler would drop
+  // it. The hub self-tests and refuses streams if notifications don't arrive (DEC-028).
+  const hub = new StreamHub(env.DATABASE_DIRECT_URL, logger, env.DATABASE_CA_CERT);
   revocationCache.onForgetUser((userId) => hub.disconnectUser(userId));
 
   const app = Fastify({
@@ -442,6 +443,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         signer: mediaSigner,
         webBaseUrl: env.WEB_BASE_URL,
         rules,
+        appEnv: env.APP_ENV,
       });
       await registerMediaRoutes(v1, { db, storage: options.mediaStorage, signer: mediaSigner });
       await registerNotificationRoutes(v1, { db, clock });
@@ -454,6 +456,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         mediaStorage: options.mediaStorage,
         webBaseUrl: env.WEB_BASE_URL,
         rules,
+        appEnv: env.APP_ENV,
       });
       // Warden and office (SDD §12.9, /v1/admin with X-Hostel-Id).
       await registerAdminVisitRoutes(v1, {
@@ -477,6 +480,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         dataEncryptionKey,
         webBaseUrl: env.WEB_BASE_URL,
         cache: revocationCache,
+        appEnv: env.APP_ENV,
       });
       await registerAdminChargesRoutes(v1, { db, clock, signer: mediaSigner, rules });
       await registerStreamRoutes(v1, { hub, cache: revocationCache, pingMs: options.streamPingMs });

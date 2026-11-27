@@ -182,6 +182,18 @@ export const GateLocationBodySchema = z.object({
   maxAccuracyM: z.number().int().min(10).max(200),
 });
 
+/**
+ * Staging only (DEC-028): "Set gate location to my current position" — one reading from
+ * the admin's phone, so the test version can be shown wherever the warden is. The
+ * radius stays as it is. Refused in production.
+ */
+export const GateTestLocationBodySchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  accuracyM: z.number().min(0).max(5000),
+});
+export type GateTestLocationBody = z.infer<typeof GateTestLocationBodySchema>;
+
 export interface GateDTO {
   id: string;
   code: string;

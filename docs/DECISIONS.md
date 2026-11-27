@@ -1756,6 +1756,128 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** No product behaviour changed; the PWA is an added way to open the
   same web app. It goes into the Phase 2 SDD addendum with DEC-026.
 
+### DEC-028 — Phase 1 deployment: same-origin API, Supabase pooler, test numbers only, test sign-in, hosted seed
+
+- **Date:** 2026-11-27
+- **Context:** DEC-026 deploys Phase 1 on free plans with no domain: the web app on
+  `*.vercel.app` (Vercel Hobby), the API on `*.onrender.com` (Render Free, Singapore),
+  Postgres and Storage on Supabase Free (Mumbai). Several SDD defaults assume a domain,
+  a direct database connection, Google sign-in and real SMS, none of which Phase 1 has.
+- **Decision:**
+  1. **One origin for the browser.** `apps/mobile/vercel.json` rewrites `/v1/*` to the
+     Render service, so the browser only ever talks to the Vercel address.
+     - The refresh cookie stays first-party; iPhone Safari blocks third-party cookies,
+       and `*.vercel.app` can't carry a `Domain` anyway.
+     - `COOKIE_DOMAIN` is now optional; unset means a host-only cookie. It is still
+       `httpOnly`, `Secure`, `SameSite=Lax`, `Path=/v1/auth`. SDD §9.5's
+       `Domain=.<domain>` applies again once there is a domain (Phase 2).
+     - `API_BASE_URL`, `WEB_BASE_URL` and `CORS_ORIGINS` are all the Vercel address, so
+       invite links, gate QR links and signed-media links point there.
+     - `TRUST_PROXY_HOPS=2` (Vercel edge + Render's proxy).
+     - The SDD's `app.`/`api.` subdomains (§8.3) wait for a domain.
+  2. **Web security headers (SA-12)** are in `vercel.json`: CSP with no inline scripts
+     (`script-src 'self'` plus Turnstile, `connect-src 'self'`, images from `*.supabase.co`
+     signed URLs, `frame-ancestors 'none'`), HSTS `max-age=31536000`, `nosniff`,
+     `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a Permissions-Policy
+     allowing only camera and geolocation for this site.
+  3. **Database through Supavisor.** The free plan's direct host may be IPv6-only, which
+     Render can't reach.
+     - Queries use the transaction pooler (6543); `pg` sends only unnamed statements,
+       and every session setting HAVEN uses is transaction-local (`set_config(…, true)`,
+       `pg_advisory_xact_lock`).
+     - `DATABASE_DIRECT_URL` (LISTEN for live updates) uses the session pooler (5432).
+       The config now refuses only a *transaction* pooler there (port 6543 or
+       `pgbouncer=true`), not every pooler host. The config test changed with it.
+     - **Self-test:** before trusting LISTEN, the hub notifies itself. If that
+       notification doesn't come back within 5 s, `/v1/stream` answers
+       `503 STREAM_UNAVAILABLE` for 5 minutes and dashboards stay on 15 s polling
+       (§9.9), instead of showing "Live" with nothing arriving.
+  4. **Verified TLS to Supabase.** Supabase signs its certificates with its own CA. The
+     public "Supabase Root 2021 CA" is pinned in `apps/api/src/db/ssl.ts`.
+     - It was taken from the live Mumbai pooler's handshake; SHA-256 `80:70:25:AD:…:CA:FA`
+       is checked by a unit test.
+     - Connections verify the chain and the host name. Any `sslmode` in a URL is
+       dropped, so `no-verify` can't switch verification off.
+     - `DATABASE_CA_CERT` can override the CA. Local databases use no TLS.
+  5. **Test numbers only in staging.** With `APP_ENV=staging`, every way a phone number
+     enters HAVEN accepts only the SDD §9.5 test numbers (+91 99999 00001…09): OTP
+     request and verify (guest sign-in and phone verification), the test sign-in below,
+     a resident's invite or overnight request, and a host registering a guest at the
+     gate. Anything else gets `403 TEST_PHONES_ONLY`: "This is a test version. Please
+     use one of the test numbers." Local and production are unchanged; production
+     still refuses the test code (existing tests) and the dev sign-in (unchanged).
+  6. **Test sign-in for residents and staff.** Phase 1 has no Google sign-in.
+     - `POST /v1/auth/test-sign-in { phone, code }` is registered only when APP_ENV is
+       not production (and refused again inside), rate-limited like OTP verify.
+     - It takes a test number and `123456`. A number that belongs to a seeded user signs
+       in as that user; any other test number creates a new applicant, phone already
+       verified, who goes through onboarding, so the warden-verifies-a-resident flow
+       can be shown.
+     - Seeded users: 04 resident waiting for verification, 05 and 06 verified
+       residents, 07 warden, 08 office, 09 super admin. 01–03 stay free for guests.
+     - The laptop demo keeps its email dev sign-in.
+  7. **"Set gate location to my current position".**
+     - `POST /v1/admin/gates/:id/test-location`, super admin only (`authorize()`
+       `admin.gates.test_location`).
+     - Refused with `403 TEST_ONLY` unless APP_ENV is staging or local.
+     - One reading from the admin's phone; the radius is unchanged (seeded at 200 m from
+       `SEED_GATE_RADIUS_M`). Audited without coordinates.
+     - The warden's averaged F8 capture remains the real way to set a gate. No gate
+       position is committed: the seed takes `SEED_GATE_LAT/LNG` from a local
+       gitignored file, or leaves the gate unset.
+  8. **The "TEST VERSION · dummy data" badge** is a strip above every screen when
+     `EXPO_PUBLIC_APP_ENV=staging`, never over the gate QR. Phone fields add a hint with
+     the test numbers.
+  9. **Hosted database scripts** (`pnpm --filter @haven/api run staging -- migrate |
+     seed | reset`). They read `apps/api/.env.staging.local` and refuse unless it says
+     `APP_ENV=staging`.
+     - **migrate** applies `supabase/migrations` in order, recorded in the Supabase CLI's
+       own `supabase_migrations.schema_migrations`. It then sets `haven_api`'s password;
+       the value is bound as a parameter and quoted server-side with `format(%L)`.
+     - **seed** puts in the same dummy world as the laptop demo (`scripts/seed-fixtures.ts`,
+       now shared with `demo-db.ts`), with visit times relative to now and photos
+       uploaded to the private buckets.
+     - **reset** deletes the photos, unschedules HAVEN's cron jobs, drops schema `haven`
+       and runs migrate and seed again, after you type the project's host name back.
+  10. **Secrets.** `node scripts/generate-secrets.mjs` prints fresh values (JWT secret,
+      OTP pepper, data-encryption key, `haven_api` password) for the owner to paste
+      straight into Render and the local file. Nothing is generated or printed by the
+      assistant.
+  11. **CAPTCHA in Phase 1.** Staging refuses to boot without `TURNSTILE_SECRET` (SA-07).
+      Phase 1 uses Cloudflare's published always-pass test keys
+      (`developers.cloudflare.com/turnstile/troubleshooting/testing/`). Only test
+      numbers are accepted and no SMS is sent, so there is nothing to pump. Phase 2
+      needs a real widget.
+  12. **What the free API's sleep delays.**
+      - Render Free sleeps after 15 minutes without requests, and the next request waits
+        about a minute.
+      - The timed jobs (walk-in expiry, overstay, night sweep, gate-offline,
+        retention, digest) are pg_cron jobs inside Supabase, so they run on time anyway.
+      - The API-side jobs (photo purge, account deletion) and the outbox worker catch
+        up on their first loop after waking. Queued rows stay queued, and daily jobs
+        compare the date, not the minute.
+      - In-app notifications are rows the list reads directly, so nothing is lost.
+      - An open gate screen sends a heartbeat every minute, which keeps the API awake.
+      - Render's 750 free hours a month cover one service running all month.
+- **Alternatives considered:**
+  - A Vercel serverless proxy (rejected: function time limits on the live stream).
+  - `sslmode=no-verify` (rejected: no verification).
+  - Email dev sign-in on staging (rejected: the brief asks for test numbers, and the
+    dev bypass must stay local-only, DEC-011).
+  - A separate staging-only seed (rejected: the shared fixtures keep the demo and the
+    test version identical).
+- **Tests:**
+  - `apps/api/test/staging-test-phones.integration.test.ts` covers test numbers only in
+    OTP and invites, the test sign-in (existing user, new applicant, refusals, absent in
+    production) and the gate test location (staging only, admin only, radius kept).
+  - Also `src/auth/test-phones.test.ts`, `src/db/ssl.test.ts`,
+    `test/stream-self-test.integration.test.ts` and the updated `config.test.ts` and
+    `lib/cookies.test.ts`.
+- **SDD updated?** Not yet. These are Phase 1 deviations from §8.3 (subdomains),
+  §9.5 (cookie domain, Google sign-in), §11.7 (direct connection for LISTEN) and §12
+  (two new endpoints, two new error codes: `TEST_PHONES_ONLY`, `TEST_ONLY`, plus
+  `STREAM_UNAVAILABLE`). They go into the SDD addendum written with Phase 2 (DEC-026).
+
 Template for a new entry:
 
 ```markdown

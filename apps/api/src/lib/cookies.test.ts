@@ -25,6 +25,15 @@ describe('refresh cookie (SDD §9.5)', () => {
     expect(options.domain).toBeUndefined();
   });
 
+  it('is host-only (no Domain) when COOKIE_DOMAIN is unset outside local (DEC-028)', () => {
+    const options = refreshCookieOptions({ APP_ENV: 'staging', COOKIE_DOMAIN: undefined });
+    expect(options.domain).toBeUndefined();
+    expect(options.secure).toBe(true);
+    expect(options.httpOnly).toBe(true);
+    expect(options.sameSite).toBe('lax');
+    expect(options.path).toBe('/v1/auth');
+  });
+
   it('is Secure in staging too, not just production', () => {
     const options = refreshCookieOptions({
       APP_ENV: 'staging',

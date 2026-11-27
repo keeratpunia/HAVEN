@@ -1,6 +1,7 @@
 import { Kysely, PostgresDialect } from 'kysely';
 import pg from 'pg';
 import type { Env } from '../config.js';
+import { pgConnectionOptions } from './ssl.js';
 
 /**
  * Database connection abstraction (SDD §11.7: connects as `haven_api` through
@@ -13,9 +14,12 @@ import type { Database } from './types.js';
 
 export type { Database } from './types.js';
 
-export function createDb(env: Pick<Env, 'DATABASE_URL' | 'DB_POOL_MAX'>): Kysely<Database> {
+export function createDb(
+  env: Pick<Env, 'DATABASE_URL' | 'DB_POOL_MAX'> & Partial<Pick<Env, 'DATABASE_CA_CERT'>>,
+): Kysely<Database> {
+  // TLS with the pinned Supabase CA outside localhost (db/ssl.ts, DEC-028).
   const pool = new pg.Pool({
-    connectionString: env.DATABASE_URL,
+    ...pgConnectionOptions(env.DATABASE_URL, env.DATABASE_CA_CERT),
     max: env.DB_POOL_MAX,
   });
 

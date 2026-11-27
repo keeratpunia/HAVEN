@@ -46,6 +46,8 @@ export const ADMIN_POLICIES: Record<string, (p: Principal | null, r: HostelResou
   // "Pair / revoke gate devices; set gate location": warden Hostel, super admin All.
   'admin.gates.read': roles('warden', 'super_admin'),
   'admin.gates.write': roles('warden', 'super_admin'),
+  // DEC-028, staging only: set the gate to the admin's current position (demo anywhere).
+  'admin.gates.test_location': (p) => isSuperAdmin(p),
   // "Invite office staff": warden Hostel. FR-07 deactivate: warden (office staff, DEC-014).
   'admin.staff.read': roles('warden'),
   'admin.staff.invite_office': roles('warden'),

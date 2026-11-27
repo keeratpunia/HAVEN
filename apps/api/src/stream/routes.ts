@@ -5,7 +5,7 @@ import { AppError } from '../lib/errors.js';
 import { authorize } from '../auth/policy.js';
 import { hasHostelRole } from '../auth/principal.js';
 import type { RevocationCache } from '../auth/principal-loader.js';
-import type { HubEvent, StreamHub } from './hub.js';
+import { StreamUnavailableError, type HubEvent, type StreamHub } from './hub.js';
 
 /**
  * `GET /v1/stream?hostelId=` (SDD §9.9, §12.9: warden, office) — `text/event-stream`
@@ -50,16 +50,24 @@ export async function registerStreamRoutes(
       unsubscribe();
       raw.end();
     };
-    const unsubscribe = await opts.hub.subscribe({
-      hostelId,
-      userId: principal.userId,
-      accepts: () => isWarden,
-      send: (e: HubEvent) =>
-        e.t === 'visit'
-          ? write('visit', { id: e.id, s: e.s })
-          : write('gate', { id: e.id, online: e.online }),
-      close: () => end(),
-    });
+    const unsubscribe = await opts.hub
+      .subscribe({
+        hostelId,
+        userId: principal.userId,
+        accepts: () => isWarden,
+        send: (e: HubEvent) =>
+          e.t === 'visit'
+            ? write('visit', { id: e.id, s: e.s })
+            : write('gate', { id: e.id, online: e.online }),
+        close: () => end(),
+      })
+      .catch((err: unknown) => {
+        // DEC-028: LISTEN failed its self-test; the client stays on 15 s polling (§9.9).
+        if (err instanceof StreamUnavailableError) {
+          throw new AppError('STREAM_UNAVAILABLE', 503, 'Live updates are unavailable.');
+        }
+        throw err;
+      });
 
     reply.hijack();
     raw.writeHead(200, {
