@@ -9,7 +9,7 @@ Follow it in order. It takes about an hour.
 
 | Piece | Where | Address |
 |---|---|---|
-| Web app (guests, residents, warden, office, gate screen) | Vercel, free | `https://haven-test.vercel.app` (or similar) |
+| Web app (guests, residents, warden, office, gate screen) | Vercel, free | `https://haven-gh8-test.vercel.app` (or similar) |
 | API | Render, free, Singapore | `https://haven-test-api.onrender.com` (only Vercel talks to it) |
 | Database and photos | Supabase, free, Mumbai | your project's `*.supabase.co` |
 
@@ -38,8 +38,8 @@ Follow it in order. It takes about an hour.
    ```
 
 2. Decide two names now (you'll need them in steps 4 and 5):
-   - **Vercel project name:** `haven-test` → your web address will be
-     `https://haven-test.vercel.app`. If Vercel says the name is taken, it adds a
+   - **Vercel project name:** `haven-gh8-test` → your web address will be
+     `https://haven-gh8-test.vercel.app`. If Vercel says the name is taken, it adds a
      suffix; that's fine, just use the address Vercel shows.
    - **Render service name:** `haven-test-api` (already in `render.yaml`) → the API
      address will be `https://haven-test-api.onrender.com`. If Render shows a different
@@ -174,7 +174,7 @@ The migrations create the three private photo buckets.
    | `OTP_PEPPER` | from step 0 |
    | `DATA_ENCRYPTION_KEY` | from step 0 (the same one as in your local file) |
    | `TURNSTILE_SECRET` | `1x0000000000000000000000000000000AA`: Cloudflare's published always-pass **test** key. Not a secret; fine for Phase 1 only (DEC-028) |
-   | `API_BASE_URL` | your Vercel address, e.g. `https://haven-test.vercel.app` |
+   | `API_BASE_URL` | your Vercel address, e.g. `https://haven-gh8-test.vercel.app` |
    | `WEB_BASE_URL` | the same Vercel address |
    | `CORS_ORIGINS` | the same Vercel address |
 
@@ -199,7 +199,7 @@ Tell Claude **"Render done"** and the API address (it isn't secret).
 1. Go to **https://vercel.com** → **Sign Up** → **Hobby** → continue with **GitHub**.
 2. **Add New… → Project** → **Import** the **HAVEN** repository.
 3. On the configure screen:
-   - **Project Name:** `haven-test`
+   - **Project Name:** `haven-gh8-test`
    - **Framework Preset:** *Other*
    - **Root Directory:** click **Edit** → choose **`apps/mobile`** → **Continue**
    - Leave Build/Output/Install commands **unchanged**: `apps/mobile/vercel.json` sets
@@ -209,7 +209,7 @@ Tell Claude **"Render done"** and the API address (it isn't secret).
      | Name | Value |
      |---|---|
      | `EXPO_PUBLIC_APP_ENV` | `staging` |
-     | `EXPO_PUBLIC_API_URL` | your Vercel address, e.g. `https://haven-test.vercel.app` |
+     | `EXPO_PUBLIC_API_URL` | your Vercel address, e.g. `https://haven-gh8-test.vercel.app` |
      | `EXPO_PUBLIC_WEB_URL` | the same address |
      | `EXPO_PUBLIC_TURNSTILE_SITE_KEY` | `1x00000000000000000000AA`: Cloudflare's published always-pass **test** site key (Phase 1 only) |
 

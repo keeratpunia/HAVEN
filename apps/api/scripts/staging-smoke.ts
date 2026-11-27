@@ -5,7 +5,7 @@
  * spirit): walks the main flows through the real web address, the same way phones do
  * — through Vercel's /v1 rewrite to the Render API, Supabase Postgres and Storage.
  *
- *   pnpm --filter @haven/api run staging:smoke -- https://haven-test.vercel.app
+ *   pnpm --filter @haven/api run staging:smoke -- https://haven-gh8-test.vercel.app
  *
  * Needs no secrets: it signs in with the test numbers (code 123456), pairs its own
  * temporary gate device to read the QR secret like a gate screen does, scans at the
@@ -221,7 +221,7 @@ async function streamCheck(token: string, hostelId: string): Promise<string> {
 async function main() {
   if (!/^https:\/\//.test(BASE)) {
     fail(
-      'Give the test version address, e.g.\n     pnpm --filter @haven/api run staging:smoke -- https://haven-test.vercel.app',
+      'Give the test version address, e.g.\n     pnpm --filter @haven/api run staging:smoke -- https://haven-gh8-test.vercel.app',
     );
   }
   console.log(`HAVEN test version smoke test against ${BASE}\n`);
