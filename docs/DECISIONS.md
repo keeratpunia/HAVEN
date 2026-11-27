@@ -1878,6 +1878,43 @@ Source for all of Part 1: SDD §2.7.
   (two new endpoints, two new error codes: `TEST_PHONES_ONLY`, `TEST_ONLY`, plus
   `STREAM_UNAVAILABLE`). They go into the SDD addendum written with Phase 2 (DEC-026).
 
+### DEC-029 — New high-severity advisories (Oct–Nov 2026): node-forge patched, zod and decode-uri-component scoped
+
+- **Date:** 2026-11-27
+- **Context:** CI's `pnpm audit --prod --audit-level high` (DEC-024) failed on the first
+  push since October. Every other CI step passed. There were ten new high advisories in
+  three packages.
+- **Decision:**
+  - **node-forge ≤ 1.4.0** (eight advisories: PEM/ASN.1/TLS denial of service, PKCS#12
+    MAC forgery, X.509 basicConstraints bypass, RSA signature forgery). It comes only
+    through Expo's CLI and code signing (build tooling), and a patch release exists, so
+    it is **fixed**: `pnpm.overrides` `node-forge@<1.4.1 → ^1.4.1` (resolves 1.4.4). The
+    lockfile changes only for node-forge; the web export still builds.
+  - **decode-uri-component ≤ 0.5.0** (GHSA-qr28-fpjm-wq7f, quadratic decoding).
+    - It comes through Expo/Metro's `query-string`, version 0.2.2. The only fix is
+      0.5.x, which is ESM-only and would break the CommonJS packages that `require` it.
+    - Where it reaches the web bundle, a crafted URL slows only the visitor's own
+      browser tab.
+    - **Accepted** with a scoped `ignoreGhsas` entry, like the DEC-024 tooling
+      advisories. Revisit when Expo updates `query-string`.
+  - **zod < 4.6.6** (GHSA-mrhx-c7xc-m3w5): an array schema with many failing elements
+    collects one issue per element, so a huge array can exhaust memory. HAVEN runs
+    zod 3.25.76 on every API request (Zod is the SDD §8.4 validator), so this one
+    reaches the API.
+    - **Measured:** every JSON body is capped at 64 KB (SA-09). The worst 64 KB body (32,763
+      failing elements) costs ≈16 MB of heap and 64 ms on zod 3, then is freed. That is
+      bounded, not an out-of-memory crash, and the global rate limit caps repeats.
+    - **Accepted for now** with a scoped `ignoreGhsas` entry.
+    - The fix is zod 4 (≥ 4.6.6). That is a major upgrade touching the shared schemas
+      and `fastify-type-provider-zod` (v4 supports zod 3 only), so per CLAUDE.md §5 it
+      gets its own PR. **Scheduled before Phase 2 (real data).**
+- **Alternatives considered:**
+  - Ignoring node-forge too (rejected: a patch exists).
+  - Forcing decode-uri-component 0.5 (rejected: breaks CommonJS consumers).
+  - Upgrading zod inside the deployment work (rejected: a major upgrade belongs in a
+    dedicated PR).
+- **SDD updated?** No.
+
 Template for a new entry:
 
 ```markdown
