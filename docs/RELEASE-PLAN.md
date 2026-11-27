@@ -1,5 +1,27 @@
 # HAVEN — Release plan: from laptop demo to a real service at GH-8
 
+## Scope change, 27 Nov 2026
+
+The team split the release into two phases (`docs/DECISIONS.md` DEC-026). **Where
+DEC-026 and this plan disagree, DEC-026 wins.**
+
+- **Phase 1: Test version (now).**
+  - Deployed from `main` with `APP_ENV=staging`, and mobile-first.
+  - Dummy data only; the test OTP is on; no SMS at all.
+  - Free plans only (NFR-14 = ₹0 a month): Supabase Free (Mumbai), Render Free
+    (Singapore; sleeping when idle is accepted), Vercel Hobby, the free
+    `*.vercel.app` / `*.onrender.com` addresses.
+  - Phones use the web app / installable PWA. No APK, no web push, no monitoring.
+  - The gate is an existing laptop or tablet browser.
+  - Goal: show it to a hostel warden for review.
+- **Phase 2: Pilot (later).** The same repository, deployed separately from a
+  `production` branch, with its own Supabase project, Render service, Vercel project and
+  secrets. Test OTP off, real SMS OTP, residents approved on the spot by the two owners
+  after the warden's written approval. Not built now.
+
+The milestones below (M1–M7) describe the full road to the pilot. In Phase 1 only the
+parts DEC-026 names are built; the rest waits for Phase 2.
+
 **Status:** proposal, 2026-11-27. Nothing in this document is decided. Every choice
 that changes the SDD or picks a paid service is listed in **§7 Decisions you must make**
 and becomes a `DEC-NNN` in `docs/DECISIONS.md` (plus an SDD addendum where it diverges,

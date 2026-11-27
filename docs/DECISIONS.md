@@ -1655,6 +1655,61 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** No. The copy needs approval with the other proposed strings, and
   G-16's screenshots are listed as a remaining gap.
 
+### DEC-026 — Scope change: Phase 1 is a deployed test version with dummy data; the pilot is Phase 2
+
+- **Date:** 2026-11-27
+- **Decided by:** the team (Keerat), replacing the milestone order in
+  `docs/RELEASE-PLAN.md` for now. Where this entry and the release plan disagree, this
+  entry wins.
+- **Context:** `docs/RELEASE-PLAN.md` (2026-11-27) planned M1–M7 to a real pilot. The
+  team wants a deployed, phone-ready version first, to show a hostel warden before any
+  real data or real SMS. The plan's decisions D-01..D-13 are answered below for that
+  phase.
+- **Decision:**
+  - **Phase 1 = Test version.**
+    - Deployed and mobile-first.
+    - Dummy data only; the test OTP is on.
+    - Deploys from `main`, with `APP_ENV=staging`.
+    - The team's brief called the variable "HAVEN_ENV". It is the existing `APP_ENV`
+      (SDD §20.3); nothing is renamed.
+  - **Phase 2 = Pilot.** Built later from the **same repository** as a **separate
+    deployment**: a new Supabase project, Render service and Vercel project, with
+    different secrets.
+    - It deploys from a `production` branch.
+    - The test OTP is off (`APP_ENV=production`) and a real SMS OTP provider is used.
+    - Residents are approved on the spot by the two owners, after the warden's written
+      approval (§23.1 Q11).
+    - Not built now. No second repository.
+  - **Release-plan decisions for Phase 1:**
+
+    | # | Decision | Phase 1 answer |
+    |---|---|---|
+    | D-01 | SMS / DLT | Deferred to Phase 2. Phase 1 sends **no SMS at all** (`SMS_PROVIDER=console`; the console line is masked, SA-14). |
+    | D-02 | Domain | Deferred. Use the free `*.vercel.app` and `*.onrender.com` addresses. |
+    | D-03 | Web push | Deferred. In-app notifications and live updates only. |
+    | D-04 | Supabase | Free plan, Mumbai (`ap-south-1`). |
+    | D-05 | Render | Free plan, Singapore. The API sleeping when idle is accepted for Phase 1. |
+    | D-06 | Gate device | An existing laptop or tablet browser in landscape. No kiosk hardware. |
+    | D-07 | Web hosting | Vercel Hobby. |
+    | D-08 | Monitoring | Not in Phase 1. |
+    | D-09 | Android APK | Deferred. Phones use the web app / installable PWA (Android Chrome and iPhone Safari). |
+    | D-10 | Wardens and office | Use phones exactly like residents. |
+    | D-11 | Owners | Keerat and one teammate, with 2-factor login on every provider. |
+    | D-12 | Guest pre-fill | Include only if small; otherwise defer and say so. |
+    | D-13 | Warden questions | `docs/WARDEN-QUESTIONS.md`. |
+
+  - **NFR-14 for Phase 1: ₹0 a month.** Every Phase 1 service runs on a free plan.
+  - `docs/report/friend-edits.docx` and `docs/report/previous-report.pdf` are never
+    committed (`.gitignore`).
+- **Alternatives considered:** a second repository for the pilot (rejected: two copies
+  of the code drift); going straight to the pilot (rejected: DLT/SMS and the warden's
+  approval have lead times, and the warden should see the app first).
+- **Why:** a deployed test version gets the warden's feedback on real phones without
+  personal data, money or SMS registration.
+- **SDD updated?** Not yet. The SDD's three environments (§8.3) and NFR-14 still
+  describe the pilot. Phase 1's deviations are recorded here and in the entries after
+  this one. The SDD addendum is written with Phase 2, when the pilot's shape is final.
+
 Template for a new entry:
 
 ```markdown

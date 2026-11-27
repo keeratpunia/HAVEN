@@ -61,3 +61,7 @@ blob-report/
 
 # Local demo settings (the room's real gate coordinates) — copied from demo.config.example.json
 demo.config.json
+
+# Private report drafts (DEC-026): never commit
+docs/report/friend-edits.docx
+docs/report/previous-report.pdf
