@@ -65,7 +65,8 @@ export const EN_COPY: Record<string, CopyEntry> = {
   // the words), DEC-022.
   location_denied: {
     title: 'Location is turned off for HAVEN',
-    body: "Allow location for this site and try again, or ask your host to confirm you're at the gate.",
+    // Phone steps added in the Phase 1 mobile pass (DEC-027); still PROPOSED (DEC-022).
+    body: "Allow location for this site and try again, or ask your host to confirm you're at the gate. Android (Chrome): tap the icon left of the address, then Permissions → Location → Allow. iPhone (Safari): tap aA in the address bar, then Website Settings → Location → Allow. If that's not there: iPhone Settings → Privacy & Security → Location Services → turn it on, then Safari Websites → While Using the App.",
   },
   low_accuracy: {
     title: "We can't pin your location",

@@ -1710,6 +1710,52 @@ Source for all of Part 1: SDD §2.7.
   describe the pilot. Phase 1's deviations are recorded here and in the entries after
   this one. The SDD addendum is written with Phase 2, when the pilot's shape is final.
 
+### DEC-027 — Phase 1 mobile-first pass: phone layout, filter sheet, installable web app
+
+- **Date:** 2026-11-27
+- **Context:** DEC-026 Phase 1 runs every role (resident, warden, office, admin, guest)
+  in a phone browser. SDD §13.3 already gives the warden bottom tabs on mobile; §13.2
+  sets 48 px touch targets; §13 doesn't describe an installable web app, because the
+  SDD's residents and staff were to use the Android app (D6).
+- **Decision:**
+  - **Phone audit.** `apps/mobile/e2e/mobile-audit/` (run with `pnpm --filter
+    @haven/mobile run audit:mobile` against `pnpm demo`) opens every route of every role
+    at 360×800 and 390×844 (Chromium with the iPhone's size and user agent; it is not
+    Safari), saves screenshots to `docs/screenshots-mobile/`, and lists horizontal
+    overflow, off-screen elements and tap targets under 44 px. It is a worklist, not a
+    CI gate. First run: no horizontal scrolling anywhere; 46 small tap targets per size
+    (filter chips at 40 px, the guest header link at 27 px, the privacy link at 19 px).
+    After the fixes: none.
+  - **Fixes.** Chips (staff and guest) are at least 48×48 (§13.2). The staff visit card
+    puts the status chip beside the name, wrapping under it on a narrow phone; before,
+    the chip squeezed the name into a column a few letters wide.
+  - **Filters in a bottom sheet** below 600 px (`components/staff/FilterSheet.tsx`):
+    visit search keeps its search box on screen, and dates and status open in a sheet;
+    the audit log's four filters move into the sheet. Laptops keep the inline form.
+  - **Installable web app.** `apps/mobile/public/`: a web manifest (name HAVEN,
+    standalone, theme `#0F766E`), icons drawn from the design tokens by
+    `scripts/make-pwa-icons.mjs` (a house outline, no fonts or third-party art), iOS
+    home-screen tags, safe-area padding (`viewport-fit=cover` + `env(safe-area-inset-*)`)
+    and `interactive-widget=resizes-content` so Android Chrome keeps inputs above the
+    keyboard; on iPhone a focused input is scrolled into view (`lib/pwa.ts`).
+  - **Service worker** (`public/sw.js`): the app shell only. It never handles `/v1/…`,
+    so no personal data is cached or available offline. It is registered only in
+    exported builds, never under `expo start` (development and the e2e suite).
+  - **"Add HAVEN to your home screen"** card on the resident Profile, the warden More
+    screen and the office charges screen: Chrome's install dialog on Android, the
+    Share → Add to Home Screen steps on iPhone, hidden once installed.
+  - **Location denied on a phone.** The proposed `location_denied` text (DEC-022) now
+    also gives the Android Chrome and iPhone Safari steps, including iPhone Settings →
+    Location Services → Safari Websites. Still proposed copy, awaiting sign-off.
+  - **D-12 guest pre-fill: deferred.** Pre-filling "About you" needs the invited name
+    and gender in the guest's browser, which §9.6 deliberately keeps out of the invite
+    landing. That is a privacy decision, not a small change; it waits for the warden's
+    review.
+- **Alternatives considered:** a separate phone-only staff UI (rejected: two UIs to
+  keep in step); caching API responses for offline use (rejected: personal data, §16).
+- **SDD updated?** No product behaviour changed; the PWA is an added way to open the
+  same web app. It goes into the Phase 2 SDD addendum with DEC-026.
+
 Template for a new entry:
 
 ```markdown

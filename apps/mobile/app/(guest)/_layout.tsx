@@ -26,6 +26,7 @@ export default function GuestLayout() {
           onPress={() => router.push('/')}
           accessibilityRole="link"
           accessibilityLabel="HAVEN home"
+          style={styles.home}
         >
           <Text style={styles.logo}>HAVEN</Text>
         </Pressable>
@@ -72,6 +73,7 @@ const styles = StyleSheet.create({
     fontWeight: typeTokens.weight.semibold,
     color: color.primary,
   },
+  home: { minHeight: 48, minWidth: 48, justifyContent: 'center' },
   myVisits: { minHeight: 48, minWidth: 48, alignItems: 'center', justifyContent: 'center' },
   myVisitsText: {
     fontSize: typeTokens.size.sm,

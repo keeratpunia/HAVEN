@@ -7,6 +7,7 @@ import { useStaff } from '../../../lib/staff-context.js';
 import { useLiveUpdates } from '../../../lib/live.js';
 import { Button } from '../../../components/Button.js';
 import { AdminVisitCard } from '../../../components/staff/AdminVisitCard.js';
+import { FilterSheet } from '../../../components/staff/FilterSheet.js';
 import {
   Chips,
   ErrorText,
@@ -79,13 +80,22 @@ export default function SearchVisits() {
         : 'Search visits';
   return (
     <StaffScreen title={title} live={live}>
-      <View style={staffStyles.row}>
-        <Field label="Guest, phone, host, room or code" value={q} onChange={setQ} />
-        <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
-        <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
-      </View>
-      <Chips label="Status" value={status} onChange={setStatus} options={STATUSES} />
-      <Button label="Search" fullWidth={false} onPress={() => void load()} />
+      <FilterSheet
+        inline={
+          <View style={staffStyles.row}>
+            <Field label="Guest, phone, host, room or code" value={q} onChange={setQ} />
+          </View>
+        }
+        activeCount={[status, from, to].filter(Boolean).length}
+        applyLabel="Search"
+        onApply={() => void load()}
+      >
+        <View style={staffStyles.row}>
+          <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
+          <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
+        </View>
+        <Chips label="Status" value={status} onChange={setStatus} options={STATUSES} />
+      </FilterSheet>
       <ErrorText>{error}</ErrorText>
       {items === null ? <ActivityIndicator accessibilityLabel="Loading" /> : null}
       {items?.length === 0 ? <Muted>No visits match.</Muted> : null}

@@ -248,7 +248,15 @@ const styles = StyleSheet.create({
   checkmark: { color: color.onPrimary, fontSize: typeTokens.size.sm },
   privacy: { fontSize: typeTokens.size.sm, color: color.textMuted },
   notice: { gap: space.xxs },
-  link: { fontSize: typeTokens.size.sm, color: color.primary, textDecorationLine: 'underline' },
+  // Padded to a 48 px tap target (SDD §13.2); the phone audit measured 19 px.
+  link: {
+    fontSize: typeTokens.size.sm,
+    color: color.primary,
+    textDecorationLine: 'underline',
+    paddingVertical: space.sm,
+    minHeight: 48,
+    alignSelf: 'flex-start',
+  },
   error: { fontSize: typeTokens.size.sm, color: color.danger },
   action: { marginTop: space.sm },
   deniedBox: { gap: space.xs, marginTop: space.md },

@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "e2e": "playwright test --config=e2e/playwright.config.ts",
-    "clean": "node ../../scripts/clean.mjs dist .expo .turbo"
+    "clean": "node ../../scripts/clean.mjs dist .expo .turbo",
+    "audit:mobile": "playwright test --config=e2e/mobile-audit.config.ts"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.16",

@@ -37,6 +37,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: space.xs, flexWrap: 'wrap' },
   chip: {
     minHeight: 48,
+    minWidth: 48,
+    alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space.md,
     borderRadius: shape.chipRadius,

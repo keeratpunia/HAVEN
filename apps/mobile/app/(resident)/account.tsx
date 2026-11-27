@@ -4,6 +4,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import { Button } from '../../components/Button.js';
 import { DeleteAccount } from '../../components/DeleteAccount.js';
+import { InstallAppCard } from '../../components/InstallAppCard.js';
 import { ProfileEditor } from '../../components/ProfileEditor.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { availableShells } from '../../lib/resident-route.js';
@@ -36,6 +37,7 @@ export default function Account() {
       <Text style={styles.title} accessibilityRole="header">
         Profile
       </Text>
+      <InstallAppCard />
       {/* FR-08: edit the name, retake the selfie (the change is logged). */}
       {user?.residentStatus === 'verified' ? (
         <ProfileEditor kind="resident" onSaved={() => void refresh()} />

@@ -20,4 +20,11 @@ describe('GPS failure messages (§13.6)', () => {
       'Location is turned off for HAVEN',
     );
   });
+
+  it('tells a phone user how to turn location back on in Chrome and iPhone Safari', () => {
+    const body = copyFor(copyKeyForGpsFailure('location_denied')).body;
+    expect(body).toContain('Android (Chrome)');
+    expect(body).toContain('iPhone (Safari)');
+    expect(body).toContain('Location Services');
+  });
 });

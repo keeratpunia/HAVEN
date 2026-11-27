@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
 import { formatDateShort, type AdminChargeDTO, type AdminResidentDTO } from '@haven/shared';
 import { color, space, type as typeTokens } from '@haven/ui';
@@ -34,10 +34,13 @@ export function ChargesBoard({
   hostelId,
   warden,
   minFine,
+  footer,
 }: {
   hostelId: string;
   warden: boolean;
   minFine: number;
+  /** Shown under the list (the office shell's "Add to home screen" card). */
+  footer?: ReactNode;
 }) {
   const [status, setStatus] = useState<Status>('pending');
   const [q, setQ] = useState('');
@@ -292,6 +295,7 @@ export function ChargesBoard({
           if (w) void act(() => staffApi.waiveCharge(hostelId, w.id, reason), 'Charge waived.');
         }}
       />
+      {footer}
     </StaffScreen>
   );
 }

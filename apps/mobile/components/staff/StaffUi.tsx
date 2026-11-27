@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { color, shape, space, type as typeTokens } from '@haven/ui';
+import { color, shape, space, touchTarget, type as typeTokens } from '@haven/ui';
 import { useStaff } from '../../lib/staff-context.js';
 
 /**
@@ -242,7 +242,10 @@ const styles = StyleSheet.create({
   hostelName: { fontSize: typeTokens.size.sm, color: color.textMuted },
   chips: { flexDirection: 'row', gap: space.xs, flexWrap: 'wrap' },
   chip: {
-    minHeight: 40,
+    // SDD §13.2: touch targets >= 48 px (the phone audit found 40).
+    minHeight: touchTarget,
+    minWidth: touchTarget,
+    alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space.sm,
     borderRadius: shape.chipRadius,

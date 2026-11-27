@@ -1,5 +1,6 @@
 import { useRouter } from 'expo-router';
 import { Button } from '../../components/Button.js';
+import { InstallAppCard } from '../../components/InstallAppCard.js';
 import { StaffScreen, Strong } from '../../components/staff/StaffUi.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { useStaff } from '../../lib/staff-context.js';
@@ -14,6 +15,7 @@ export default function More() {
   const others = user ? availableShells(user).filter((s) => s.label !== 'Warden') : [];
   return (
     <StaffScreen title="More">
+      <InstallAppCard />
       {MORE.filter((i) => can(...i.roles)).map((i) => (
         <Button
           key={i.path}

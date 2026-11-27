@@ -270,7 +270,15 @@ const styles = StyleSheet.create({
     fontSize: typeTokens.size.body,
     color: color.text,
   },
-  link: { fontSize: typeTokens.size.sm, color: color.primary, textDecorationLine: 'underline' },
+  // Padded to a 48 px tap target (SDD §13.2); the phone audit measured 19 px.
+  link: {
+    fontSize: typeTokens.size.sm,
+    color: color.primary,
+    textDecorationLine: 'underline',
+    paddingVertical: space.sm,
+    minHeight: 48,
+    alignSelf: 'flex-start',
+  },
   consent: { flexDirection: 'row', gap: space.sm, alignItems: 'flex-start', minHeight: 48 },
   box: {
     width: 24,

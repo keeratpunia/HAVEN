@@ -4,6 +4,7 @@ import { formatDateTime, type AuditRowDTO } from '@haven/shared';
 import { staffApi } from '../../api/client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { Button } from '../../components/Button.js';
+import { FilterSheet } from '../../components/staff/FilterSheet.js';
 import {
   Card,
   ErrorText,
@@ -56,13 +57,18 @@ export default function Audit() {
 
   return (
     <StaffScreen title="Audit log">
-      <View style={staffStyles.row}>
-        <Field label="Entity (visits, residents, charges…)" value={entity} onChange={setEntity} />
-        <Field label="Actor id" value={actorId} onChange={setActorId} />
-        <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
-        <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
-      </View>
-      <Button label="Filter" fullWidth={false} onPress={() => void load()} />
+      <FilterSheet
+        activeCount={[entity, actorId, from, to].filter(Boolean).length}
+        applyLabel="Filter"
+        onApply={() => void load()}
+      >
+        <View style={staffStyles.row}>
+          <Field label="Entity (visits, residents, charges…)" value={entity} onChange={setEntity} />
+          <Field label="Actor id" value={actorId} onChange={setActorId} />
+          <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
+          <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
+        </View>
+      </FilterSheet>
       <ErrorText>{message}</ErrorText>
       {items === null ? <ActivityIndicator accessibilityLabel="Loading" /> : null}
       {items?.length === 0 ? <Muted>No entries.</Muted> : null}
