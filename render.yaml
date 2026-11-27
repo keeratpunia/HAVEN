@@ -13,7 +13,9 @@ services:
     region: singapore
     branch: main
     autoDeploy: true
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @haven/api run build
+    # NODE_ENV=production (below) would make pnpm skip devDependencies, and the build
+    # needs esbuild; the install alone runs as development. The API runs as production.
+    buildCommand: corepack enable && NODE_ENV=development pnpm install --frozen-lockfile && pnpm --filter @haven/api run build
     startCommand: node apps/api/dist/server.js
     # Liveness only: /ready also checks the database and would restart the API on a
     # database blip.
