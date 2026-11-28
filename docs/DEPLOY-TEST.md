@@ -65,7 +65,9 @@ Follow it in order. It takes about an hour.
    - Name: `haven-test`
    - Database password: click **Generate a password**, then **Copy**, and save it in
      your password manager as "Supabase haven-test database password".
-   - Region: **South Asia (Mumbai)**
+   - Region: **South Asia (Mumbai)**. *(The Phase 1 project ended up in Southeast Asia
+     (Singapore), which is accepted for dummy data only (DEC-030). The pilot's project
+     must be Mumbai.)*
    - Plan: **Free**
    - Click **Create new project** and wait 1–2 minutes until it says the project is
      ready.

@@ -1922,6 +1922,23 @@ Source for all of Part 1: SDD §2.7.
     dedicated PR).
 - **SDD updated?** No.
 
+### DEC-030 — Phase 1's Supabase project is in Singapore, not Mumbai
+
+- **Date:** 2026-11-28
+- **Decided by:** the team (Keerat).
+- **Context:** DEC-026 D-04 chose Supabase Free in Mumbai (`ap-south-1`), following
+  SDD §8.3 ("Data at rest stays in India"). The test version's project
+  (`lvispjhryvrececgberp`) was created in Southeast Asia (Singapore, `ap-southeast-1`);
+  this was found when its pooler host appeared during the seed.
+- **Decision:** keep Singapore for Phase 1. The test version holds dummy data only
+  (DEC-026); no personal data is stored there. Render is also in Singapore, so the API
+  and the database sit together.
+- **Phase 2 (pilot, real data) must use a new Supabase project in Mumbai**, as SDD §8.3
+  requires. DEC-026 already makes it a separate project.
+- **Alternatives considered:** recreating the project in Mumbai now (rejected for
+  Phase 1: about 30 minutes of setup for no benefit with dummy data).
+- **SDD updated?** No. §8.3 stays as written for the pilot.
+
 Template for a new entry:
 
 ```markdown
