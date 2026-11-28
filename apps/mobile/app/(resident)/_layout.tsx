@@ -3,7 +3,7 @@ import { Redirect, Stack, usePathname, useRouter } from 'expo-router';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { NotificationDTO } from '@haven/shared';
 import { color, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { OfflineBanner } from '../../components/Banner.js';
 import { useAuth } from '../../lib/auth-context.js';
 import { handleNotificationTap } from '../../lib/notification-routing.js';

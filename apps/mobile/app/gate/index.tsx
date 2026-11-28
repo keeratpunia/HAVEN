@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import QRCode from 'qrcode';
 import { color, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import {
   clearGateStorage,
   readGateStorage,

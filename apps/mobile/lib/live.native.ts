@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import EventSource from 'react-native-sse';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 import type { LiveEvent } from './live.js';
 
 /**

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { formatDateTime, type AuditRowDTO } from '@haven/shared';
-import { staffApi } from '../../api/client.js';
+import { staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { Button } from '../../components/Button.js';
 import { FilterSheet } from '../../components/staff/FilterSheet.js';

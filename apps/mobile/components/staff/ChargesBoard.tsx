@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
 import { formatDateShort, type AdminChargeDTO, type AdminResidentDTO } from '@haven/shared';
 import { color, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
-import { staffApi } from '../../api/client.js';
+import * as api from '../../services/api-client.js';
+import { staffApi } from '../../services/api-client.js';
 import { Button } from '../Button.js';
 import { ConfirmSheet } from '../ConfirmSheet.js';
 import {

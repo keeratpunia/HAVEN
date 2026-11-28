@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import type { AdminVisitDTO } from '@haven/shared';
-import { staffApi } from '../../../api/client.js';
+import { staffApi } from '../../../services/api-client.js';
 import { useStaff } from '../../../lib/staff-context.js';
 import { useLiveUpdates } from '../../../lib/live.js';
 import { Button } from '../../../components/Button.js';

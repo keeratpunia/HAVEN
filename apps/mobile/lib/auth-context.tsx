@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 
 interface AuthState {
   visitor: api.MeVisitor | null;
@@ -25,7 +25,7 @@ const AuthContext = createContext<AuthState | null>(null);
  * Holds the signed-in principal — guest visitor or resident user — across screens.
  * `GET /me` (via `api.getMe()`) returns whichever shape matches the access token's
  * principal type; this sets exactly one of `visitor`/`user` and nulls the other. The
- * access token itself lives in `api/client.ts`'s module state (memory only, SDD §9.5)
+ * access token itself lives in `services/api-client.ts`'s module state (memory only, SDD §9.5)
  * — on mount this tries `GET /me`, which (via the client's 401 -> refresh -> retry
  * logic) picks up an existing session from the httpOnly refresh cookie on reload.
  */

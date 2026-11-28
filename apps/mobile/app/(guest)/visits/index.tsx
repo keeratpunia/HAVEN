@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { color, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../../api/client.js';
+import * as api from '../../../services/api-client.js';
 import { EmptyState } from '../../../components/EmptyState.js';
 import { StatusChip } from '../../../components/StatusChip.js';
 import { formatDateIst, formatTimeIst } from '../../../lib/formatTime.js';

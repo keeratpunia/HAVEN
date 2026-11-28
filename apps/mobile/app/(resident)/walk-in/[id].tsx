@@ -10,7 +10,7 @@ import {
   VISIT_TYPE_LABELS,
 } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../../api/client.js';
+import * as api from '../../../services/api-client.js';
 import { Button } from '../../../components/Button.js';
 import { ConfirmSheet } from '../../../components/ConfirmSheet.js';
 import { DateTimeField } from '../../../components/DateTimeField.js';

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { VisitDetailDTO } from '@haven/shared';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 
 /**
  * Loads one of the host's visits for R-08/R-09/R-10, and runs host actions with the

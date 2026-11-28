@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { copyFor, fillCopy } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../../api/client.js';
+import * as api from '../../../services/api-client.js';
 import { OfflineBanner } from '../../../components/Banner.js';
 import { Button } from '../../../components/Button.js';
 import { Countdown } from '../../../components/Countdown.js';

@@ -3,7 +3,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { copyFor } from '@haven/shared';
 import { color, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../../api/client.js';
+import * as api from '../../../services/api-client.js';
 import { OfflineBanner } from '../../../components/Banner.js';
 import { ErrorState } from '../../../components/ErrorState.js';
 import { StatusChip } from '../../../components/StatusChip.js';

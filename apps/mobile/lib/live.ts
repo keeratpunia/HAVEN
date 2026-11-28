@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 
 /**
  * SDD §9.9 client side (web): `@microsoft/fetch-event-source`, so the Authorization

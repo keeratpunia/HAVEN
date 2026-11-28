@@ -3,7 +3,7 @@ import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { CONSENT_VERSION, copyFor } from '@haven/shared';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { Button } from '../../components/Button.js';
 import { LiveCamera } from '../../components/LiveCamera.js';
 import { useAuth } from '../../lib/auth-context.js';

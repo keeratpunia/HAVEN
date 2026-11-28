@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { MeUserDTO } from '@haven/shared';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 
 /**
  * Which hostel a staff member is working in (SDD §3.4: "A user can hold roles in several

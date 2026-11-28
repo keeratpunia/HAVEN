@@ -1775,6 +1775,13 @@ Source for all of Part 1: SDD §2.7.
        invite links, gate QR links and signed-media links point there.
      - `TRUST_PROXY_HOPS=2` (Vercel edge + Render's proxy).
      - The SDD's `app.`/`api.` subdomains (§8.3) wait for a domain.
+     - The Vercel project's root is `apps/mobile`, and Vercel turns any top-level `api/`
+       folder there into server functions. The app's API client therefore lives in
+       `apps/mobile/services/api-client.ts` (it was `api/client.ts`, which the first
+       deploy published as a crashing `/api/client` function). Never add an `api/` folder
+       under `apps/mobile`.
+     - The test version's address is `https://haven-gh8-test-bay.vercel.app` (Vercel
+       added `-bay`: the plain name wasn't available).
   2. **Web security headers (SA-12)** are in `vercel.json`: CSP with no inline scripts
      (`script-src 'self'` plus Turnstile, `connect-src 'self'`, images from `*.supabase.co`
      signed URLs, `frame-ancestors 'none'`), HSTS `max-age=31536000`, `nosniff`,

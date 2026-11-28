@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator } from 'react-native';
-import { staffApi } from '../../api/client.js';
+import { staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { ChargesBoard } from '../../components/staff/ChargesBoard.js';
 

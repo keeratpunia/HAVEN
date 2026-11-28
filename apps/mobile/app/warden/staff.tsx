@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { formatDateTime, type StaffDTO } from '@haven/shared';
-import * as api from '../../api/client.js';
-import { staffApi } from '../../api/client.js';
+import * as api from '../../services/api-client.js';
+import { staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { copyText } from '../../lib/share.js';
 import { shareText } from '../../lib/download.js';

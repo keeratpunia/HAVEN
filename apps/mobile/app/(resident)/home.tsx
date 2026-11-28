@@ -4,7 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { formatDateShort, toLocalDateString, type VisitDTO } from '@haven/shared';
 import { serverNow } from '../../lib/server-time.js';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { Button } from '../../components/Button.js';
 import { EmptyState } from '../../components/EmptyState.js';
 import { VisitCard } from '../../components/VisitCard.js';

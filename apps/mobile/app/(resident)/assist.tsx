@@ -10,7 +10,7 @@ import {
   gateTokenFromQr,
 } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { Button } from '../../components/Button.js';
 import { LiveCamera } from '../../components/LiveCamera.js';
 import { PhoneInput } from '../../components/PhoneInput.js';

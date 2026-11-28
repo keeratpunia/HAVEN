@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { ScanLocation } from '../api/client.js';
+import type { ScanLocation } from '../services/api-client.js';
 
 /**
  * Client location capture for a scan session (SDD §9.3): `watchPosition` with

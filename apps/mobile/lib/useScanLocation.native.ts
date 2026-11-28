@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import type { ScanLocation } from '../api/client.js';
+import type { ScanLocation } from '../services/api-client.js';
 
 /**
  * Native location capture (SDD §9.3): `Location.getCurrentPositionAsync({ accuracy:

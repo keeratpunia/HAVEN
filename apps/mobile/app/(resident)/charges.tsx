@@ -3,7 +3,7 @@ import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import { formatDateShort, type ChargeDTO } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { EmptyState } from '../../components/EmptyState.js';
 
 /** R-14 Charges (SDD §13.4): "List with status chips and totals". Money is whole rupees (CLAUDE.md §2). */

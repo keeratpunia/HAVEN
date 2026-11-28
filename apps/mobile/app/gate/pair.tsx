@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { Button } from '../../components/Button.js';
 import { writeGateStorage } from '../../lib/gateStorage.js';
 

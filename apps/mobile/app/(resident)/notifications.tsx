@@ -3,7 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatDateTime, type NotificationDTO } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { EmptyState } from '../../components/EmptyState.js';
 import { handleNotificationTap } from '../../lib/notification-routing.js';
 

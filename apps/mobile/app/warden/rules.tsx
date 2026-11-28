@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { formatDateTime, RulesConfigSchema, type RulesConfig, type RulesDTO } from '@haven/shared';
-import * as api from '../../api/client.js';
-import { staffApi } from '../../api/client.js';
+import * as api from '../../services/api-client.js';
+import { staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { Button } from '../../components/Button.js';
 import {

@@ -15,7 +15,7 @@ import { routeForUser } from '../../lib/resident-route.js';
 import { OfflineBanner } from '../../components/Banner.js';
 import { useOnline } from '../../lib/useOnline.js';
 import { HostelPicker } from '../../components/staff/StaffUi.js';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { handleNotificationTap } from '../../lib/notification-routing.js';
 import { registerForPush, subscribeToNotificationTaps } from '../../lib/push.js';
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Redirect, useRouter } from 'expo-router';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { formatDateTime, formatTime12h, type DashboardDTO } from '@haven/shared';
-import { staffApi } from '../../api/client.js';
+import { staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { useLiveUpdates } from '../../lib/live.js';
 import {

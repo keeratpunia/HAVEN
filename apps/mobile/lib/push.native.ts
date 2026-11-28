@@ -3,7 +3,7 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { ANDROID_CHANNELS } from '@haven/shared';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 import type { PushPermission } from './push.js';
 
 /**

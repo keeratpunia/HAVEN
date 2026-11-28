@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { formatTime12h, type EmergencyRowDTO } from '@haven/shared';
 import { color, space, type as typeTokens } from '@haven/ui';
-import { adminCsv, staffApi } from '../../api/client.js';
+import { adminCsv, staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { useLiveUpdates } from '../../lib/live.js';
 import { printPage, saveCsv, shareText } from '../../lib/download.js';

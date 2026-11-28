@@ -10,8 +10,8 @@ import {
   type VisitEventDTO,
 } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../../api/client.js';
-import { staffApi } from '../../../api/client.js';
+import * as api from '../../../services/api-client.js';
+import { staffApi } from '../../../services/api-client.js';
 import { useStaff } from '../../../lib/staff-context.js';
 import { useLiveUpdates } from '../../../lib/live.js';
 import { useActionKeys } from '../../../lib/action-key.js';

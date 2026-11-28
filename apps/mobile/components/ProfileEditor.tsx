@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
 import { copyFor } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 import { Button } from './Button.js';
 import { LiveCamera } from './LiveCamera.js';
 

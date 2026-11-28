@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { copyFor, fillCopy, type CopyEntry, type DeletionWaitingFor } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import * as api from '../api/client.js';
+import * as api from '../services/api-client.js';
 import { Button } from './Button.js';
 import { ConfirmSheet } from './ConfirmSheet.js';
 

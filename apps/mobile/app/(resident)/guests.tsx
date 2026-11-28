@@ -3,7 +3,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
 import type { HostedVisitBucket, VisitDTO } from '@haven/shared';
 import { color, space, type as typeTokens } from '@haven/ui';
-import * as api from '../../api/client.js';
+import * as api from '../../services/api-client.js';
 import { EmptyState } from '../../components/EmptyState.js';
 import { Segments } from '../../components/Segments.js';
 import { VisitCard } from '../../components/VisitCard.js';
