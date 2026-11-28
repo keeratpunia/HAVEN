@@ -719,6 +719,8 @@ export const staffApi = {
       expectedToday?: boolean;
       /** W-08 resident detail: one host's visits (DEC-031). */
       hostId?: string;
+      /** 'guest': match the guest only, not the host or room (W-07, DEC-032). */
+      match?: 'all' | 'guest';
       cursor?: string | null;
     } = {},
   ) =>
@@ -816,6 +818,8 @@ export const staffApi = {
     p: {
       entity?: string;
       actorId?: string;
+      /** Part of the person's name (W-11, DEC-032). */
+      actor?: string;
       from?: string;
       to?: string;
       cursor?: string | null;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatDateTime, RulesConfigSchema, type RulesConfig, type RulesDTO } from '@haven/shared';
 import * as api from '../../services/api-client.js';
 import { staffApi } from '../../services/api-client.js';
@@ -14,6 +14,8 @@ import {
   Strong,
   staffStyles,
 } from '../../components/staff/StaffUi.js';
+import { DateTimeField } from '../../components/DateTimeField.js';
+import { StatusText, useStatus } from '../../components/StatusText.js';
 
 /**
  * W-06 Rules (FR-55): "Form grouped: Times, Limits, Overnight, Charges; preview of
@@ -33,7 +35,7 @@ const GROUPS: { title: string; fields: FieldDef[] }[] = [
   {
     title: 'Times',
     fields: [
-      { path: 'visiting_start', label: 'Visiting starts (HH:MM)', kind: 'time' },
+      { path: 'visiting_start', label: 'Visiting starts', kind: 'time' },
       { path: 'last_entry_day', label: 'Last entry for day guests', kind: 'time' },
       { path: 'hard_cutoff', label: 'No entry after', kind: 'time' },
       { path: 'day_visit_latest_end', label: 'Day visits end by', kind: 'time' },
@@ -105,7 +107,7 @@ export default function Rules() {
   const [current, setCurrent] = useState<RulesDTO | null>(null);
   const [draft, setDraft] = useState<Record<Path, string>>({});
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const hostelId = hostel?.id ?? null;
 
   const load = useCallback(async () => {
@@ -117,7 +119,7 @@ export default function Rules() {
     setDraft(d);
   }, [hostelId]);
   useEffect(() => {
-    void load().catch(() => setMessage("Couldn't load the rules."));
+    void load().catch(() => notice.fail("Couldn't load the rules."));
   }, [load]);
 
   const candidate = useMemo(() => {
@@ -150,7 +152,7 @@ export default function Rules() {
   if (!current) {
     return (
       <StaffScreen title="Rules">
-        <ErrorText>{message}</ErrorText>
+        <StatusText status={notice.message} />
         <ActivityIndicator accessibilityLabel="Loading rules" />
       </StaffScreen>
     );
@@ -183,6 +185,15 @@ export default function Rules() {
                     {draft[f.path] === 'true' ? '☑' : '☐'} {f.label}
                   </Text>
                 </Pressable>
+              ) : f.kind === 'time' ? (
+                <View key={f.path} style={styles.timeField}>
+                  <DateTimeField
+                    kind="time"
+                    label={f.label}
+                    value={draft[f.path] ?? ''}
+                    onChange={(v) => setDraft({ ...draft, [f.path]: v })}
+                  />
+                </View>
               ) : (
                 <Field
                   key={f.path}
@@ -211,7 +222,7 @@ export default function Rules() {
           </ErrorText>
         ) : null}
       </Card>
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       <Button
         label="Save as new version"
         disabled={!parsed?.success || changes.length === 0}
@@ -219,13 +230,13 @@ export default function Rules() {
         onPress={async () => {
           if (!parsed?.success || !hostelId) return;
           setBusy(true);
-          setMessage(null);
+          notice.clear();
           try {
             const saved = await staffApi.publishRules(hostelId, parsed.data);
-            setMessage(`Saved as version ${saved.version}. New entries use it now.`);
+            notice.ok(`Saved as version ${saved.version}. New entries use it now.`);
             await load();
           } catch (err) {
-            setMessage(err instanceof api.ApiError ? err.message : "Couldn't save.");
+            notice.fail(err instanceof api.ApiError ? err.message : "Couldn't save.");
           } finally {
             setBusy(false);
           }
@@ -234,3 +245,8 @@ export default function Rules() {
     </StaffScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  // Same footprint as the other rule fields (StaffUi Field: flexBasis 200 in a row).
+  timeField: { flexGrow: 1, flexBasis: 200 },
+});

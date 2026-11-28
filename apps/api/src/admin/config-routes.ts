@@ -569,7 +569,11 @@ export async function registerAdminConfigRoutes(
           'haven.audit_log.after',
         ])
         .where('haven.audit_log.hostel_id', '=', request.hostelId);
-      if (q.entity) query = query.where('haven.audit_log.entity', '=', q.entity);
+      if (q.entity) query = query.where('haven.audit_log.entity', 'in', q.entity.split(','));
+      if (q.actor) {
+        const like = `%${q.actor.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+        query = query.where('haven.users.full_name', 'ilike', like);
+      }
       if (q.entityId) query = query.where('haven.audit_log.entity_id', '=', q.entityId);
       if (q.actorId) query = query.where('haven.audit_log.actor_id', '=', q.actorId);
       if (q.from)

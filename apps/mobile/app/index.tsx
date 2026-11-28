@@ -27,7 +27,6 @@ export default function Home() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>HAVEN</Text>
-      <Text style={styles.subtitle}>Hostel guest check-in</Text>
       <View style={styles.action}>
         {/* Phone test 2026-11-28: the admin took "Sign in" for theirs; say who each is for. */}
         <Button label="Guest sign-in" onPress={() => router.push('/login')} />
@@ -56,6 +55,5 @@ const styles = StyleSheet.create({
     fontWeight: typeTokens.weight.semibold,
     color: color.text,
   },
-  subtitle: { fontSize: typeTokens.size.body, color: color.textMuted },
   action: { marginTop: space.lg, width: 240 },
 });

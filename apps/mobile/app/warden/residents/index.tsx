@@ -9,13 +9,13 @@ import { FilterSheet } from '../../../components/staff/FilterSheet.js';
 import {
   Card,
   Chips,
-  ErrorText,
   Field,
   Muted,
   StaffScreen,
   Strong,
   staffStyles,
 } from '../../../components/staff/StaffUi.js';
+import { StatusText, useStatus } from '../../../components/StatusText.js';
 
 /**
  * W-08 Residents (SDD §13.4): "Search; status filters; resident detail with suspend /
@@ -40,7 +40,7 @@ export default function Residents() {
   const [q, setQ] = useState('');
   const [items, setItems] = useState<AdminResidentDTO[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const hostelId = hostel?.id ?? null;
 
   const load = useCallback(async () => {
@@ -49,9 +49,9 @@ export default function Residents() {
       const page = await staffApi.residents(hostelId, { status, sort, q: q || undefined });
       setItems(page.items);
       setCursor(page.nextCursor);
-      setMessage(null);
+      notice.clear();
     } catch {
-      setMessage("Couldn't load residents.");
+      notice.fail("Couldn't load residents.");
     }
   }, [hostelId, status, sort, q]);
   useEffect(() => {
@@ -86,7 +86,7 @@ export default function Residents() {
         <Muted>Sort by</Muted>
         <Chips label="Sort by" value={sort} onChange={setSort} options={SORTS} />
       </FilterSheet>
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       {items === null ? <ActivityIndicator accessibilityLabel="Loading" /> : null}
       {items?.length === 0 ? <Muted>No residents.</Muted> : null}
       {items?.map((r) => (

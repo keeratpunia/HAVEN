@@ -16,6 +16,7 @@ import {
   Strong,
   staffStyles,
 } from './StaffUi.js';
+import { StatusText, useStatus } from '../StatusText.js';
 
 /**
  * O-01 Charges (office) and the warden's Charges (FR-59): "Table: resident, room, kind,
@@ -48,7 +49,7 @@ export function ChargesBoard({
   const [cursor, setCursor] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Record<string, string>>({});
   const [waiving, setWaiving] = useState<AdminChargeDTO | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const [fineOpen, setFineOpen] = useState(false);
   const [residentQ, setResidentQ] = useState('');
   const [residents, setResidents] = useState<AdminResidentDTO[] | null>(null);
@@ -67,17 +68,17 @@ export function ChargesBoard({
     setCursor(page.nextCursor);
   }, [hostelId, status, q]);
   useEffect(() => {
-    void load().catch(() => setMessage("Couldn't load charges."));
+    void load().catch(() => notice.fail("Couldn't load charges."));
     // search runs on demand
   }, [hostelId, status]);
 
   async function act(fn: () => Promise<unknown>, ok: string) {
-    setMessage(null);
+    notice.clear();
     try {
       await fn();
-      setMessage(ok);
+      notice.ok(ok);
     } catch (err) {
-      setMessage(
+      notice.fail(
         err instanceof api.ApiError
           ? err.status === 409
             ? 'This was updated by someone else.'
@@ -194,7 +195,7 @@ export function ChargesBoard({
         </Card>
       ) : null}
 
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       {items === null ? <ActivityIndicator accessibilityLabel="Loading charges" /> : null}
       {items && items.length > 0 ? <Muted>{`${items.length} shown · ₹${total}`}</Muted> : null}
       {items?.length === 0 ? <Muted>No charges.</Muted> : null}

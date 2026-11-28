@@ -10,6 +10,7 @@ import { handleNotificationTap } from '../../lib/notification-routing.js';
 import { registerForPush, subscribeToNotificationTaps } from '../../lib/push.js';
 import { residentRoute } from '../../lib/resident-route.js';
 import { useOnline } from '../../lib/useOnline.js';
+import { ShellHeader } from '../../components/ShellHeader.js';
 
 /**
  * Resident shell (SDD §13.4: "Bottom tabs: Home, Guests, Invite (centre +), Charges,
@@ -101,17 +102,23 @@ export default function ResidentLayout() {
   return (
     <View style={styles.root}>
       <OfflineBanner online={online} />
-      <View style={styles.header} accessibilityRole="header">
-        <Text style={styles.logo}>HAVEN</Text>
-        <Pressable
-          onPress={() => router.push('/notifications')}
-          accessibilityRole="button"
-          accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-          style={styles.bell}
-        >
-          <Text style={styles.bellText}>Notifications{unread > 0 ? ` (${unread})` : ''}</Text>
-        </Pressable>
-      </View>
+      <ShellHeader
+        role="Resident"
+        // Screens below the tabs (a visit, an arrival, notifications…) get Back (DEC-032).
+        backTo={onTab ? null : '/home'}
+        right={
+          pathname === '/notifications' ? null : (
+            <Pressable
+              onPress={() => router.push('/notifications')}
+              accessibilityRole="button"
+              accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+              style={styles.bell}
+            >
+              <Text style={styles.bellText}>Notifications{unread > 0 ? ` (${unread})` : ''}</Text>
+            </Pressable>
+          )
+        }
+      />
       {banner ? (
         <Pressable
           style={styles.banner}
@@ -142,6 +149,7 @@ export default function ResidentLayout() {
             return (
               <Pressable
                 key={tab.path}
+                // replace: tabs don't stack; screens below a tab get the header's Back.
                 onPress={() => router.replace(tab.path as never)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected }}
@@ -180,20 +188,6 @@ function BannerContent({ n }: { n: NotificationDTO }) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: space.md,
-    minHeight: 48,
-    borderBottomWidth: 1,
-    borderBottomColor: color.border,
-  },
-  logo: {
-    fontSize: typeTokens.size.md,
-    fontWeight: typeTokens.weight.semibold,
-    color: color.primary,
-  },
   bell: { minHeight: 48, minWidth: 48, justifyContent: 'center' },
   bellText: {
     fontSize: typeTokens.size.sm,

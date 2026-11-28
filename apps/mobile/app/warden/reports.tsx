@@ -7,15 +7,9 @@ import { adminCsv, staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
 import { saveCsv } from '../../lib/download.js';
 import { Button } from '../../components/Button.js';
-import {
-  Card,
-  ErrorText,
-  Field,
-  Muted,
-  StaffScreen,
-  Strong,
-  staffStyles,
-} from '../../components/staff/StaffUi.js';
+import { Card, Muted, StaffScreen, Strong, staffStyles } from '../../components/staff/StaffUi.js';
+import { DateTimeField } from '../../components/DateTimeField.js';
+import { StatusText, useStatus } from '../../components/StatusText.js';
 
 /** W-12 Reports (FR-57): date range, counts by type/status, CSV export (audited). */
 const today = toLocalDateString(new Date(), 'Asia/Kolkata');
@@ -27,14 +21,14 @@ export default function Reports() {
   const [from, setFrom] = useState(params.from ?? plusDays(today, -30));
   const [to, setTo] = useState(params.to ?? today);
   const [report, setReport] = useState<ReportDTO | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const valid = /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to) && from <= to;
 
   return (
     <StaffScreen title="Reports">
       <View style={staffStyles.row}>
-        <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
-        <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
+        <DateTimeField kind="date" label="From" value={from} onChange={setFrom} />
+        <DateTimeField kind="date" label="To" value={to} onChange={setTo} />
       </View>
       <View style={staffStyles.row}>
         <Button
@@ -45,9 +39,9 @@ export default function Reports() {
             if (!hostel) return;
             try {
               setReport(await staffApi.report(hostel.id, from, to));
-              setMessage(null);
+              notice.clear();
             } catch (err) {
-              setMessage(err instanceof api.ApiError ? err.message : "Couldn't load the report.");
+              notice.fail(err instanceof api.ApiError ? err.message : "Couldn't load the report.");
             }
           }}
         />
@@ -65,7 +59,7 @@ export default function Reports() {
           }}
         />
       </View>
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       {report ? (
         <Card>
           <Strong>{`${report.total} visits`}</Strong>

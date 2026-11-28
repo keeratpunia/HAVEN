@@ -11,14 +11,14 @@ import { ConfirmSheet } from '../../../components/ConfirmSheet.js';
 import { AdminVisitCard } from '../../../components/staff/AdminVisitCard.js';
 import {
   Card,
-  ErrorText,
-  Field,
   Muted,
   StaffScreen,
   Strong,
   Tile,
   staffStyles,
 } from '../../../components/staff/StaffUi.js';
+import { DateTimeField } from '../../../components/DateTimeField.js';
+import { StatusText, useStatus } from '../../../components/StatusText.js';
 
 /**
  * W-08 resident detail (SDD §13.4: "resident detail with suspend / mark left"), with the
@@ -40,7 +40,7 @@ export default function ResidentDetail() {
   const [until, setUntil] = useState('');
   const [sheet, setSheet] = useState<Sheet>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
 
   const load = useCallback(async () => {
     if (!hostelId || !id) return;
@@ -50,7 +50,7 @@ export default function ResidentDetail() {
       setVisits(page.items);
       setCursor(page.nextCursor);
     } catch (err) {
-      setMessage(err instanceof api.ApiError ? err.message : "Couldn't load this resident.");
+      notice.fail(err instanceof api.ApiError ? err.message : "Couldn't load this resident.");
     }
   }, [hostelId, id]);
   useEffect(() => {
@@ -59,12 +59,12 @@ export default function ResidentDetail() {
 
   async function act(fn: () => Promise<unknown>, ok: string) {
     setBusy(true);
-    setMessage(null);
+    notice.clear();
     try {
       await fn();
-      setMessage(ok);
+      notice.ok(ok);
     } catch (err) {
-      setMessage(err instanceof api.ApiError ? err.message : "Couldn't reach HAVEN.");
+      notice.fail(err instanceof api.ApiError ? err.message : "Couldn't reach HAVEN.");
     } finally {
       setBusy(false);
       setSheet(null);
@@ -75,19 +75,15 @@ export default function ResidentDetail() {
   if (!resident) {
     return (
       <StaffScreen title="Resident">
-        <ErrorText>{message}</ErrorText>
-        {message ? null : <ActivityIndicator accessibilityLabel="Loading" />}
+        <StatusText status={notice.message} />
+        {notice.message ? null : <ActivityIndicator accessibilityLabel="Loading" />}
       </StaffScreen>
     );
   }
 
   const s = resident.hostStats;
-  // An installed web app has no browser Back button (DEC-027).
-  const back = () =>
-    router.canGoBack() ? router.back() : router.replace('/warden/residents' as never);
   return (
     <StaffScreen title={resident.fullName}>
-      <Button label="Back to residents" variant="ghost" fullWidth={false} onPress={back} />
       <Card>
         <View style={staffStyles.row}>
           {resident.selfie ? (
@@ -128,11 +124,12 @@ export default function ResidentDetail() {
         <Tile label="Latest guest" value={s.lastGuestAt ? formatDateShort(s.lastGuestAt) : '—'} />
       </View>
 
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       {resident.status === 'verified' && can('warden', 'super_admin') ? (
         <View style={staffStyles.row}>
-          <Field
-            label="Suspend until (YYYY-MM-DD, empty = until lifted)"
+          <DateTimeField
+            kind="date"
+            label="Suspend until (optional)"
             value={until}
             onChange={setUntil}
           />

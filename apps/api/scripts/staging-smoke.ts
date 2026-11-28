@@ -315,7 +315,7 @@ async function main() {
   const paired = await call('POST', '/v1/gate-devices/pair', {
     body: {
       code: String(pairing.body.code).replace(/[^0-9A-Z]/gi, ''),
-      label: 'Smoke test (temporary)',
+      label: 'Temporary check device',
     },
   });
   expect2xx(paired, 'pair temporary gate device');
@@ -335,7 +335,7 @@ async function main() {
         auth: resident,
         body: {
           kind: 'invite',
-          guest: { name: 'Smoke Guest A', phone: PHONES.guestA, gender: 'female' },
+          guest: { name: 'Aditi Verma', phone: PHONES.guestA, gender: 'female' },
           type: 'day',
           windowStart: now.toISOString(),
           windowEnd: new Date(now.getTime() + 2 * 3_600_000).toISOString(),
@@ -345,7 +345,7 @@ async function main() {
       const inviteToken = String(invite.body.inviteUrl).split('/i/')[1];
       if (!inviteToken || !String(invite.body.inviteUrl).startsWith(BASE))
         fail('invite link does not point at the test version address', invite.body.inviteUrl);
-      const guestA = await guest(PHONES.guestA, 'Smoke Guest A');
+      const guestA = await guest(PHONES.guestA, 'Aditi Verma');
       await checkOutIfInside(guestA, gate, secret, 'earlier smoke visit');
       expect2xx(
         await call('POST', `/v1/invites/${inviteToken}/claim`, { auth: guestA, body: {} }),
@@ -376,7 +376,7 @@ async function main() {
       if (!kinds.includes('N-ARRIVED')) fail('host got no N-ARRIVED in-app notification', kinds);
       ok(`guest scans, live photo, checked in (${visitA.code}); host sees the arrival`);
 
-      const guestB = await guest(PHONES.guestB, 'Smoke Guest B');
+      const guestB = await guest(PHONES.guestB, 'Nisha Kapoor');
       await checkOutIfInside(guestB, gate, secret, 'earlier smoke walk-in');
       const sB = await scan(guestB, gate, secret);
       if (sB.options.actions?.[0] !== 'request_entry')
@@ -424,7 +424,7 @@ async function main() {
     const after = await call('GET', '/v1/admin/gates', { auth: admin, headers: adminHeaders });
     const device = (
       (after.body.items as { devices: { id: string; label: string }[] }[])[0]?.devices ?? []
-    ).find((d) => d.label === 'Smoke test (temporary)');
+    ).find((d) => d.label === 'Temporary check device');
     if (device) {
       const revoked = await call('POST', `/v1/admin/gate-devices/${device.id}/revoke`, {
         auth: admin,

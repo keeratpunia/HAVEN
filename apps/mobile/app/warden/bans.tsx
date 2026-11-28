@@ -9,13 +9,13 @@ import { Button } from '../../components/Button.js';
 import { ConfirmSheet } from '../../components/ConfirmSheet.js';
 import {
   Card,
-  ErrorText,
   Field,
   Muted,
   StaffScreen,
   Strong,
   staffStyles,
 } from '../../components/staff/StaffUi.js';
+import { StatusText, useStatus } from '../../components/StatusText.js';
 
 /**
  * W-07 Bans (FR-54): "Active bans list; add ban from visit or guest search — Add ban".
@@ -30,7 +30,7 @@ export default function Bans() {
   const [found, setFound] = useState<AdminVisitDTO[] | null>(null);
   const [lifting, setLifting] = useState<BanDTO | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const hostelId = hostel?.id ?? null;
 
   const load = useCallback(async () => {
@@ -38,7 +38,7 @@ export default function Bans() {
     setItems((await staffApi.bans(hostelId)).items);
   }, [hostelId]);
   useEffect(() => {
-    void load().catch(() => setMessage("Couldn't load bans."));
+    void load().catch(() => notice.fail("Couldn't load bans."));
   }, [load]);
 
   return (
@@ -51,10 +51,19 @@ export default function Bans() {
             label="Find guest"
             fullWidth={false}
             disabled={q.trim().length < 2}
-            onPress={async () =>
-              hostelId &&
-              setFound((await staffApi.visits(hostelId, { q })).items.filter((v) => v.guest.id))
-            }
+            onPress={async () => {
+              if (!hostelId) return;
+              const visits = (await staffApi.visits(hostelId, { q, match: 'guest' })).items;
+              // One row per guest (their latest visit), not one per visit.
+              const seen = new Set<string>();
+              setFound(
+                visits.filter((v) => {
+                  if (!v.guest.id || seen.has(v.guest.id)) return false;
+                  seen.add(v.guest.id);
+                  return true;
+                }),
+              );
+            }}
           />
         </View>
         {found?.length === 0 ? <Muted>No guest found.</Muted> : null}
@@ -62,12 +71,12 @@ export default function Bans() {
           <Button
             key={v.id}
             variant="secondary"
-            label={`${v.guest.name} · ${v.code} · ${formatDateShort(v.windowStart)}`}
+            label={`${v.guest.name} · last visit ${formatDateShort(v.windowStart)} · host ${v.host.displayName}`}
             onPress={() => router.push(`/warden/visits/${v.id}`)}
           />
         ))}
       </Card>
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       {items === null ? <ActivityIndicator accessibilityLabel="Loading" /> : null}
       {items?.length === 0 ? <Muted>No active bans.</Muted> : null}
       {items?.map((b) => (
@@ -100,9 +109,9 @@ export default function Bans() {
           setBusy(true);
           try {
             await staffApi.liftBan(hostelId, lifting.id, reason);
-            setMessage('Ban lifted.');
+            notice.ok('Ban lifted.');
           } catch (err) {
-            setMessage(err instanceof api.ApiError ? err.message : "Couldn't lift the ban.");
+            notice.fail(err instanceof api.ApiError ? err.message : "Couldn't lift the ban.");
           } finally {
             setBusy(false);
             setLifting(null);

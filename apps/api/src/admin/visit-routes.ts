@@ -3,6 +3,9 @@ import type { Kysely } from 'kysely';
 import { z } from 'zod';
 import {
   AdminVisitsQuerySchema,
+  formatDateTimeWithYear,
+  formatDateWithYear,
+  formatTime12h,
   ForceCheckoutBodySchema,
   nightsBetween,
   quotaUsed,
@@ -52,6 +55,86 @@ export interface AdminVisitRoutesOptions {
 }
 
 /** CSV with every field quoted; formula-leading characters neutralised (CSV injection). */
+/**
+ * W-12 export in the hostel's own time and words (DEC-032; phone test 2026-11-28: raw UTC
+ * timestamps and a bare "yes" for guests who overstayed and had already left).
+ */
+const CSV_STATUS: Record<string, string> = {
+  pending_host: 'Waiting for host',
+  pending_warden: 'Waiting for warden',
+  approved: 'Approved',
+  inside: 'Inside',
+  completed: 'Completed',
+  rejected: 'Not allowed',
+  expired: 'Expired',
+  cancelled: 'Cancelled',
+};
+const CSV_TYPE: Record<string, string> = {
+  quick_drop: 'Quick drop-off',
+  day: 'Day visit',
+  overnight_room: 'Overnight in room',
+  guest_room: 'Guest room',
+};
+
+export interface ReportCsvSource {
+  code: string;
+  type: string;
+  status: string;
+  guest_name: string | null;
+  invited_name: string | null;
+  host_name: string;
+  room_number: string | null;
+  claimed_room: string;
+  window_start: Date;
+  window_end: Date;
+  first_entry_at: Date | null;
+  last_exit_at: Date | null;
+  closed_at: Date | null;
+  overstay_since: Date | null;
+  host_disputed_at: Date | null;
+  location_unverified: boolean;
+  close_reason: string | null;
+}
+
+export function reportCsvRow(r: ReportCsvSource, zone: string): string[] {
+  const day = (d: Date) => formatDateWithYear(d, zone);
+  const time = (d: Date) => formatTime12h(d, zone);
+  const when = (d: Date | null) => (d ? formatDateTimeWithYear(d, zone) : '');
+  const left = r.last_exit_at ?? (r.status === 'completed' ? r.closed_at : null);
+  let overstay = '';
+  if (r.overstay_since) {
+    overstay =
+      r.status === 'inside'
+        ? `Yes, still inside (overstaying since ${when(r.overstay_since)})`
+        : `Yes, left ${when(left ?? r.closed_at)}`;
+  }
+  let ended = '';
+  if (r.close_reason === 'checked_out') ended = 'Checked out at the gate';
+  else if (r.close_reason === 'host_marked_left') ended = 'Host said the guest had left';
+  else if (r.close_reason === 'forced') ended = 'Checked out by the warden';
+  else if (r.close_reason === 'window_ended' || r.status === 'expired')
+    ended = r.first_entry_at ? 'Visit time ended' : "Guest didn't arrive";
+  else if (r.status === 'cancelled') ended = 'Cancelled';
+  else if (r.status === 'rejected') ended = 'Not allowed';
+  return [
+    r.code,
+    day(r.window_start),
+    CSV_TYPE[r.type] ?? r.type,
+    CSV_STATUS[r.status] ?? r.status,
+    r.guest_name ?? r.invited_name ?? '',
+    r.host_name,
+    r.room_number ?? r.claimed_room,
+    time(r.window_start),
+    when(r.window_end),
+    when(r.first_entry_at),
+    when(left),
+    overstay,
+    r.host_disputed_at ? 'Reported' : '',
+    r.first_entry_at ? (r.location_unverified ? 'Not verified (host confirmed)' : 'Verified') : '',
+    ended,
+  ];
+}
+
 export function toCsv(header: string[], rows: (string | number | null)[][]): string {
   const cell = (v: string | number | null) => {
     let s = v === null ? '' : String(v);
@@ -305,10 +388,16 @@ export async function registerAdminVisitRoutes(
           eb.or([
             eb('haven.visitors.full_name', 'ilike', like),
             eb('haven.visits.invited_name', 'ilike', like),
-            eb('host.full_name', 'ilike', like),
-            eb('haven.rooms.number', 'ilike', like),
-            eb('haven.residents.claimed_room', 'ilike', like),
             eb('haven.visits.code', 'ilike', like),
+            // Host and room only for the general search: "riya" must not find Priya's
+            // guests when the warden is looking for a guest to ban (DEC-032).
+            ...(q.match === 'guest'
+              ? []
+              : [
+                  eb('host.full_name', 'ilike', like),
+                  eb('haven.rooms.number', 'ilike', like),
+                  eb('haven.residents.claimed_room', 'ilike', like),
+                ]),
             ...(digits.length >= 4
               ? [
                   eb('haven.visitors.phone', 'like', `%${digits}%`),
@@ -588,6 +677,7 @@ export async function registerAdminVisitRoutes(
         'haven.visits.window_end',
         'haven.visits.first_entry_at',
         'haven.visits.last_exit_at',
+        'haven.visits.closed_at',
         'haven.visits.overstay_since',
         'haven.visits.host_disputed_at',
         'haven.visits.location_unverified',
@@ -641,12 +731,12 @@ export async function registerAdminVisitRoutes(
     async (request, reply) => {
       authorize(request.principal, 'admin.reports.read', { hostelId: request.hostelId });
       const rows = await reportRows(request, request.query.from, request.query.to);
+      const { config } = await rules.forHostel(request.hostelId);
       await audit(request, 'read.export', 'visits', null, {
         from: request.query.from,
         to: request.query.to,
         count: rows.length,
       });
-      const iso = (d: Date | null) => (d ? d.toISOString() : null);
       reply
         .header('Content-Type', 'text/csv; charset=utf-8')
         .header(
@@ -657,36 +747,22 @@ export async function registerAdminVisitRoutes(
           toCsv(
             [
               'Code',
+              'Date',
               'Type',
               'Status',
               'Guest',
               'Host',
               'Room',
-              'Window start (UTC)',
-              'Window end (UTC)',
-              'First entry (UTC)',
-              'Last exit (UTC)',
+              'Expected from',
+              'Expected until',
+              'Checked in',
+              'Checked out',
               'Overstay',
-              'Disputed',
-              'Location unverified',
-              'Close reason',
+              'Not my guest',
+              'Location',
+              'How it ended',
             ],
-            rows.map((r) => [
-              r.code,
-              r.type,
-              r.status,
-              r.guest_name ?? r.invited_name,
-              r.host_name,
-              r.room_number ?? r.claimed_room,
-              iso(r.window_start),
-              iso(r.window_end),
-              iso(r.first_entry_at),
-              iso(r.last_exit_at),
-              r.overstay_since ? 'yes' : '',
-              r.host_disputed_at ? 'yes' : '',
-              r.location_unverified ? 'yes' : '',
-              r.close_reason,
-            ]),
+            rows.map((r) => reportCsvRow(r, config.timezone)),
           ),
         );
     },

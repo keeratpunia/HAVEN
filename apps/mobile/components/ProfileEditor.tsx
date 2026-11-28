@@ -155,6 +155,6 @@ const styles = StyleSheet.create({
     color: color.text,
   },
   hint: { fontSize: typeTokens.size.sm, color: color.textMuted },
-  message: { fontSize: typeTokens.size.sm, color: color.text },
+  message: { fontSize: typeTokens.size.sm, color: color.success },
   error: { fontSize: typeTokens.size.sm, color: color.danger },
 });

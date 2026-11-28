@@ -32,6 +32,18 @@ export function formatDateTime(instant: Date | string, timezone = HOSTEL_TIMEZON
   return `${dt.toFormat('d LLL')}, ${dt.toFormat('h:mm a').toLowerCase()}`;
 }
 
+/** "28 Nov 2026" — exports and reports, where the year matters (DEC-032). */
+export function formatDateWithYear(instant: Date | string, timezone = HOSTEL_TIMEZONE): string {
+  return DateTime.fromJSDate(new Date(instant), { zone: 'utc' })
+    .setZone(timezone)
+    .toFormat('d LLL yyyy');
+}
+
+/** "28 Nov 2026, 2:10 pm". */
+export function formatDateTimeWithYear(instant: Date | string, timezone = HOSTEL_TIMEZONE): string {
+  return `${formatDateWithYear(instant, timezone)}, ${formatTime12h(instant, timezone)}`;
+}
+
 /** A hostel-local YYYY-MM-DD date moved by `days`. */
 export function plusDays(isoDate: string, days: number, timezone = HOSTEL_TIMEZONE): string {
   return DateTime.fromISO(isoDate, { zone: timezone }).plus({ days }).toISODate() ?? isoDate;

@@ -150,5 +150,5 @@ test('F10: overstay → host and guest told → warden told 30 min later → for
   await warden.getByRole('button', { name: 'Force check-out' }).click();
   await warden.getByLabel('Reason (required)').fill('Stayed past the visit, host unreachable');
   await warden.getByRole('button', { name: 'Force check-out' }).last().click();
-  await expect(warden.getByText('Closed: forced')).toBeVisible({ timeout: 15_000 });
+  await expect(warden.getByText('The warden checked the guest out.')).toBeVisible({ timeout: 15_000 });
 });

@@ -41,13 +41,13 @@ people, so please try anything you like."
 
 - Ask her to open the address on her phone (send it on WhatsApp, then **Open in
   Chrome/Safari**).
-- Tap **Resident or staff sign-in** → **Sign in with a test number** → `99999 00007` →
-  code `123456` → **Sign in with test number**.
+- Tap **Resident or staff sign-in** → phone `99999 00007` → **Send code** → code
+  `123456` → **Verify**.
 - She sees **Dashboard**: how many guests are inside now, expected today, overstaying,
   any "not my guest" reports, and requests waiting for her.
 
-**Say:** "The orange strip at the top means it's the test version. In the real one you
-would sign in with your own Google account."
+**Say:** "In the real one you would sign in with your own Google account; here everyone
+uses a test phone number."
 
 ## 3. A student invites a guest (2 minutes)
 

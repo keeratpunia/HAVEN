@@ -16,14 +16,8 @@ import { useLiveUpdates } from '../../lib/live.js';
 import { newActionKey } from '../../lib/action-key.js';
 import { Button } from '../../components/Button.js';
 import { ConfirmSheet } from '../../components/ConfirmSheet.js';
-import {
-  Card,
-  Chips,
-  ErrorText,
-  Muted,
-  StaffScreen,
-  Strong,
-} from '../../components/staff/StaffUi.js';
+import { Card, Chips, Muted, StaffScreen, Strong } from '../../components/staff/StaffUi.js';
+import { StatusText, useStatus } from '../../components/StatusText.js';
 
 /**
  * W-04 Approvals (SDD §13.4): "Tabs: Overnight requests, Residents; each card has all
@@ -43,7 +37,7 @@ export default function Approvals() {
   );
   const [overnight, setOvernight] = useState<ApprovalDTO[] | null>(null);
   const [residents, setResidents] = useState<AdminResidentDTO[] | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<{ kind: Tab; id: string; name: string } | null>(null);
   const hostelId = hostel?.id ?? null;
@@ -54,7 +48,7 @@ export default function Approvals() {
       if (canOvernight) setOvernight((await staffApi.approvals(hostelId)).items);
       setResidents((await staffApi.residents(hostelId, { status: 'pending' })).items);
     } catch {
-      setMessage("Couldn't load approvals. Retrying.");
+      notice.fail("Couldn't load approvals. Retrying.");
     }
   }, [hostelId, canOvernight]);
   useEffect(() => {
@@ -64,12 +58,12 @@ export default function Approvals() {
 
   async function act(id: string, fn: () => Promise<unknown>, ok: string) {
     setBusy(id);
-    setMessage(null);
+    notice.clear();
     try {
       await fn();
-      setMessage(ok);
+      notice.ok(ok);
     } catch (err) {
-      setMessage(
+      notice.fail(
         err instanceof api.ApiError
           ? err.status === 409
             ? 'This was updated by someone else.'
@@ -101,7 +95,7 @@ export default function Approvals() {
           { value: 'residents', label: `Residents${residents ? ` (${residents.length})` : ''}` },
         ]}
       />
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
 
       {tab === 'overnight' ? (
         overnight === null ? (

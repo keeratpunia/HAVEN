@@ -1,6 +1,5 @@
 import { Stack } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
-import { TestVersionBadge } from '../components/TestVersionBadge.js';
 import { AuthProvider } from '../lib/auth-context.js';
 import { initSentry } from '../lib/sentry.js';
 import { startPwa } from '../lib/pwa.js';
@@ -18,7 +17,6 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <View style={styles.root}>
-        <TestVersionBadge />
         <Stack screenOptions={{ headerShown: false }} />
       </View>
     </AuthProvider>

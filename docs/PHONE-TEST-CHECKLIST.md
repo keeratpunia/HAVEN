@@ -1,7 +1,8 @@
 # Phone test checklist: HAVEN test version
 
 **Where:** https://haven-gh8-test-bay.vercel.app (dummy data only, `docs/DECISIONS.md`
-DEC-026). Every phone shows an orange **TEST VERSION · dummy data** strip.
+DEC-026). It looks exactly like the pilot will: nothing on screen says "test" (DEC-032),
+so keep this sheet handy for the numbers.
 
 **Who:** four people, at least **one Android phone (Chrome)** and **one iPhone
 (Safari)**. Tick each box as you go and write down anything odd next to it: what you
@@ -33,7 +34,12 @@ tapped, what you saw, phone model. A screenshot helps.
 
 ## 1. Sign in (everyone)
 
-- [ ] **A** signs in with 00005 → lands on **Home** with "Inside now" and bottom tabs.
+- [ ] **A**: **Resident or staff sign-in** → `9999900005` → **Send code** → `123456` →
+      **Verify** → lands on **HAVEN · Resident**, Home, with bottom tabs.
+- [ ] **A**: from the front page, tap **Guest sign-in** by mistake → **‹ Back** returns to
+      the front page.
+- [ ] **D** on a laptop, signed in as admin (00009): the header says **HAVEN · Admin**,
+      and **Sign out** is at the bottom of the left menu.
 - [ ] **C** signs in with 00007 → lands on **HAVEN · Warden** with **● Live** on the
       dashboard. (If it says "Updating every 15 s", note it; it still works.)
 - [ ] **D** signs in with 00008 → lands on **Charges** (office).

@@ -3,7 +3,7 @@
  * design; the API enforces everything it implies.
  *
  * `staging` is the Phase 1 test version (DEC-026, DEC-028): dummy data, test phone
- * numbers only, a "TEST VERSION" badge on every screen, and sign-in by test number for
+ * numbers only, and sign-in by test number for
  * residents and staff.
  */
 export const APP_ENV = (process.env.EXPO_PUBLIC_APP_ENV ?? 'local') as

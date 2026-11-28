@@ -1,16 +1,25 @@
 import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { detectInAppBrowser } from '@haven/shared';
 import { InAppBrowserNotice } from '../../components/InAppBrowserNotice.js';
 import { Stack } from 'expo-router';
-import { color, space, type as typeTokens } from '@haven/ui';
+import { color, type as typeTokens } from '@haven/ui';
 import { useAuth } from '../../lib/auth-context.js';
+import { ShellHeader } from '../../components/ShellHeader.js';
+
+/** Where Back goes when there's no history (DEC-032). Entry screens (/g, /i) have none. */
+function guestBackTo(pathname: string): string | null {
+  if (pathname === '/login') return '/';
+  if (pathname === '/my-profile' || /^\/visits\/[^/]+$/.test(pathname)) return '/visits';
+  return null;
+}
 
 /** SDD §13.4: "Guest (web): No tab bar; header with HAVEN logo and 'My visits'." */
 export default function GuestLayout() {
   const router = useRouter();
   const { visitor } = useAuth();
+  const pathname = usePathname();
   // E-03: guest links are mostly opened from WhatsApp; its in-app browser (and
   // Instagram's, Facebook's) often blocks camera and location.
   const [inAppBrowser, setInAppBrowser] = useState(() =>
@@ -21,26 +30,22 @@ export default function GuestLayout() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.header} accessibilityRole="header">
-        <Pressable
-          onPress={() => router.push('/')}
-          accessibilityRole="link"
-          accessibilityLabel="HAVEN home"
-          style={styles.home}
-        >
-          <Text style={styles.logo}>HAVEN</Text>
-        </Pressable>
-        {visitor ? (
-          <Pressable
-            onPress={() => router.push('/visits')}
-            accessibilityRole="link"
-            accessibilityLabel="My visits"
-            style={styles.myVisits}
-          >
-            <Text style={styles.myVisitsText}>My visits</Text>
-          </Pressable>
-        ) : null}
-      </View>
+      <ShellHeader
+        role="Guest"
+        backTo={guestBackTo(pathname)}
+        right={
+          visitor && pathname !== '/visits' ? (
+            <Pressable
+              onPress={() => router.navigate('/visits')}
+              accessibilityRole="link"
+              accessibilityLabel="My visits"
+              style={styles.myVisits}
+            >
+              <Text style={styles.myVisitsText}>My visits</Text>
+            </Pressable>
+          ) : null
+        }
+      />
       <View style={styles.content}>
         {inAppBrowser ? (
           <InAppBrowserNotice
@@ -58,22 +63,6 @@ export default function GuestLayout() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: color.bg },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: color.border,
-    minHeight: 48,
-  },
-  logo: {
-    fontSize: typeTokens.size.md,
-    fontWeight: typeTokens.weight.semibold,
-    color: color.primary,
-  },
-  home: { minHeight: 48, minWidth: 48, justifyContent: 'center' },
   myVisits: { minHeight: 48, minWidth: 48, alignItems: 'center', justifyContent: 'center' },
   myVisitsText: {
     fontSize: typeTokens.size.sm,

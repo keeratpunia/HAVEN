@@ -264,8 +264,9 @@ run unless `apps/api/.env.staging.local` says `APP_ENV=staging`.
 You need the laptop or tablet that will show the gate QR, and your phone.
 
 1. **On your phone**, open your Vercel address → **Resident or staff sign-in** (not
-   *Guest sign-in*) → **Sign in with a test number** → `9999900009` (admin) → code
-   `123456` → **Sign in with test number**. (Or open `<your Vercel address>/sign-in`.)
+   *Guest sign-in*) → phone `9999900009` (admin) → **Send code** → code `123456` →
+   **Verify**. (Or open `<your Vercel address>/sign-in`.) The header says
+   **HAVEN · Admin**.
 2. Bottom bar **More** → **Gates**.
 3. **Stand where the demo will happen** (the room or the gate) → **Set gate location to
    my current position** → allow location → it says "Gate moved to your position". The
@@ -281,7 +282,8 @@ You need the laptop or tablet that will show the gate QR, and your phone.
 ## 8. Open it on a phone
 
 1. On any phone, open your Vercel address in **Chrome** (Android) or **Safari**
-   (iPhone). You'll see an orange **TEST VERSION · dummy data** strip at the top.
+   (iPhone). The test version looks exactly like the pilot will (DEC-032): nothing on
+   screen says "test". Only test numbers work.
 2. **Install it like an app:**
    - Android Chrome: sign in → **Profile** (resident) or **More** (warden) → **Install
      HAVEN**, or Chrome menu **⋮** → **Add to Home screen**.

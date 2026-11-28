@@ -71,6 +71,8 @@ export const AdminVisitsQuerySchema = z.object({
   expectedToday: z.enum(['true']).optional(),
   /** W-08 resident detail: one host's visits, newest first (DEC-031). */
   hostId: z.string().uuid().optional(),
+  /** W-07 ban search: `guest` matches the guest's name, phone or visit code only (DEC-032). */
+  match: z.enum(['all', 'guest']).default('all'),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -309,9 +311,16 @@ export interface AdminChargeDTO {
 }
 
 export const AuditQuerySchema = z.object({
-  entity: z.string().max(40).optional(),
+  /** One entity, or several comma-separated (the W-11 "Staff" chip covers three). */
+  entity: z
+    .string()
+    .max(120)
+    .regex(/^[a-z_]+(,[a-z_]+)*$/)
+    .optional(),
   entityId: Uuid.optional(),
   actorId: Uuid.optional(),
+  /** W-11 "Who": part of the person's name (DEC-032). */
+  actor: z.string().trim().min(1).max(80).optional(),
   from: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)

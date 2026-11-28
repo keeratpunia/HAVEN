@@ -1999,6 +1999,95 @@ Source for all of Part 1: SDD §2.7.
 - **SDD updated?** Not yet: an addition to W-08 and §12.9 (one endpoint, two query
   parameters). Goes into the Phase 2 SDD addendum with DEC-026–028.
 
+### DEC-032 — The test version looks exactly like the pilot; fixes from the team's walkthrough
+
+- **Date:** 2026-11-28
+- **Decided by:** the team (Keerat), after walking through every role on the deployed
+  test version. Answers to the open points were given explicitly: remove the test strip,
+  the test-number hints and the landing subtitle; keep the install card, the sign-in
+  role lines (SDD R-01) and the live badge; phone + code sign-in; keep "Rejected"; plain
+  CSV dates and overstay text.
+- **Decision.**
+
+  **Presentation: "exactly how the pilot would look".** This supersedes DEC-028 item 8
+  and the PhoneInput hint.
+  - The "TEST VERSION · dummy data" strip and every test-number / `123456` hint are
+    gone, and so is the front page's "Hostel guest check-in" subtitle.
+  - Residents and staff sign in in two steps, like any phone sign-in: phone → **Send
+    code** → the 6-box code → **Verify**. Underneath it is still the staging-only
+    test sign-in (DEC-028); a real number is refused with the test-version message and
+    returns to the phone step.
+  - Testers get the numbers from `docs/PHONE-TEST-CHECKLIST.md`, not the screen.
+
+  **Bugs found by the walkthrough.**
+  - **Every in-browser photo failed on the live site.** Five screens turned the camera
+    snapshot into a file with `fetch(dataUrl)`, which the deployed CSP's
+    `connect-src 'self'` blocks; the local demo has no CSP. The snapshot is now decoded
+    in memory (`lib/data-url.ts`), and a test fails if any screen fetches a data URL
+    again.
+    - The CSP stays as it is.
+    - The ID-card step uses the back camera on purpose; the selfie uses the front one.
+  - **No Sign out on a laptop.** The laptop sidebar listed every page but had no More
+    screen. It now ends with role switches and **Sign out**.
+  - **The header said "Warden" for the admin.** Every shell now uses one header, "HAVEN ·
+    Guest / Resident / Warden / Admin / Office" (`components/ShellHeader.tsx`).
+  - **No way back.** The shared header has **‹ Back** on every screen below a shell's
+    main pages (sign-in → front page; guest login → front page; a visit → the list;
+    More pages → More; a resident → Residents). With no history (a shared link) it
+    goes to that section's home. Tab switches still replace the screen: keeping every
+    visited tab alive would hold one live-update stream open per tab (found by the e2e
+    suite).
+  - **Seeded visits showed "Created" after "Checked in".** The seed now stamps each
+    visit's creation before its window.
+  - **"Closed: window_ended" and raw codes on W-05.**
+    - The close reason, the zone and the notification rows read as sentences ("The
+      guest didn't arrive before the visit ended.", "Arrival sent to the host ·
+      delivered").
+    - The photo pair shows only when there is a photo.
+  - **The ban search found the host's guests** ("riya" matched "Priya"). Visit search
+    takes `match=guest` (guest name, phone, visit code only), and the ban list shows
+    each guest once.
+  - **Successes in red.** One status line (`components/StatusText.tsx`) shows green for
+    success and red for failure on the eleven staff screens that used the error style
+    for both.
+
+  **Smaller changes.**
+  - **Calendars.** Every date and time field on the staff screens is the browser's own
+    picker (type it or pick it): visit search, audit log, reports, suspend until, ban
+    until, and the rule times. The resident screens already used it.
+  - **Hostels.** "Create a hostel" moves from Staff (which is about people) to its own
+    **Hostels** page in the super admin's menu, which also lists the hostels.
+  - **Audit log (W-11).**
+    - The "Actor id" box asked for an internal id; it is now **Who** (part of a
+      name, `?actor=`).
+    - The free-text entity box is now chips (Everything, Visits, Residents, Charges,
+      Bans, Gates, Rules, Staff; `?entity=` takes a comma list).
+    - Rows read as sentences ("Invited a warden · Dean of Students · 28 Nov, 8:56 pm")
+      with no ids or JSON.
+  - **Reports CSV (W-12).**
+    - Indian time and plain words ("28 Nov 2026, 2:10 pm", "Day visit", "Completed").
+    - Overstay says what happened: empty, "Yes, left <time>", or "Yes, still inside
+      (overstaying since <time>)".
+    - New "Checked out" and "How it ended" columns.
+  - **The smoke test's guests** are "Aditi Verma" and "Nisha Kapoor", and its temporary
+    gate device is "Temporary check device".
+- **Explained, not changed:**
+  - A disputed guest stays checked in until the warden acts (F9: the dispute alerts the
+    warden; force check-out and ban are the warden's).
+  - "Location not verified" lists guests let in by their host after GPS failed
+    (FR-27, F3), for the warden to review.
+  - "Rejected" lists residents the warden turned down; they may resubmit once.
+  - "Confirmed" means the office agrees the charge is owed; "Paid" means it was paid,
+    with a receipt number (FR-59).
+- **Tests:**
+  - `apps/mobile/test/data-url.test.ts`;
+  - `apps/api/src/admin/report-csv.test.ts`;
+  - `apps/api/test/warden-search.integration.test.ts` (ban search, audit who/what);
+  - `apps/mobile/e2e/mobile-audit/test-version.spec.ts` (no test text, two-step
+    sign-in, role headers, Back, admin gate tools, gate screen).
+- **SDD updated?** Not yet. The audit filters, the visit-search `match`, the Hostels
+  screen and the two-step test sign-in go into the Phase 2 addendum with DEC-026–031.
+
 Template for a new entry:
 
 ```markdown

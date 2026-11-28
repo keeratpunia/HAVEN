@@ -22,13 +22,15 @@ import { StatusChip } from '../../../components/StatusChip.js';
 import {
   Card,
   Chips,
-  ErrorText,
   Field,
   Muted,
   RedBanner,
   StaffScreen,
   Strong,
+  staffStyles,
 } from '../../../components/staff/StaffUi.js';
+import { DateTimeField } from '../../../components/DateTimeField.js';
+import { StatusText, useStatus } from '../../../components/StatusText.js';
 
 /**
  * W-05 Visit detail (FR-52): "Everything in VisitDTO + timeline with photos and GPS
@@ -47,8 +49,55 @@ const EVENT: Record<VisitEventDTO['kind'], string> = {
   disputed: 'Host reported "Not my guest"',
   dispute_resolved: 'Dispute resolved',
   overstay: 'Overstay flagged',
-  closed: 'Closed',
+  closed: 'Visit closed',
 };
+
+/** Plain words for the stored codes (phone test 2026-11-28: "Closed: window_ended"). */
+const ZONE: Record<string, string> = {
+  visitors_room: "Visitors' Room only",
+  room: "In the resident's room",
+  guest_room: 'Guest room',
+};
+
+function endedText(status: string, reason: string | null): string | null {
+  if (!reason) return null;
+  if (reason === 'window_ended')
+    return status === 'expired'
+      ? "The guest didn't arrive before the visit ended."
+      : 'The visit time ended.';
+  return (
+    {
+      checked_out: 'The guest checked out at the gate.',
+      host_marked_left: 'The host said the guest had left.',
+      forced: 'The warden checked the guest out.',
+    }[reason] ?? null
+  );
+}
+
+const NOTIFICATION: Record<string, string> = {
+  'N-WALKIN': 'Walk-in request sent to the host',
+  'N-WALKIN-EXPIRED': 'Walk-in request expired',
+  'N-WALKIN-REJECTED': 'Walk-in declined',
+  'N-ARRIVED': 'Arrival sent to the host',
+  'N-CONFIRM-LOCATION': 'Host asked to confirm the location',
+  'N-LEFT': 'Host told the guest left',
+  'N-DISPUTE': 'Warden alerted: "Not my guest"',
+  'N-OVERSTAY-HOST': 'Host told about the overstay',
+  'N-OVERSTAY-GUEST': 'Guest told about the overstay',
+  'N-OVERSTAY-WARDEN': 'Warden told about the overstay',
+  'N-OVERNIGHT-REQ': 'Overnight request sent to the warden',
+  'N-OVERNIGHT-DECIDED': 'Host told the overnight decision',
+  'N-NIGHT-SWEEP': 'Night sweep sent to the warden',
+  'N-NIGHT-SWEEP-HOST': 'Night sweep reminder to the host',
+  'N-CHARGE': 'Charge sent to the resident',
+};
+
+function notificationStatus(status: string, channel: string): string {
+  if (status === 'sent') return channel === 'sms' ? 'text sent' : 'delivered';
+  if (status === 'cancelled') return channel === 'sms' ? 'text not needed' : 'shown in the app';
+  if (status === 'failed') return 'not delivered';
+  return 'sending';
+}
 
 export default function WardenVisit() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -57,7 +106,7 @@ export default function WardenVisit() {
   const { keyFor, done } = useActionKeys();
   const [visit, setVisit] = useState<AdminVisitDetailDTO | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const [busy, setBusy] = useState(false);
   const [sheet, setSheet] = useState<'force' | 'resolve' | 'reject' | null>(null);
   const [banOpen, setBanOpen] = useState(false);
@@ -83,17 +132,17 @@ export default function WardenVisit() {
 
   async function act(fn: () => Promise<unknown>, after?: () => void) {
     setBusy(true);
-    setMessage(null);
+    notice.clear();
     try {
       await fn();
       after?.();
       await load();
     } catch (err) {
       if (err instanceof api.ApiError && err.status === 409) {
-        setMessage('This was updated by someone else.');
+        notice.fail('This was updated by someone else.');
         await load();
       } else
-        setMessage(err instanceof api.ApiError ? err.message : "Couldn't reach HAVEN. Try again.");
+        notice.fail(err instanceof api.ApiError ? err.message : "Couldn't reach HAVEN. Try again.");
     } finally {
       setBusy(false);
       setSheet(null);
@@ -126,8 +175,7 @@ export default function WardenVisit() {
               Host {visit.host.displayName} · room {visit.host.room}
             </Muted>
             <Muted>
-              {VISIT_TYPE_LABELS[visit.type]} ·{' '}
-              {visit.zone === 'visitors_room' ? "Visitors' Room only" : visit.zone} ·{' '}
+              {VISIT_TYPE_LABELS[visit.type]} · {ZONE[visit.zone] ?? visit.zone} ·{' '}
               {formatDateShort(visit.windowStart)} {formatTime12h(visit.windowStart)}–
               {formatTime12h(visit.windowEnd)}
             </Muted>
@@ -136,7 +184,9 @@ export default function WardenVisit() {
                 Charge ₹{visit.charge.amountInr} · {visit.charge.status}
               </Muted>
             ) : null}
-            {visit.closeReason ? <Muted>Closed: {visit.closeReason}</Muted> : null}
+            {endedText(visit.status, visit.closeReason) ? (
+              <Muted>{endedText(visit.status, visit.closeReason)}</Muted>
+            ) : null}
           </View>
           <StatusChip status={visit.status} />
         </View>
@@ -151,11 +201,14 @@ export default function WardenVisit() {
         <Banner tone="warning">⚠ Left without a verified location.</Banner>
       ) : null}
 
-      <PhotoCompare
-        live={visit.latestPhoto}
-        profile={visit.guest.profilePhoto}
-        guestName={visit.guest.name}
-      />
+      {/* Only when there's something to compare: a guest who never came has no photos. */}
+      {visit.latestPhoto || visit.guest.profilePhoto ? (
+        <PhotoCompare
+          live={visit.latestPhoto}
+          profile={visit.guest.profilePhoto}
+          guestName={visit.guest.name}
+        />
+      ) : null}
 
       <Strong>Timeline</Strong>
       {visit.events.map((e, i) => (
@@ -184,12 +237,13 @@ export default function WardenVisit() {
       {visit.notifications.length === 0 ? <Muted>None.</Muted> : null}
       {visit.notifications.map((n, i) => (
         <Muted key={`${n.kind}-${i}`}>
-          {formatDateTime(n.createdAt)} · {n.kind} · {n.channel} to {n.recipientType} · {n.status}
+          {formatDateTime(n.createdAt)} · {NOTIFICATION[n.kind] ?? n.kind} ·{' '}
+          {notificationStatus(n.status, n.channel)}
           {n.openedAt ? ' · opened' : ''}
         </Muted>
       ))}
 
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       <View style={styles.actions}>
         {can('approve') ? (
           <Button
@@ -251,11 +305,14 @@ export default function WardenVisit() {
               { value: 'all', label: 'All hostels' },
             ]}
           />
-          <Field
-            label="Until (YYYY-MM-DD, empty = permanent)"
-            value={banUntil}
-            onChange={setBanUntil}
-          />
+          <View style={staffStyles.row}>
+            <DateTimeField
+              kind="date"
+              label="Ban until (optional)"
+              value={banUntil}
+              onChange={setBanUntil}
+            />
+          </View>
           <Button
             label="Confirm ban"
             variant="danger"
@@ -276,7 +333,7 @@ export default function WardenVisit() {
                   }),
                 () => {
                   setBanOpen(false);
-                  setMessage('Guest banned.');
+                  notice.ok('Guest banned.');
                 },
               )
             }

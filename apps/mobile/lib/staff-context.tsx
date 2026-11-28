@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import type { MeUserDTO } from '@haven/shared';
 import * as api from '../services/api-client.js';
 
@@ -65,6 +73,8 @@ interface StaffState {
   hostel: StaffHostel | null;
   choose: (id: string) => void;
   can: (...roles: StaffRole[]) => boolean;
+  /** Re-reads the hostel list (after a super admin creates a hostel). */
+  reload: () => Promise<void>;
 }
 
 const StaffContext = createContext<StaffState | null>(null);
@@ -73,11 +83,16 @@ export function StaffProvider({ me, children }: { me: MeUserDTO; children: React
   const [hostels, setHostels] = useState<StaffHostel[] | null>(null);
   const [selected, setSelected] = useState<string | null>(remembered());
 
+  const reload = useCallback(
+    () =>
+      loadStaffHostels(me)
+        .then(setHostels)
+        .catch(() => setHostels([])),
+    [me],
+  );
   useEffect(() => {
-    void loadStaffHostels(me)
-      .then(setHostels)
-      .catch(() => setHostels([]));
-  }, [me]);
+    void reload();
+  }, [reload]);
 
   const value = useMemo<StaffState>(() => {
     const hostel = hostels?.find((h) => h.id === selected) ?? hostels?.[0] ?? null;
@@ -89,8 +104,9 @@ export function StaffProvider({ me, children }: { me: MeUserDTO; children: React
         setSelected(id);
       },
       can: (...roles) => Boolean(hostel && roles.some((r) => hostel.roles.includes(r))),
+      reload,
     };
-  }, [hostels, selected]);
+  }, [hostels, selected, reload]);
 
   return <StaffContext.Provider value={value}>{children}</StaffContext.Provider>;
 }

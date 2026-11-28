@@ -214,9 +214,9 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
       `insert into haven.visits
          (code, hostel_id, host_id, visitor_id, type, status, origin, zone, window_start, window_end,
           rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at,
-          host_confirmed_at, overstay_since, host_disputed_at)
+          host_confirmed_at, overstay_since, host_disputed_at, created_at)
        values ($1, $2, $3, $4, 'day', 'inside', 'invite', 'visitors_room', $5, $6, 1, 'user', $3, $7, $7,
-               $8, $9, $10)
+               $8, $9, $10, $11)
        returning id`,
       [
         code,
@@ -229,6 +229,8 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
         extra.disputedAt === undefined ? at(entered + 1) : null,
         extra.overstaySince === undefined ? null : at(extra.overstaySince),
         extra.disputedAt === undefined ? null : at(extra.disputedAt),
+        // Invited well before the window opens, so the timeline reads in order.
+        at(Math.min(window[0], entered) - 120),
       ],
     );
     await client.query(
@@ -272,19 +274,19 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
   await client.query(
     `insert into haven.visits
        (code, hostel_id, host_id, invited_name, invited_phone, invited_gender, type, status, origin, zone,
-        window_start, window_end, rules_version, created_by_type, created_by_id)
+        window_start, window_end, rules_version, created_by_type, created_by_id, created_at)
      values ('VDEM004', $1, $2, 'Sneha Pillai', '+919876500004', 'female', 'day', 'approved', 'invite',
-             'visitors_room', $3, $4, 1, 'user', $2)`,
-    [hostelId, resident1Id, at(60), at(240)],
+             'visitors_room', $3, $4, 1, 'user', $2, $5)`,
+    [hostelId, resident1Id, at(60), at(240), at(-180)],
   );
   // An overnight stay waiting for the warden (F6 step 4).
   await client.query(
     `insert into haven.visits
        (code, hostel_id, host_id, invited_name, invited_phone, invited_gender, type, status, origin, zone,
-        window_start, window_end, nights, rules_version, created_by_type, created_by_id)
+        window_start, window_end, nights, rules_version, created_by_type, created_by_id, created_at)
      values ('VDEM005', $1, $2, 'Meghna Joshi', '+919876500005', 'female', 'overnight_room', 'pending_warden',
-             'overnight_request', 'room', $3, $4, 2, 1, 'user', $2)`,
-    [hostelId, resident1Id, at(24 * 60), at(72 * 60)],
+             'overnight_request', 'room', $3, $4, 2, 1, 'user', $2, $5)`,
+    [hostelId, resident1Id, at(24 * 60), at(72 * 60), at(-90)],
   );
   // Yesterday's visit, checked out (shows in reports and search).
   const earlier = await guest('+919876500006', 'Divya Nair');
@@ -292,11 +294,20 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
     `insert into haven.visits
        (code, hostel_id, host_id, visitor_id, type, status, origin, zone, window_start, window_end,
         rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at, last_exit_at,
-        host_confirmed_at, closed_at, close_reason)
+        host_confirmed_at, closed_at, close_reason, created_at)
      values ('VDEM006', $1, $2, $3, 'day', 'completed', 'invite', 'visitors_room', $4, $5, 1, 'user', $2,
-             $6, $6, $7, $6, $7, 'checked_out')
+             $6, $6, $7, $6, $7, 'checked_out', $8)
      returning id`,
-    [hostelId, resident1Id, earlier, at(-26 * 60), at(-22 * 60), at(-25 * 60), at(-23 * 60)],
+    [
+      hostelId,
+      resident1Id,
+      earlier,
+      at(-26 * 60),
+      at(-22 * 60),
+      at(-25 * 60),
+      at(-23 * 60),
+      at(-28 * 60),
+    ],
   );
   for (const [kind, minutes] of [
     ['entry', -25 * 60],

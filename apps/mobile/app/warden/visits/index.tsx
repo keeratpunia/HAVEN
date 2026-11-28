@@ -16,6 +16,7 @@ import {
   StaffScreen,
   staffStyles,
 } from '../../../components/staff/StaffUi.js';
+import { DateTimeField } from '../../../components/DateTimeField.js';
 
 /** FR-57 visit search: guest name, guest phone, host name, room, code; status; dates. */
 const STATUSES = [
@@ -91,8 +92,8 @@ export default function SearchVisits() {
         onApply={() => void load()}
       >
         <View style={staffStyles.row}>
-          <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
-          <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
+          <DateTimeField kind="date" label="From" value={from} onChange={setFrom} />
+          <DateTimeField kind="date" label="To" value={to} onChange={setTo} />
         </View>
         <Chips label="Status" value={status} onChange={setStatus} options={STATUSES} />
       </FilterSheet>

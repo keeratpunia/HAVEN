@@ -14,7 +14,6 @@ import { averageGateFixes } from '../../lib/gate-location.js';
 import { IS_TEST_VERSION } from '../../lib/app-env.js';
 import {
   Card,
-  ErrorText,
   Field,
   Muted,
   RedBanner,
@@ -22,6 +21,7 @@ import {
   Strong,
   staffStyles,
 } from '../../components/staff/StaffUi.js';
+import { StatusText, useStatus } from '../../components/StatusText.js';
 
 /**
  * W-09 Gates (FR-56, FR-29, F8, E-14): "Gate card: location map, radius, devices
@@ -54,7 +54,7 @@ export default function Gates() {
   const [capture, setCapture] = useState<(Capture & { gateId: string }) | null>(null);
   const [radius, setRadius] = useState('50');
   const [revoking, setRevoking] = useState<{ id: string; label: string } | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const hostelId = hostel?.id ?? null;
 
   const load = useCallback(async () => {
@@ -62,7 +62,7 @@ export default function Gates() {
     setGates((await staffApi.gates(hostelId)).items);
   }, [hostelId]);
   useEffect(() => {
-    void load().catch(() => setMessage("Couldn't load gates."));
+    void load().catch(() => notice.fail("Couldn't load gates."));
   }, [load]);
   const live = useLiveUpdates(hostelId, (e) => {
     if (!e || e.type === 'gate') void load();
@@ -78,21 +78,21 @@ export default function Gates() {
       ).catch(() => null);
       setPairing({ gateId, code: res.code, expiresAt: res.expiresAt, qr });
     } catch (err) {
-      setMessage(err instanceof api.ApiError ? err.message : "Couldn't create a pairing code.");
+      notice.fail(err instanceof api.ApiError ? err.message : "Couldn't create a pairing code.");
     }
   }
 
   // F8 step 4: "takes 5 GPS fixes 2 s apart, discards any with accuracy > 30 m, averages the rest".
   async function captureLocation(gateId: string) {
     setCapturing(gateId);
-    setMessage(null);
+    notice.clear();
     const fixes: { lat: number; lng: number; accuracy: number }[] = [];
     for (let i = 0; i < FIXES; i++) {
       if (i > 0) await new Promise((r) => setTimeout(r, FIX_GAP_MS));
       const { location, locationError } = await captureScanLocation();
       if (locationError === 'mocked') {
         setCapturing(null);
-        setMessage('Turn off fake location apps.');
+        notice.fail('Turn off fake location apps.');
         return;
       }
       if (location) fixes.push(location);
@@ -100,7 +100,7 @@ export default function Gates() {
     setCapturing(null);
     const avg = averageGateFixes(fixes);
     if (!avg) {
-      setMessage('No accurate reading. Stand in the open at the gate and try again.');
+      notice.fail('No accurate reading. Stand in the open at the gate and try again.');
       return;
     }
     setCapture({ gateId, ...avg });
@@ -109,15 +109,15 @@ export default function Gates() {
   async function moveGateHere(gateId: string) {
     if (!hostelId) return;
     setMoving(gateId);
-    setMessage(null);
+    notice.clear();
     try {
       const { location, locationError } = await captureScanLocation();
       if (locationError === 'mocked') {
-        setMessage('Turn off fake location apps.');
+        notice.fail('Turn off fake location apps.');
         return;
       }
       if (!location) {
-        setMessage("Couldn't get your location. Allow location for this site and try again.");
+        notice.fail("Couldn't get your location. Allow location for this site and try again.");
         return;
       }
       await staffApi.setGateTestLocation(hostelId, gateId, {
@@ -125,10 +125,10 @@ export default function Gates() {
         lng: location.lng,
         accuracyM: location.accuracy,
       });
-      setMessage(`Gate moved to your position (about ±${Math.round(location.accuracy)} m).`);
+      notice.ok(`Gate moved to your position (about ±${Math.round(location.accuracy)} m).`);
       await load();
     } catch (err) {
-      setMessage(err instanceof api.ApiError ? err.message : "Couldn't move the gate.");
+      notice.fail(err instanceof api.ApiError ? err.message : "Couldn't move the gate.");
     } finally {
       setMoving(null);
     }
@@ -138,7 +138,7 @@ export default function Gates() {
 
   return (
     <StaffScreen title="Gates" live={live}>
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       {gates === null ? <ActivityIndicator accessibilityLabel="Loading gates" /> : null}
       {gates?.map((g) => (
         <Card key={g.id}>
@@ -240,10 +240,10 @@ export default function Gates() {
                       maxAccuracyM: g.maxAccuracyM,
                     });
                     setCapture(null);
-                    setMessage('Gate location saved.');
+                    notice.ok('Gate location saved.');
                     await load();
                   } catch (err) {
-                    setMessage(err instanceof api.ApiError ? err.message : "Couldn't save.");
+                    notice.fail(err instanceof api.ApiError ? err.message : "Couldn't save.");
                   }
                 }}
               />
@@ -261,7 +261,7 @@ export default function Gates() {
           if (!revoking || !hostelId) return;
           await staffApi
             .revokeDevice(hostelId, revoking.id)
-            .catch(() => setMessage("Couldn't remove it."));
+            .catch(() => notice.fail("Couldn't remove it."));
           setRevoking(null);
           await load();
         }}

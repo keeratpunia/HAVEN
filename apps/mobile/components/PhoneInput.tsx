@@ -1,6 +1,5 @@
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
-import { IS_TEST_VERSION } from '../lib/app-env.js';
 
 /** SDD G-02: "Phone field with +91 prefix." */
 export function PhoneInput({
@@ -34,12 +33,6 @@ export function PhoneInput({
         />
       </View>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
-      {IS_TEST_VERSION ? (
-        // DEC-028: the test version takes only the SDD §9.5 test numbers.
-        <Text style={styles.hint}>
-          Test version: use a test number, 99999 00001 to 99999 00009. The code is 123456.
-        </Text>
-      ) : null}
     </View>
   );
 }

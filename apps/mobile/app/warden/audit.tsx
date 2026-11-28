@@ -3,40 +3,54 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { formatDateTime, type AuditRowDTO } from '@haven/shared';
 import { staffApi } from '../../services/api-client.js';
 import { useStaff } from '../../lib/staff-context.js';
+import { AUDIT_ENTITIES, describeAuditAction } from '../../lib/audit-labels.js';
 import { Button } from '../../components/Button.js';
 import { FilterSheet } from '../../components/staff/FilterSheet.js';
 import {
   Card,
-  ErrorText,
+  Chips,
   Field,
   Muted,
   StaffScreen,
   staffStyles,
 } from '../../components/staff/StaffUi.js';
+import { DateTimeField } from '../../components/DateTimeField.js';
+import { StatusText, useStatus } from '../../components/StatusText.js';
 
-/** W-11 Audit log (FR-58): filterable by actor, entity and date. Rows hold no raw PII. */
+/**
+ * W-11 Audit log (FR-58): filterable by who, what and when. Rows hold no raw PII. Each row
+ * reads as a sentence ("Invited a warden") with the person and the time (DEC-032); the
+ * old "Actor id" box wanted an internal id nobody could know, so it searches names now.
+ */
 const isDate = (s: string) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? s : undefined);
+
+function who(r: AuditRowDTO): string {
+  if (r.actorName) return r.actorName;
+  if (r.actorType === 'visitor') return 'A guest';
+  if (r.actorType === 'device') return 'Gate screen';
+  return 'HAVEN (automatic)';
+}
 
 export default function Audit() {
   const { hostel } = useStaff();
   const [entity, setEntity] = useState('');
-  const [actorId, setActorId] = useState('');
+  const [actor, setActor] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [items, setItems] = useState<AuditRowDTO[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const notice = useStatus();
   const hostelId = hostel?.id ?? null;
 
   const filters = useCallback(
     (c?: string | null) => ({
       entity: entity || undefined,
-      actorId: /^[0-9a-f-]{36}$/.test(actorId) ? actorId : undefined,
+      actor: actor.trim() || undefined,
       from: isDate(from),
       to: isDate(to),
       cursor: c,
     }),
-    [entity, actorId, from, to],
+    [entity, actor, from, to],
   );
 
   const load = useCallback(async () => {
@@ -45,40 +59,41 @@ export default function Audit() {
       const page = await staffApi.audit(hostelId, filters());
       setItems(page.items);
       setCursor(page.nextCursor);
-      setMessage(null);
+      notice.clear();
     } catch {
-      setMessage("Couldn't load the audit log.");
+      notice.fail("Couldn't load the audit log.");
     }
   }, [hostelId, filters]);
   useEffect(() => {
     void load();
-    // filters apply on demand
-  }, [hostelId]);
+    // the name search runs on demand; the chips apply at once
+  }, [hostelId, entity]);
 
   return (
     <StaffScreen title="Audit log">
       <FilterSheet
-        activeCount={[entity, actorId, from, to].filter(Boolean).length}
-        applyLabel="Filter"
+        inline={
+          <View style={staffStyles.row}>
+            <Field label="Who" value={actor} onChange={setActor} />
+          </View>
+        }
+        activeCount={[entity, from, to].filter(Boolean).length}
+        applyLabel="Search"
         onApply={() => void load()}
       >
+        <Chips label="What" value={entity} onChange={setEntity} options={AUDIT_ENTITIES} />
         <View style={staffStyles.row}>
-          <Field label="Entity (visits, residents, charges…)" value={entity} onChange={setEntity} />
-          <Field label="Actor id" value={actorId} onChange={setActorId} />
-          <Field label="From (YYYY-MM-DD)" value={from} onChange={setFrom} />
-          <Field label="To (YYYY-MM-DD)" value={to} onChange={setTo} />
+          <DateTimeField kind="date" label="From" value={from} onChange={setFrom} />
+          <DateTimeField kind="date" label="To" value={to} onChange={setTo} />
         </View>
       </FilterSheet>
-      <ErrorText>{message}</ErrorText>
+      <StatusText status={notice.message} />
       {items === null ? <ActivityIndicator accessibilityLabel="Loading" /> : null}
-      {items?.length === 0 ? <Muted>No entries.</Muted> : null}
+      {items?.length === 0 ? <Muted>Nothing found.</Muted> : null}
       {items?.map((r) => (
         <Card key={r.id}>
-          <Text>{`${r.action} · ${r.entity}`}</Text>
-          <Muted>{`${formatDateTime(r.at)} · ${r.actorName ?? r.actorType}${r.entityId ? ` · ${r.entityId}` : ''}`}</Muted>
-          {(r.action.startsWith('admin.') || r.action.startsWith('read.')) && r.after ? (
-            <Muted>{JSON.stringify(r.after)}</Muted>
-          ) : null}
+          <Text>{describeAuditAction(r.action, r.entity)}</Text>
+          <Muted>{`${who(r)} · ${formatDateTime(r.at)}`}</Muted>
         </Card>
       ))}
       {cursor ? (
