@@ -9,6 +9,7 @@ import { Button } from '../../components/Button.js';
 import { ErrorState } from '../../components/ErrorState.js';
 import { LiveCamera } from '../../components/LiveCamera.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { dataUrlToBlob } from '../../lib/data-url.js';
 
 /**
  * R-03 Onboarding (SDD §13.4, F7 step 4): "Hostel (GH-8 preselected), room number,
@@ -76,7 +77,7 @@ export default function Onboarding() {
     setError(null);
     setLoading(true);
     try {
-      const blob = await (await fetch(dataUrl)).blob();
+      const blob = dataUrlToBlob(dataUrl);
       await api.uploadResidentDocument(kind, blob);
       setStep(kind === 'id_card' ? 'selfie' : 'submit');
     } catch (err) {

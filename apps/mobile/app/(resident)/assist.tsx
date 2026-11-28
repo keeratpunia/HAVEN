@@ -23,6 +23,7 @@ import { successHaptic } from '../../lib/haptics.js';
 import { ruleMessage, RULES } from '../../lib/rule-hints.js';
 import { serverNow } from '../../lib/server-time.js';
 import { captureScanLocation } from '../../lib/useScanLocation.js';
+import { dataUrlToBlob } from '../../lib/data-url.js';
 
 /**
  * R-12 Guest without phone (SDD §13.4, F4, FR-28): "Scan gate QR (camera) → guest
@@ -142,7 +143,7 @@ export default function Assist() {
     setPhase('busy');
     actionKey.current = actionKey.current ?? newActionKey();
     try {
-      const blob = await (await fetch(dataUrl)).blob();
+      const blob = dataUrlToBlob(dataUrl);
       const { photoId } = await api.uploadScanSessionPhoto(session.id, session.nonce, blob);
       await api.hostAssistedEntry(session.id, session.nonce, actionKey.current, {
         guest: { name: name.trim(), gender, phone: phone ? `+91${phone}` : null },

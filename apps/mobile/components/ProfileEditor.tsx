@@ -5,6 +5,7 @@ import { color, shape, space, type as typeTokens } from '@haven/ui';
 import * as api from '../services/api-client.js';
 import { Button } from './Button.js';
 import { LiveCamera } from './LiveCamera.js';
+import { dataUrlToBlob } from '../lib/data-url.js';
 
 /**
  * FR-08: "Guests and residents can view and edit their name and retake their profile
@@ -53,7 +54,7 @@ export function ProfileEditor(props: { kind: 'guest' | 'resident'; onSaved?: () 
     setError(null);
     setMessage(null);
     try {
-      const blob = await (await fetch(dataUrl)).blob();
+      const blob = dataUrlToBlob(dataUrl);
       if (props.kind === 'guest') await api.uploadProfilePhoto(blob);
       else await api.uploadResidentDocument('selfie', blob);
       setRetaking(false);

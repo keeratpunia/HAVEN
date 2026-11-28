@@ -7,6 +7,7 @@ import * as api from '../../services/api-client.js';
 import { Button } from '../../components/Button.js';
 import { LiveCamera } from '../../components/LiveCamera.js';
 import { useAuth } from '../../lib/auth-context.js';
+import { dataUrlToBlob } from '../../lib/data-url.js';
 
 type Gender = 'female' | 'male' | 'undisclosed';
 
@@ -49,7 +50,7 @@ export default function Profile() {
   async function finishWithPhoto(dataUrl: string) {
     setError(null);
     try {
-      const blob = await (await fetch(dataUrl)).blob();
+      const blob = dataUrlToBlob(dataUrl);
       await api.uploadProfilePhoto(blob);
     } catch (err) {
       // The profile photo is part of a complete profile (FR-02): without it the API
