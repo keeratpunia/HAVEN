@@ -1951,6 +1951,54 @@ Source for all of Part 1: SDD §2.7.
   Phase 1: about 30 minutes of setup for no benefit with dummy data).
 - **SDD updated?** No. §8.3 stays as written for the pilot.
 
+### DEC-031 — W-08 resident detail shows the resident as a host; residents can be sorted by guests
+
+- **Date:** 2026-11-28
+- **Decided by:** the team (Keerat), from the warden-facing review of the test version.
+- **Context:** SDD §13.4 W-08 lists "Search; status filters; resident detail with
+  suspend / mark left". The app only expanded a list card in place, with suspend and
+  mark-left buttons. The team asked for the warden to open a resident and see who they
+  invited and when, and to sort residents by how many guests they brought in. The SDD
+  is silent on both; F6 step 4 already shows the warden a "host's history" (visits,
+  overnight stays, disputes) on overnight approvals, so the idea isn't new to the design.
+- **Decision:**
+  - **Resident detail screen** (`apps/mobile/app/warden/residents/[id].tsx`), opened by
+    tapping a resident. It shows:
+    - the profile and the suspend / lift / mark-left actions, moved from the list card;
+    - **"As a host"** tiles: guests who came in, different guests, visits hosted,
+      overnight stays that took place, "Not my guest" reports, and the latest guest's
+      arrival date;
+    - **their guests**: every visit they hosted, newest first, each opening W-05.
+  - **API.**
+    - `GET /v1/admin/residents/:userId` returns the same `AdminResidentDTO` as the list.
+      Reading the selfie or a pending ID card is audited as `read.resident_documents`
+      (SA-11).
+    - Every `AdminResidentDTO` now carries `hostStats`, all-time counts from one grouped
+      query; no guest identities are added.
+    - Visit search takes `hostId` for the history, so it reuses W-05's existing
+      permission (`admin.visits.read`: warden, super admin), serializer and photo
+      signing.
+  - **Sorting.** `GET /v1/admin/residents?sort=oldest|most_guests|latest_guest|name|room`.
+    - `oldest` (sign-up order) stays the default, so nothing changes for existing
+      callers.
+    - "Most guests" counts visits whose guest actually came in at the gate, all time.
+    - Ties go by name, then id, so pages never overlap.
+    - On a phone the status and sort chips sit in the filter sheet (DEC-027).
+  - **Who sees it.** `admin.residents.read` (warden and super admin), as before. The
+    office sees none of it.
+- **Alternatives considered:**
+  - Counting only the last 30 days (rejected for now: the warden asked for "who invited
+    whom", and all-time counts are what the overnight approval card already shows).
+  - A separate history endpoint (rejected: visit search already does it, with its
+    permissions and serializers).
+- **Tests:** `apps/api/test/resident-history.integration.test.ts`:
+  - every stat, and zeros for a resident who never hosted;
+  - sorting by most guests and latest guest; an unknown sort is a 400;
+  - the `hostId` history;
+  - the office is refused, and another hostel's resident is not shown.
+- **SDD updated?** Not yet: an addition to W-08 and §12.9 (one endpoint, two query
+  parameters). Goes into the Phase 2 SDD addendum with DEC-026–028.
+
 Template for a new entry:
 
 ```markdown

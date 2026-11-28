@@ -321,6 +321,21 @@ test('warden and admin screens', async ({ page }, info) => {
     await first.click();
     await audit(page, 'warden', 'visit-detail', p);
   }
+  // W-08: residents sorted by most guests, then one resident's detail (DEC-031).
+  await page.goto('/warden/residents');
+  await settle(page);
+  const residentsFilters = page.getByRole('button', { name: /^Filters/ });
+  if (await residentsFilters.count()) {
+    await residentsFilters.first().click();
+    await page.getByRole('tab', { name: 'Most guests' }).click();
+    await page.getByRole('button', { name: 'Show results' }).click();
+  } else {
+    await page.getByRole('tab', { name: 'Most guests' }).click();
+  }
+  await audit(page, 'warden', 'residents-most-guests', p);
+  await page.getByRole('button', { name: /^Priya Sharma, room 101/ }).click();
+  await page.getByText('As a host').waitFor({ timeout: 30_000 });
+  await audit(page, 'warden', 'resident-detail', p);
   // The phone filter sheet on visit search.
   await page.goto('/warden/visits');
   await settle(page);

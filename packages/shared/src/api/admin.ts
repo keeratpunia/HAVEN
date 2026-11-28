@@ -69,6 +69,8 @@ export const AdminVisitsQuerySchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
   expectedToday: z.enum(['true']).optional(),
+  /** W-08 resident detail: one host's visits, newest first (DEC-031). */
+  hostId: z.string().uuid().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -117,9 +119,14 @@ export interface ApprovalDTO {
   hostHistory: { overnightStays: number; visits: number; disputes: number };
 }
 
+/** W-08 list order (DEC-031). `oldest` (by sign-up) is the original order. */
+export const RESIDENT_SORTS = ['oldest', 'name', 'room', 'most_guests', 'latest_guest'] as const;
+export type ResidentSort = (typeof RESIDENT_SORTS)[number];
+
 export const AdminResidentsQuerySchema = z.object({
   status: z.enum(['pending', 'verified', 'rejected', 'suspended', 'left']).optional(),
   q: z.string().trim().max(80).optional(),
+  sort: z.enum(RESIDENT_SORTS).default('oldest'),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
@@ -140,6 +147,23 @@ export interface AdminResidentDTO {
   selfie: PhotoDTO | null;
   /** F7 step 6 / E-20: other verified residents already in that room. */
   roommates: { userId: string; fullName: string }[];
+  /** W-08: this resident as a host, all time (DEC-031). */
+  hostStats: ResidentHostStatsDTO;
+}
+
+export interface ResidentHostStatsDTO {
+  /** Every visit they hosted: invites, walk-ins they approved, overnight requests. */
+  visits: number;
+  /** Visits whose guest actually came in at the gate. */
+  guestsIn: number;
+  /** Different guests who came in. */
+  distinctGuests: number;
+  /** Overnight / guest-room stays that took place. */
+  overnightStays: number;
+  /** Arrivals they reported as "Not my guest". */
+  disputes: number;
+  /** When their latest guest came in. */
+  lastGuestAt: string | null;
 }
 
 export const RejectResidentBodySchema = z.object({ reason: Reason });

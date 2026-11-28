@@ -259,6 +259,8 @@ export async function registerAdminVisitRoutes(
         .selectAll('haven.visits')
         .where('haven.visits.hostel_id', '=', request.hostelId);
       if (q.status) query = query.where('haven.visits.status', '=', q.status);
+      // W-08 resident detail: one host's visits (DEC-031).
+      if (q.hostId) query = query.where('haven.visits.host_id', '=', q.hostId);
       if (q.type) query = query.where('haven.visits.type', '=', q.type);
       if (q.flag === 'overstay')
         query = query

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { Kysely } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { z } from 'zod';
 import {
   AdminResidentsQuerySchema,
@@ -9,6 +9,7 @@ import {
   SuspendResidentBodySchema,
   type AdminResidentDTO,
   type BanDTO,
+  type ResidentHostStatsDTO,
 } from '@haven/shared';
 import type { ZodTypeProvider } from '../lib/validation.js';
 import type { Database } from '../db/index.js';
@@ -59,8 +60,69 @@ export async function registerAdminPeopleRoutes(
     return row;
   }
 
+  /**
+   * W-08 host stats (DEC-031): one grouped query over the visits these residents hosted.
+   * Counts only, no guest identities; the visit list itself comes from visit search.
+   */
+  async function hostStats(userIds: string[]): Promise<Map<string, ResidentHostStatsDTO>> {
+    const rows = await db
+      .selectFrom('haven.visits')
+      .select((eb) => [
+        'host_id',
+        eb.fn.countAll<string>().as('visits'),
+        eb.fn.count<string>('first_entry_at').as('guests_in'),
+        eb.fn
+          .count<string>(
+            eb.case().when('first_entry_at', 'is not', null).then(eb.ref('visitor_id')).end(),
+          )
+          .distinct()
+          .as('distinct_guests'),
+        eb.fn
+          .count<string>(
+            eb
+              .case()
+              .when(
+                eb.and([
+                  eb('type', 'in', ['overnight_room', 'guest_room']),
+                  eb('first_entry_at', 'is not', null),
+                ]),
+              )
+              .then(1)
+              .end(),
+          )
+          .as('overnight'),
+        eb.fn.count<string>('host_disputed_at').as('disputes'),
+        eb.fn.max('first_entry_at').as('last_guest_at'),
+      ])
+      .where('host_id', 'in', userIds)
+      .groupBy('host_id')
+      .execute();
+    const out = new Map<string, ResidentHostStatsDTO>();
+    for (const r of rows) {
+      out.set(r.host_id, {
+        visits: Number(r.visits),
+        guestsIn: Number(r.guests_in),
+        distinctGuests: Number(r.distinct_guests),
+        overnightStays: Number(r.overnight),
+        disputes: Number(r.disputes),
+        lastGuestAt: r.last_guest_at ? new Date(r.last_guest_at).toISOString() : null,
+      });
+    }
+    return out;
+  }
+
+  const NO_STATS: ResidentHostStatsDTO = {
+    visits: 0,
+    guestsIn: 0,
+    distinctGuests: 0,
+    overnightStays: 0,
+    disputes: 0,
+    lastGuestAt: null,
+  };
+
   async function residentDto(userIds: string[]): Promise<AdminResidentDTO[]> {
     if (userIds.length === 0) return [];
+    const stats = await hostStats(userIds);
     const rows = await db
       .selectFrom('haven.residents')
       .innerJoin('haven.users', 'haven.users.id', 'haven.residents.user_id')
@@ -114,6 +176,7 @@ export async function registerAdminPeopleRoutes(
         idCardPhoto: pending ? signer.signOrNull(r.id_card_media_id) : null,
         selfie: signer.signOrNull(r.selfie_media_id),
         roommates: roommates.map((m) => ({ userId: m.user_id, fullName: m.full_name })),
+        hostStats: stats.get(r.user_id) ?? NO_STATS,
       });
     }
     return out;
@@ -171,8 +234,31 @@ export async function registerAdminPeopleRoutes(
           ]),
         );
       }
+      // W-08 sort (DEC-031). Guest counts are per host over all time; ties fall back to
+      // the name, then the id, so pages never overlap.
+      const guestsIn = sql<number>`(select count(v.first_entry_at) from haven.visits v
+        where v.host_id = haven.residents.user_id)`;
+      const lastGuest = sql<Date | null>`(select max(v.first_entry_at) from haven.visits v
+        where v.host_id = haven.residents.user_id)`;
+      switch (request.query.sort) {
+        case 'name':
+          q = q.orderBy('haven.users.full_name', 'asc');
+          break;
+        case 'room':
+          q = q
+            .orderBy(sql`coalesce(haven.rooms.number, haven.residents.claimed_room)`, 'asc')
+            .orderBy('haven.users.full_name', 'asc');
+          break;
+        case 'most_guests':
+          q = q.orderBy(guestsIn, 'desc').orderBy('haven.users.full_name', 'asc');
+          break;
+        case 'latest_guest':
+          q = q.orderBy(sql`${lastGuest} desc nulls last`).orderBy('haven.users.full_name', 'asc');
+          break;
+        default:
+          q = q.orderBy('haven.residents.submitted_at', 'asc');
+      }
       const rows = await q
-        .orderBy('haven.residents.submitted_at', 'asc')
         .orderBy('haven.residents.user_id')
         .offset(offset)
         .limit(request.query.limit + 1)
@@ -188,6 +274,26 @@ export async function registerAdminPeopleRoutes(
         });
       }
       reply.send({ items, nextCursor: page.nextCursor });
+    },
+  );
+
+  // GET /v1/admin/residents/:userId — W-08 resident detail (DEC-031): the same DTO as the
+  // list, with host stats; the visit history is GET /admin/visits?hostId=.
+  api.get(
+    '/admin/residents/:userId',
+    { schema: { params: USER }, preHandler: staffScope },
+    async (request, reply) => {
+      authorize(request.principal, 'admin.residents.read', { hostelId: request.hostelId });
+      await scopedResident(request, request.params.userId);
+      const [dto] = await residentDto([request.params.userId]);
+      if (!dto) throw new AppError('NOT_FOUND', 404, 'Resident not found.');
+      // The selfie (and a pending ID card) are identity documents: reads are audited (SA-11).
+      if (dto.idCardPhoto || dto.selfie) {
+        await audit(db, request, 'read.resident_documents', 'residents', dto.userId, {
+          residentIds: [dto.userId],
+        });
+      }
+      reply.send(dto);
     },
   );
 

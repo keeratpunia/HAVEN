@@ -16,6 +16,7 @@ import {
   type VisitPreview,
   type AdminChargeDTO,
   type AdminResidentDTO,
+  type ResidentSort,
   type AdminVisitDetailDTO,
   type AdminVisitDTO,
   type ApprovalDTO,
@@ -716,6 +717,8 @@ export const staffApi = {
       from?: string;
       to?: string;
       expectedToday?: boolean;
+      /** W-08 resident detail: one host's visits (DEC-031). */
+      hostId?: string;
       cursor?: string | null;
     } = {},
   ) =>
@@ -737,8 +740,12 @@ export const staffApi = {
     }),
   emergency: (h: string) => admin<{ count: number; items: EmergencyRowDTO[] }>(h, '/emergency'),
   approvals: (h: string) => admin<{ items: ApprovalDTO[] }>(h, '/approvals'),
-  residents: (h: string, p: { status?: string; q?: string; cursor?: string | null } = {}) =>
-    admin<Paged<AdminResidentDTO>>(h, `/residents${qs(p)}`),
+  residents: (
+    h: string,
+    p: { status?: string; q?: string; sort?: ResidentSort; cursor?: string | null } = {},
+  ) => admin<Paged<AdminResidentDTO>>(h, `/residents${qs(p)}`),
+  /** W-08 resident detail with host stats (DEC-031). */
+  resident: (h: string, userId: string) => admin<AdminResidentDTO>(h, `/residents/${userId}`),
   verifyResident: (h: string, userId: string) =>
     admin<AdminResidentDTO>(h, `/residents/${userId}/verify`, { method: 'POST' }),
   rejectResident: (h: string, userId: string, reason: string) =>
