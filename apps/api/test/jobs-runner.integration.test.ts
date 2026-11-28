@@ -540,7 +540,8 @@ describe('FR-60: daily digest at 08:00 IST (job_daily_digest, DEC-016)', () => {
     expect(rows[0]).toMatchObject({
       channel: 'push',
       title: `Yesterday at ${code}`,
-      body: '2 visits · 1 disputed · 1 overstayed · 1 location not verified · 1 forced check-outs.',
+      // DEC-033: a dispute left from before the change is no longer counted.
+      body: '2 visits · 1 overstayed · 1 location not verified · 1 forced check-outs.',
       data: { screen: '/warden/reports?from=2026-10-17&to=2026-10-17' },
     });
   });

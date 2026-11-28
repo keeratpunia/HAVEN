@@ -1,24 +1,22 @@
-import { useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { formatTime12h, VISIT_TYPE_LABELS } from '@haven/shared';
 import { color, shape, space, type as typeTokens } from '@haven/ui';
 import * as api from '../../../services/api-client.js';
 import { Button } from '../../../components/Button.js';
-import { ConfirmSheet } from '../../../components/ConfirmSheet.js';
 import { EmptyState } from '../../../components/EmptyState.js';
 import { FlagBanners } from '../../../components/FlagBanners.js';
-import { PhotoCompare } from '../../../components/PhotoCompare.js';
+import { LivePhoto, PhotoCompare } from '../../../components/PhotoCompare.js';
 import { StatusChip } from '../../../components/StatusChip.js';
 import { useActionKeys } from '../../../lib/action-key.js';
-import { successHaptic, warningHaptic } from '../../../lib/haptics.js';
-import { ruleMessage, RULES } from '../../../lib/rule-hints.js';
+import { successHaptic } from '../../../lib/haptics.js';
+import { ruleMessage } from '../../../lib/rule-hints.js';
 import { useHostedVisit } from '../../../lib/useHostedVisit.js';
 
 /**
- * R-09 Guest arrived (SDD §13.4): "Live photo vs profile photo side by side, time —
- * Yes, that's my guest / Not my guest" (FR-42, available for 30 min; FR-43 dispute).
- * §14: "the dispute button is visually distinct (red outline) but not the default."
+ * R-09 Guest arrived (SDD §13.4), opened from N-ARRIVED. DEC-033: for an invited or
+ * overnight guest it is a notice only — the gate photo and the time, no "Yes, that's my
+ * guest" / "Not my guest" (those belong to walk-ins, whom the host approves before entry).
  *
  * Also the F3 confirmation: a guest whose location couldn't be checked is waiting at
  * the gate, and only the host's Confirm lets them in (§13.6 "Host-confirm path").
@@ -28,7 +26,6 @@ export default function Arrival() {
   const router = useRouter();
   const { visit, notFound, message, busy, run } = useHostedVisit(id);
   const { keyFor, done } = useActionKeys();
-  const [disputing, setDisputing] = useState(false);
 
   if (notFound)
     return (
@@ -47,7 +44,7 @@ export default function Arrival() {
   }
   const visitId = visit.id;
   const canConfirm = visit.allowedActions.includes('confirm_arrival');
-  const canDispute = visit.allowedActions.includes('dispute');
+  const waiting = visit.awaitingHostConfirmation;
 
   async function confirm() {
     const ok = await run(() => api.confirmArrival(visitId, keyFor('confirm')), ruleMessage);
@@ -57,39 +54,27 @@ export default function Arrival() {
     }
   }
 
-  async function dispute(note: string) {
-    const ok = await run(
-      () => api.disputeArrival(visitId, keyFor('dispute'), note || undefined),
-      ruleMessage,
-    );
-    setDisputing(false);
-    if (ok) {
-      done('dispute');
-      warningHaptic();
-    }
-  }
-
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title} accessibilityRole="header">
-        {visit.awaitingHostConfirmation
-          ? 'Confirm your guest is at the gate'
-          : visit.flags.disputed
-            ? 'You reported this guest'
-            : `${visit.guest.name} has arrived`}
+        {waiting ? 'Confirm your guest is at the gate' : `${visit.guest.name} has arrived`}
       </Text>
-      <PhotoCompare
-        live={visit.latestPhoto}
-        profile={visit.guest.profilePhoto}
-        guestName={visit.guest.name}
-      />
+      {waiting ? (
+        <PhotoCompare
+          live={visit.latestPhoto}
+          profile={visit.guest.profilePhoto}
+          guestName={visit.guest.name}
+        />
+      ) : (
+        <LivePhoto photo={visit.latestPhoto} guestName={visit.guest.name} />
+      )}
       <FlagBanners visit={visit} />
       <View style={styles.card}>
         <Text style={styles.name}>{visit.guest.name}</Text>
         <Text style={styles.body}>
           {VISIT_TYPE_LABELS[visit.type]} · until {formatTime12h(visit.windowEnd)}
         </Text>
-        {visit.awaitingHostConfirmation ? (
+        {waiting ? (
           <Text style={styles.warn} accessibilityRole="alert">
             ⚠ {visit.guest.name}'s location couldn't be checked. Only confirm if you know they're
             there.
@@ -98,15 +83,6 @@ export default function Arrival() {
           <Text style={styles.body}>Checked in at {formatTime12h(visit.firstEntryAt)}</Text>
         ) : null}
         <StatusChip status={visit.status} />
-        {visit.hostConfirmedAt && !visit.awaitingHostConfirmation ? (
-          <Text style={styles.ok}>✓ You confirmed this guest.</Text>
-        ) : null}
-        {canDispute ? (
-          <Text style={styles.hint}>
-            You can report a guest you don't know for {RULES.dispute_window_minutes} minutes after
-            they arrive.
-          </Text>
-        ) : null}
       </View>
 
       {message ? (
@@ -116,38 +92,14 @@ export default function Arrival() {
       ) : null}
 
       {canConfirm ? (
-        <Button
-          label={visit.awaitingHostConfirmation ? 'Confirm' : "Yes, that's my guest"}
-          onPress={confirm}
-          loading={busy}
-        />
-      ) : null}
-      {canDispute ? (
-        <Button
-          label="Not my guest"
-          variant="danger"
-          onPress={() => setDisputing(true)}
-          disabled={busy}
-        />
-      ) : null}
-      {!canConfirm && !canDispute ? (
+        <Button label="Confirm" onPress={confirm} loading={busy} />
+      ) : (
         <Button
           label="Open visit"
           variant="secondary"
           onPress={() => router.replace(`/visit/${visitId}`)}
         />
-      ) : null}
-
-      <ConfirmSheet
-        visible={disputing}
-        title={`Report ${visit.guest.name} as not your guest?`}
-        body="The warden is told straight away. Your guest stays checked in until the warden acts."
-        confirmLabel="Report guest"
-        reasonLabel="Anything the warden should know (optional)"
-        loading={busy}
-        onCancel={() => setDisputing(false)}
-        onConfirm={(note) => void dispute(note)}
-      />
+      )}
     </ScrollView>
   );
 }
@@ -174,12 +126,6 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: typeTokens.size.md, fontWeight: typeTokens.weight.semibold, color: color.text },
   body: { fontSize: typeTokens.size.body, color: color.textMuted },
-  hint: { fontSize: typeTokens.size.sm, color: color.textMuted },
-  ok: {
-    fontSize: typeTokens.size.sm,
-    color: color.success,
-    fontWeight: typeTokens.weight.semibold,
-  },
   warn: {
     fontSize: typeTokens.size.sm,
     color: color.warning,

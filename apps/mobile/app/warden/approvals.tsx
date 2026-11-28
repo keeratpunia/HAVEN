@@ -124,7 +124,7 @@ export default function Approvals() {
               ))}
               <Muted>
                 Host history: {a.hostHistory.visits} visits, {a.hostHistory.overnightStays}{' '}
-                overnight stays, {a.hostHistory.disputes} disputes
+                overnight stays
               </Muted>
               <View style={styles.pair}>
                 <View style={styles.half}>

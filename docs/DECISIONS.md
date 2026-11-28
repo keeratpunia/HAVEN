@@ -2073,7 +2073,8 @@ Source for all of Part 1: SDD §2.7.
     gate device is "Temporary check device".
 - **Explained, not changed:**
   - A disputed guest stays checked in until the warden acts (F9: the dispute alerts the
-    warden; force check-out and ban are the warden's).
+    warden; force check-out and ban are the warden's). Superseded by DEC-033: hosts no
+    longer report invited or overnight guests after entry.
   - "Location not verified" lists guests let in by their host after GPS failed
     (FR-27, F3), for the warden to review.
   - "Rejected" lists residents the warden turned down; they may resubmit once.
@@ -2087,6 +2088,76 @@ Source for all of Part 1: SDD §2.7.
     sign-in, role headers, Back, admin gate tools, gate screen).
 - **SDD updated?** Not yet. The audit filters, the visit-search `match`, the Hostels
   screen and the two-step test sign-in go into the Phase 2 addendum with DEC-026–031.
+
+### DEC-033 — An invited guest's arrival is a notice; "Not my guest" is retired
+
+- **Date:** 2026-11-29
+- **Decided by:** the team (Keerat), after comparing the walk-in and invited-guest
+  flows step by step: "keep these two options for walkins only … we want the process to
+  be even more small and short for the invited guests. Same for overnight."
+- **Context:** SDD FR-42, FR-43, F1 step 10, F9, R-09 and E-21. An invited or
+  overnight guest checked in at once, and the host then had 30 minutes to tap **Yes,
+  that's my guest** or **Not my guest**. "Not my guest" alerted the wardens, but the
+  guest stayed inside until a warden acted. The team found that backwards, and it
+  made invited guests a second, slower version of the walk-in check.
+- **Decision.**
+  - **Invited and overnight guests:** after check-in the host gets N-ARRIVED ("{guest}
+    has arrived / Checked in at {time}.") and R-09 shows the gate photo and the time.
+    There is nothing to confirm or report. The invite itself (by name and phone, with
+    the guest signing in on that phone) is the host's approval.
+  - **Walk-ins:** unchanged (F2). The host sees the live photo before entry and taps
+    **Approve** or **Reject**, so a guest the host doesn't know never gets in.
+  - **Location not verified (F3):** unchanged, for everyone. When the phone can't
+    confirm the gate, the guest waits until the host taps **Confirm** (walk-ins:
+    approval doubles as confirmation). The visit carries the "Location not verified"
+    flag.
+- **What changed in the build:**
+  - API: `POST /v1/visits/{id}/dispute` is removed (404). `confirm-arrival` only
+    performs the F3 entry; for a guest already inside it is `409 INVALID_TRANSITION`.
+    `allowedActions` never lists `dispute`, nor `confirm_arrival` after entry.
+  - App: R-09 has no buttons once the guest is inside, just **Open visit**. The
+    dashboard's **Disputed** tile, the Inside **Disputed** filter, the resident
+    detail's "Not my guest" count, the approvals card's dispute count, the reports
+    dispute count, the CSV's **Not my guest** column and the Rules screen's "Not my
+    guest window" field are gone.
+  - The daily digest drops "{n} disputed" (new migration
+    `20261129000001_digest_without_disputes.sql`; the old one is not edited).
+  - The demo, test-version and dev seeds have no disputed visit. The test version's
+    third guest inside is now one the host let in after GPS failed.
+- **Kept, dormant:**
+  - The `host_disputed_at` / `dispute_resolved_*` columns, the `N-DISPUTE` kind and
+    template.
+  - The warden's `resolve-dispute` endpoint and the W-05 banner for a disputed visit.
+  - `dispute_window_minutes` in the rules config.
+  - Nothing sets a dispute any more; these stay so that rows recorded before the
+    change still read correctly, and so no migration drops a column (CLAUDE.md §3.11,
+    §6). They can be removed in a dedicated clean-up PR.
+- **Alternatives considered:**
+  - Keeping the after-entry check but blocking a disputed guest from re-entering.
+  - Making invited guests wait at the gate for the host, like walk-ins.
+  - A Rules switch for the warden.
+  - All three were rejected: the team wants invited guests' entry to be the shortest
+    path, and the walk-in check already covers strangers.
+- **Accepted risk:** someone holding an invited guest's phone can check in as that
+  guest. The host's arrival notice shows the gate photo, so the host can still call
+  the warden, but the app no longer raises the alert for them.
+- **Tests:**
+  - `apps/api/test/resident-approvals-notifications.integration.test.ts`: the arrival
+    is a notice (no actions, `/dispute` 404, no `N-DISPUTE`, nothing stamped), and an
+    approved walk-in has nothing more to confirm. This replaces the old FR-42 / FR-43 /
+    TC-FLOW-06 cases.
+  - `apps/api/test/jobs-runner.integration.test.ts`: the digest ignores an old dispute.
+  - `apps/api/src/notify/templates.test.ts`, `apps/api/src/admin/report-csv.test.ts`,
+    `apps/mobile/test/resident-logic.test.ts`.
+  - `apps/mobile/e2e/tests/resident-app.spec.ts`: R-09 shows the photo and time, with
+    no Yes / Not my guest.
+- **SDD updated?** Not yet. Addendum for Phase 2, with DEC-026–032:
+  - FR-42 becomes "Host receives a push for every check-in of their guest showing the
+    live photo"; FR-43, F9, E-21 and TC-FLOW-06 are retired.
+  - The §15 N-ARRIVED body loses "Tap if this isn't your guest."; N-DISPUTE and
+    `HAVEN_DISPUTE` are unused.
+  - FR-60's digest drops the dispute count, and §3's "Disputes per 100 check-ins" KPI
+    goes.
 
 Template for a new entry:
 

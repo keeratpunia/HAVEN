@@ -360,8 +360,9 @@ async function seedVisits(
   residentIds: string[],
   visitorIds: string[],
 ): Promise<void> {
-  // 30 visits covering every status (8) and every flag (4): overstay_since,
-  // host_disputed_at, location_unverified, exit_location_unverified (SDD §7.2).
+  // 30 visits covering every status (8) and every flag the app still sets (3):
+  // overstay_since, location_unverified, exit_location_unverified (SDD §7.2; DEC-033
+  // retired host_disputed_at).
   const seeds: VisitSeed[] = [];
 
   // Every status appears at least 3 times (24 rows), with varied type/origin/zone.
@@ -402,7 +403,7 @@ async function seedVisits(
     origin: 'walk_in',
     zone: 'room',
     overstay: false,
-    disputed: true,
+    disputed: false, // DEC-033: hosts no longer report arrivals, so nothing sets it
     locationUnverified: false,
     exitLocationUnverified: false,
   });

@@ -353,7 +353,7 @@ describe('walk-in approvals (FR-40, FR-41, R-08)', () => {
   });
 });
 
-describe('arrival confirmation and disputes (FR-42, FR-43, F3, F9, R-09)', () => {
+describe('arrival notice and the F3 host confirmation (FR-42 per DEC-033, F3, R-09)', () => {
   it('TC-FLOW-04: unverified check-in waits for the host; Confirm performs the entry', async () => {
     const w = await world();
     const visitId = await invitedVisit(w);
@@ -408,7 +408,7 @@ describe('arrival confirmation and disputes (FR-42, FR-43, F3, F9, R-09)', () =>
     expect(res.body.error.code).toBe('SCAN_SESSION_EXPIRED');
   });
 
-  it('N-ARRIVED, then "Yes, that\'s my guest" once; a second confirm is refused', async () => {
+  it("DEC-033: an invited guest's arrival is a notice; nothing to confirm or report", async () => {
     const w = await world();
     const visitId = await invitedVisit(w);
     expect((await guestCheckIn(w, visitId)).body.result).toBe('inside');
@@ -419,69 +419,45 @@ describe('arrival confirmation and disputes (FR-42, FR-43, F3, F9, R-09)', () =>
       .executeTakeFirstOrThrow();
     expect(arrived).toEqual({
       title: 'Test Guest has arrived',
-      body: "Checked in at 4:12 pm. Tap if this isn't your guest.",
+      body: 'Checked in at 4:12 pm.',
       data: { screen: `/arrival/${visitId}` },
     });
 
     const card = await supertest(app.server)
       .get(`/v1/visits/${visitId}`)
       .set('Authorization', `Bearer ${w.hostToken}`);
-    expect(card.body.allowedActions).toEqual(['confirm_arrival', 'dispute', 'mark_left']);
+    expect(card.body.allowedActions).toEqual(['mark_left']);
+    expect(card.body.flags.disputed).toBe(false);
 
-    expect((await hostPost(w, `/v1/visits/${visitId}/confirm-arrival`)).status).toBe(200);
-    const twice = await hostPost(w, `/v1/visits/${visitId}/confirm-arrival`);
-    expect(twice.status).toBe(409);
-    // Once confirmed, the arrival card's actions are gone.
-    expect((await hostPost(w, `/v1/visits/${visitId}/dispute`)).status).toBe(409);
-  });
-
-  it('TC-FLOW-06: "Not my guest" flags the visit and alerts wardens by push and SMS immediately', async () => {
-    const w = await world();
-    const visitId = await invitedVisit(w);
-    await guestCheckIn(w, visitId);
     clock.advance(5 * MIN);
-
-    const res = await hostPost(w, `/v1/visits/${visitId}/dispute`, { note: 'Never seen her' });
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ status: 'inside', flags: { disputed: true } });
-
-    const rows = await db
+    const confirm = await hostPost(w, `/v1/visits/${visitId}/confirm-arrival`);
+    expect(confirm.status).toBe(409);
+    expect(confirm.body.error.code).toBe('INVALID_TRANSITION');
+    // "Not my guest" is gone: no route, no warden alert, the visit is untouched.
+    expect((await hostPost(w, `/v1/visits/${visitId}/dispute`, { note: 'x' })).status).toBe(404);
+    const disputes = await db
       .selectFrom('haven.notifications')
-      .selectAll()
+      .select('id')
       .where('kind', '=', 'N-DISPUTE')
-      .orderBy('channel')
       .execute();
-    expect(rows.map((r) => r.channel)).toEqual(['push', 'sms']);
-    expect(rows[0]).toMatchObject({
-      recipient_id: w.wardenId,
-      title: 'Unknown guest reported',
-      data: { screen: `/warden/visits/${visitId}`, note: 'Never seen her' },
-    });
-    expect(rows[0]?.body).toMatch(
-      /^Test Host \(room R\d+\) says Test Guest is not their guest\. Checked in 4:12 pm\.$/,
-    );
-    expect(rows[1]).toMatchObject({ sms_template_id: 'HAVEN_DISPUTE', cancel_if_opened: null });
-    expect(rows[1]?.next_attempt_at.getTime()).toBe(NOW.getTime() + 5 * MIN);
-
-    expect((await hostPost(w, `/v1/visits/${visitId}/dispute`)).status).toBe(409);
+    expect(disputes).toHaveLength(0);
+    const row = await db
+      .selectFrom('haven.visits')
+      .select(['status', 'host_confirmed_at', 'host_disputed_at'])
+      .where('id', '=', visitId)
+      .executeTakeFirstOrThrow();
+    expect(row).toEqual({ status: 'inside', host_confirmed_at: null, host_disputed_at: null });
   });
 
-  it('the arrival actions expire 30 minutes after entry, and don’t apply to walk-ins', async () => {
+  it('a walk-in the host approved has nothing more to confirm either', async () => {
     const w = await world();
-    const visitId = await invitedVisit(w);
-    await guestCheckIn(w, visitId);
-    clock.advance(31 * MIN);
-    const late = await hostPost(w, `/v1/visits/${visitId}/dispute`);
-    expect(late.status).toBe(409);
+    const walk = await walkIn(w);
+    await hostPost(w, `/v1/visits/${walk}/approve`);
     const card = await supertest(app.server)
-      .get(`/v1/visits/${visitId}`)
+      .get(`/v1/visits/${walk}`)
       .set('Authorization', `Bearer ${w.hostToken}`);
     expect(card.body.allowedActions).toEqual(['mark_left']);
-
-    const w2 = await world();
-    const walk = await walkIn(w2);
-    await hostPost(w2, `/v1/visits/${walk}/approve`);
-    expect((await hostPost(w2, `/v1/visits/${walk}/dispute`)).status).toBe(409);
+    expect((await hostPost(w, `/v1/visits/${walk}/confirm-arrival`)).status).toBe(409);
   });
 
   it('"My guest has left" completes the visit (F10); the replay is identical', async () => {

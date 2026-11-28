@@ -27,22 +27,20 @@ import {
   updateVisitStatus,
   type VisitRow,
 } from './repository.js';
-import { isVisitorBanned, loadGuestName, loadHostIdentity, loadHostState } from './context.js';
+import { isVisitorBanned, loadGuestName, loadHostState } from './context.js';
 import { bookingDates, checkIn, type VisitServiceDeps } from './service.js';
 import type { VisitActorResource } from './policy.js';
-import { enqueueNotification, wardenIdsFor } from '../notify/outbox.js';
+import { enqueueNotification } from '../notify/outbox.js';
 import {
   confirmLocationSms,
   confirmLocationText,
-  disputeSms,
-  disputeText,
   SMS_FALLBACK_DELAY_MS,
 } from '../notify/templates.js';
 import { consumeScanSession } from '../gate/repository.js';
 
 /**
  * Host actions from SDD §12.6 that aren't a plain §7.1 status transition (or that
- * wrap one with host-specific rules): confirm-arrival, dispute, window edit, invite-
+ * wrap one with host-specific rules): confirm-arrival, window edit, invite-
  * link regeneration, preview — plus the guest-side half of F3 that confirm-arrival
  * completes. Each runs in one transaction and calls `authorize()` (CLAUDE.md §3.10).
  */
@@ -165,12 +163,10 @@ export async function requestHostLocationConfirmation(
 // ---------------------------------------------------------------------------
 
 /**
- * Two cases, both "Host — VisitDTO" in SDD §12.6:
- *  - the guest's check-in is waiting on the host (F3): "For a location-unverified
- *    check-in this performs the entry" — via `checkIn` with the pending scan
- *    session's GPS facts and photo, cut-offs judged at the scan time (E-05);
- *  - the guest is already inside: R-09's "Yes, that's my guest" (FR-42), available
- *    within `dispute_window_minutes` of entry — sets `host_confirmed_at`.
+ * The guest's check-in is waiting on the host (F3): "For a location-unverified
+ * check-in this performs the entry" — via `checkIn` with the pending scan session's
+ * GPS facts and photo, cut-offs judged at the scan time (E-05). DEC-033: there is no
+ * "Yes, that's my guest" once the guest is inside, so nothing else can be confirmed.
  */
 export async function confirmArrival(
   deps: VisitServiceDeps,
@@ -217,135 +213,7 @@ export async function confirmArrival(
     return updated;
   }
 
-  if (visit.status === 'inside') {
-    if (visit.host_confirmed_at) {
-      throw new AppError('INVALID_TRANSITION', 409, 'You already confirmed this guest.');
-    }
-    if (visit.host_disputed_at) {
-      throw new AppError('INVALID_TRANSITION', 409, 'You reported this guest as not yours.');
-    }
-    assertWithinDisputeWindow(deps, visit);
-    return withTx(
-      deps.db,
-      { principal: params.principal, requestId: params.requestId },
-      async (trx) => {
-        const row = await trx
-          .updateTable('haven.visits')
-          .set({ host_confirmed_at: deps.clock.now().toISOString(), updated_at: new Date() })
-          .where('id', '=', visit.id)
-          .where('status', '=', 'inside')
-          .where('host_confirmed_at', 'is', null)
-          .where('host_disputed_at', 'is', null)
-          .returningAll()
-          .executeTakeFirst();
-        if (!row)
-          throw new AppError(
-            'INVALID_TRANSITION',
-            409,
-            'This visit changed. Refresh and try again.',
-          );
-        return row;
-      },
-    );
-  }
-
   throw new AppError('INVALID_TRANSITION', 409, 'There is nothing to confirm for this visit.');
-}
-
-/** FR-42: "Yes, that's my guest / Not my guest (available for 30 min)". */
-function assertWithinDisputeWindow(deps: VisitServiceDeps, visit: VisitRow): void {
-  const enteredAt = visit.last_entry_at ?? visit.first_entry_at;
-  const windowMs = deps.rulesConfig.dispute_window_minutes * 60_000;
-  if (!enteredAt || deps.clock.now().getTime() > enteredAt.getTime() + windowMs) {
-    throw new AppError(
-      'INVALID_TRANSITION',
-      409,
-      `This can only be done within ${deps.rulesConfig.dispute_window_minutes} minutes of arrival.`,
-    );
-  }
-}
-
-/**
- * Whether R-09's arrival actions apply: the guest checked themself in (an invite or an
- * overnight stay). Walk-ins and host-assisted entries were approved by the host with
- * the photo in front of them — "Host does not get a separate arrival confirmation"
- * (SDD F2 step 9), so there is no arrival card to dispute.
- */
-export function hasArrivalCard(visit: Pick<VisitRow, 'origin'>): boolean {
-  return visit.origin === 'invite' || visit.origin === 'overnight_request';
-}
-
-// ---------------------------------------------------------------------------
-// POST /visits/{id}/dispute ★ (F9)
-// ---------------------------------------------------------------------------
-
-export async function disputeArrival(
-  deps: VisitServiceDeps,
-  params: { principal: Principal | null; requestId: string; visitId: string; note?: string },
-): Promise<VisitRow> {
-  return withTx(
-    deps.db,
-    { principal: params.principal, requestId: params.requestId },
-    async (trx) => {
-      const visit = await findVisitById(trx, params.visitId);
-      if (!visit) throw new AppError('NOT_FOUND', 404, 'Visit not found.');
-      authorize(params.principal, 'visits.dispute', resourceFor(visit));
-      if (visit.status !== 'inside' || !hasArrivalCard(visit)) {
-        throw new AppError('INVALID_TRANSITION', 409, 'This guest is not checked in.');
-      }
-      if (visit.host_disputed_at) {
-        throw new AppError('INVALID_TRANSITION', 409, 'You already reported this guest.');
-      }
-      if (visit.host_confirmed_at) {
-        throw new AppError('INVALID_TRANSITION', 409, 'You already confirmed this guest.');
-      }
-      assertWithinDisputeWindow(deps, visit);
-
-      const now = deps.clock.now();
-      // F9 step 2: "Visit gets host_disputed_at; status stays inside (the person is
-      // still physically inside)."
-      const updated = await trx
-        .updateTable('haven.visits')
-        .set({ host_disputed_at: now.toISOString(), updated_at: new Date() })
-        .where('id', '=', visit.id)
-        .where('status', '=', 'inside')
-        .where('host_disputed_at', 'is', null)
-        .returningAll()
-        .executeTakeFirst();
-      if (!updated)
-        throw new AppError('INVALID_TRANSITION', 409, 'This visit changed. Refresh and try again.');
-
-      const host = await loadHostIdentity(trx, visit.host_id);
-      const guestName = await loadGuestName(trx, visit);
-      const hostel = await trx
-        .selectFrom('haven.hostels')
-        .select('code')
-        .where('id', '=', visit.hostel_id)
-        .executeTakeFirstOrThrow();
-      const checkedInAt = visit.last_entry_at ?? visit.first_entry_at ?? now;
-      for (const wardenId of await wardenIdsFor(trx, visit.hostel_id)) {
-        const screen = `/warden/visits/${visit.id}`;
-        // N-DISPUTE: wardens, "Push (alerts) + SMS immediately" (SDD §15.2).
-        await enqueueNotification(trx, {
-          now,
-          hostelId: visit.hostel_id,
-          recipient: { type: 'user', userId: wardenId },
-          kind: 'N-DISPUTE',
-          channel: 'push',
-          visitId: visit.id,
-          screen,
-          text: disputeText({ hostName: host.fullName, room: host.room, guestName, checkedInAt }),
-          data: params.note ? { note: params.note } : undefined,
-          dedupeKey: `dispute:${visit.id}:${wardenId}`,
-          sms: {
-            text: disputeSms({ hostelCode: hostel.code, link: linkFor(deps, screen) }),
-            delayMs: 0,
-          },
-        });
-      }
-      return updated;
-    },
-  );
 }
 
 // ---------------------------------------------------------------------------

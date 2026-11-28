@@ -80,12 +80,6 @@ export default function Dashboard() {
           onPress={() => router.push('/warden/inside?flag=overstay')}
         />
         <Tile
-          label="Disputed"
-          value={c.disputed}
-          tone={c.disputed ? 'danger' : undefined}
-          onPress={() => router.push('/warden/visits?flag=disputed')}
-        />
-        <Tile
           label="Pending approvals"
           value={c.pendingApprovals}
           tone={c.pendingApprovals ? 'warning' : undefined}

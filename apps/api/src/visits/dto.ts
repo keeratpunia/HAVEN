@@ -1,9 +1,7 @@
 import type { Kysely } from 'kysely';
 import {
   displayName,
-  GH8_RULES_CONFIG_V1,
   maskPhone,
-  type RulesConfig,
   type VisitAction,
   type VisitDTO,
   type VisitEventDTO,
@@ -12,7 +10,7 @@ import type { Database } from '../db/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { MediaUrlSigner } from '../media/signing.js';
 import type { VisitRow } from './repository.js';
-import { canShareInvite, hasArrivalCard, isEditable } from './host-actions.js';
+import { canShareInvite, isEditable } from './host-actions.js';
 
 /**
  * Host-view serializer for SDD §12.3's `VisitDTO`. Loads everything for a page of
@@ -26,8 +24,6 @@ export interface DtoDeps {
   db: Kysely<Database>;
   clock: Clock;
   signer: MediaUrlSigner;
-  /** The hostel's current rules (only the dispute window is needed here). */
-  rulesFor: (hostelId: string) => Promise<RulesConfig>;
 }
 
 export async function buildHostVisitDtos(deps: DtoDeps, rows: VisitRow[]): Promise<VisitDTO[]> {
@@ -87,9 +83,6 @@ export async function buildHostVisitDtos(deps: DtoDeps, rows: VisitRow[]): Promi
   ]);
 
   const now = deps.clock.now();
-  const rulesByHostel = new Map(
-    await Promise.all(hostelIds.map(async (h) => [h, await deps.rulesFor(h)] as const)),
-  );
   const hostelById = new Map(hostels.map((h) => [h.id, h]));
   const hostById = new Map(hosts.map((h) => [h.id, h]));
   const visitorById = new Map(visitors.map((v) => [v.id, v]));
@@ -158,42 +151,26 @@ export async function buildHostVisitDtos(deps: DtoDeps, rows: VisitRow[]): Promi
       lastExitAt: row.last_exit_at?.toISOString() ?? null,
       latestPhoto: deps.signer.signOrNull(latestPhotoId),
       charge: charge ? { amountInr: charge.amount_inr, status: charge.status } : null,
-      allowedActions: hostAllowedActions(
-        row,
-        awaitingHostConfirmation,
-        now,
-        rulesByHostel.get(row.hostel_id) ?? GH8_RULES_CONFIG_V1,
-      ),
+      allowedActions: hostAllowedActions(row, awaitingHostConfirmation),
       hostConfirmedAt: row.host_confirmed_at?.toISOString() ?? null,
       awaitingHostConfirmation,
     };
   });
 }
 
-/** What the host may do right now — the server's answer, never re-derived in the app. */
+/**
+ * What the host may do right now — the server's answer, never re-derived in the app.
+ * DEC-033: an invited or overnight guest's arrival is a notice only — no "Yes, that's
+ * my guest" / "Not my guest" after entry. The host confirms before entry only when the
+ * guest's location couldn't be checked (F3), and approves every walk-in (F2).
+ */
 export function hostAllowedActions(
   row: VisitRow,
   awaitingHostConfirmation: boolean,
-  now: Date,
-  cfg: RulesConfig,
 ): VisitAction[] {
   const actions: VisitAction[] = [];
   if (row.status === 'pending_host') actions.push('approve', 'reject');
   if (awaitingHostConfirmation) actions.push('confirm_arrival');
-
-  const enteredAt = row.last_entry_at ?? row.first_entry_at;
-  const inArrivalWindow =
-    enteredAt !== null &&
-    now.getTime() <= enteredAt.getTime() + cfg.dispute_window_minutes * 60_000;
-  if (
-    row.status === 'inside' &&
-    hasArrivalCard(row) &&
-    inArrivalWindow &&
-    !row.host_confirmed_at &&
-    !row.host_disputed_at
-  ) {
-    actions.push('confirm_arrival', 'dispute');
-  }
   if (row.status === 'inside') actions.push('mark_left');
   if (
     (row.status === 'approved' && row.first_entry_at === null) ||

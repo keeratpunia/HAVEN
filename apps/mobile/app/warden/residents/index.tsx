@@ -143,6 +143,5 @@ function guestLine(r: AdminResidentDTO): string {
   if (s.visits === 0) return 'No guests yet';
   const came = `${s.guestsIn} guest${s.guestsIn === 1 ? '' : 's'} came in`;
   const latest = s.lastGuestAt ? ` · latest ${formatDateShort(s.lastGuestAt)}` : '';
-  const disputes = s.disputes > 0 ? ` · ${s.disputes} "not my guest"` : '';
-  return `${came}${latest}${disputes}`;
+  return `${came}${latest}`;
 }

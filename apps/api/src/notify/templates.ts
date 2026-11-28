@@ -45,11 +45,11 @@ export function confirmLocationText(p: { guestName: string }): PushText {
   };
 }
 
-/** N-ARRIVED — "{guestName} has arrived / Checked in at {time}. Tap if this isn't your guest." */
+/** N-ARRIVED — "{guestName} has arrived / Checked in at {time}." (DEC-033: nothing to tap; the SDD catalogue added "Tap if this isn't your guest.") */
 export function arrivedText(p: { guestName: string; at: Date }): PushText {
   return {
     title: `${p.guestName} has arrived`,
-    body: `Checked in at ${formatTime12h(p.at)}. Tap if this isn't your guest.`,
+    body: `Checked in at ${formatTime12h(p.at)}.`,
   };
 }
 

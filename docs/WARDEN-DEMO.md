@@ -44,7 +44,7 @@ people, so please try anything you like."
 - Tap **Resident or staff sign-in** → phone `99999 00007` → **Send code** → code
   `123456` → **Verify**.
 - She sees **Dashboard**: how many guests are inside now, expected today, overstaying,
-  any "not my guest" reports, and requests waiting for her.
+  and requests waiting for her.
 
 **Say:** "In the real one you would sign in with your own Google account; here everyone
 uses a test phone number."
@@ -67,8 +67,8 @@ to the privacy notice and takes a photo there and then."
 - **Presenter 2:** opens the phone camera, points it at the QR on the gate screen, taps
   the link, allows location → **Check in** → takes a photo → green **"You're checked
   in"**.
-- **Presenter 1 (Priya):** gets **"… has arrived"**, with today's photo next to the
-  selfie → **Yes, that's my guest**.
+- **Presenter 1 (Priya):** gets **"… has arrived"** with today's gate photo and the
+  time. Nothing to tap: she invited this guest herself.
 - **Warden's phone:** the guest appears under **Inside** by herself, without refreshing.
 
 **Say:** "Three checks happen together: the code on the gate screen changes every ten
@@ -79,7 +79,7 @@ learns who came in."
 ## 5. When something is wrong (2 minutes)
 
 On the **warden's phone**:
-- Tap the **Overstaying** or **Disputed** tile → open the guest → she sees the photos,
+- Tap the **Overstaying** tile → open the guest → she sees the photos,
   the times, and where the phone was.
 - **Force check-out** with a reason. She can also **ban** a guest from the hostel, and
   any later attempt by that guest is refused at the gate.
@@ -88,8 +88,9 @@ On the **warden's phone**:
 - Show **Residents**: a new student, **Neha**, waiting to be verified with her ID card
   photo. She can approve or reject.
 
-**Say:** "If a student says 'that's not my guest', you're told immediately. Every action
-is recorded, including who looked at whose photos."
+**Say:** "A guest who turns up without an invite only gets in after their host has
+seen the photo and approved it. Every action is recorded, including who looked at whose
+photos."
 
 ## 6. Her questions (2 minutes, or as long as she likes)
 

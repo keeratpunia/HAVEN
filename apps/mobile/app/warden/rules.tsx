@@ -50,7 +50,6 @@ const GROUPS: { title: string; fields: FieldDef[] }[] = [
       { path: 'overstay_grace_minutes', label: 'Overstay grace (min)', kind: 'int' },
       { path: 'quick_drop_minutes', label: 'Quick drop-off length (min)', kind: 'int' },
       { path: 'walk_in_timeout_minutes', label: 'Walk-in expires after (min)', kind: 'int' },
-      { path: 'dispute_window_minutes', label: '"Not my guest" window (min)', kind: 'int' },
       { path: 'max_active_day_guests', label: 'Day guests per host at once', kind: 'int' },
       { path: 'invite_max_days_ahead', label: 'Invites up to (days ahead)', kind: 'int' },
       {

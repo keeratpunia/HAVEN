@@ -57,7 +57,6 @@ export interface VisitPreview {
 export const ApproveBodySchema = z.object({ windowEnd: z.string().datetime().optional() });
 export const RejectBodySchema = z.object({ reason: z.string().trim().max(300).optional() });
 export const CancelBodySchema = z.object({ reason: z.string().trim().max(300).optional() });
-export const DisputeBodySchema = z.object({ note: z.string().trim().max(300).optional() });
 export const PatchVisitBodySchema = z
   .object({
     windowStart: z.string().datetime().optional(),
@@ -104,7 +103,6 @@ export type VisitAction =
   | 'approve'
   | 'reject'
   | 'confirm_arrival'
-  | 'dispute'
   | 'mark_left'
   | 'cancel'
   | 'edit'

@@ -95,7 +95,6 @@ export function registerVisitPolicies(): void {
 
   // SDD §12.6 host-only actions that aren't a §7.1 status transition of their own.
   definePolicy<VisitActorResource>('visits.confirm_arrival', isHost);
-  definePolicy<VisitActorResource>('visits.dispute', isHost);
   definePolicy<VisitActorResource>('visits.edit_window', isHost);
   definePolicy<VisitActorResource>('visits.invite_link', isHost);
   definePolicy<VisitActorResource>('visits.preview', isHost);

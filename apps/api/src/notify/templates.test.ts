@@ -26,7 +26,7 @@ describe('SDD §15 notification text, verbatim', () => {
   it('N-ARRIVED and N-LEFT (with F5 step 5’s unverified-exit sentence)', () => {
     expect(arrivedText({ guestName: 'Simran', at: AT })).toEqual({
       title: 'Simran has arrived',
-      body: "Checked in at 4:42 pm. Tap if this isn't your guest.",
+      body: 'Checked in at 4:42 pm.',
     });
     expect(leftText({ guestName: 'Simran', at: AT, locationVerified: true })).toEqual({
       title: 'Simran has left',

@@ -6,7 +6,6 @@ import {
   CancelBodySchema,
   ChargesQuerySchema,
   CreateVisitBodySchema,
-  DisputeBodySchema,
   HostedVisitsQuerySchema,
   nightsBetween,
   PatchVisitBodySchema,
@@ -42,7 +41,6 @@ import {
 } from './service.js';
 import {
   confirmArrival,
-  disputeArrival,
   editVisitWindow,
   overnightWindow,
   previewVisit,
@@ -92,7 +90,6 @@ export async function registerHostVisitRoutes(
     db,
     clock,
     signer,
-    rulesFor: async (h) => (await opts.rules.forHostel(h)).config,
   };
 
   /** Service deps carrying the hostel's current rules version (SDD §4, E-13). */
@@ -457,7 +454,7 @@ export async function registerHostVisitRoutes(
     },
   );
 
-  // POST /v1/visits/:id/confirm-arrival ★ — F3 confirm / R-09 "Yes, that's my guest".
+  // POST /v1/visits/:id/confirm-arrival ★ — F3: the host lets in a guest whose location couldn't be checked.
   api.post(
     '/visits/:id/confirm-arrival',
     { schema: { params: VISIT_ID_PARAMS }, preHandler: requireAuth },
@@ -476,32 +473,6 @@ export async function registerHostVisitRoutes(
           principal,
           requestId: request.id,
           visitId: request.params.id,
-        });
-        return { status: 200, body: await freshDto(request.params.id) };
-      });
-    },
-  );
-
-  // POST /v1/visits/:id/dispute ★ — R-09 "Not my guest" (FR-43, F9).
-  api.post(
-    '/visits/:id/dispute',
-    { schema: { params: VISIT_ID_PARAMS, body: DisputeBodySchema }, preHandler: requireAuth },
-    async (request, reply) => {
-      // A replayed response is still a read of this visit: check access first, so a
-      // replay never skips authorize() (SECURITY-AUDIT SA-15). Only people act here.
-      if (!request.principal || request.principal.type === 'device') {
-        throw new AppError('AUTH_REQUIRED', 401, 'Sign in required.');
-      }
-      await visibleVisit(request.principal, request.params.id);
-      await runIdempotent(db, request, reply, async () => {
-        const principal = requireUser(request.principal);
-        const visit = await visibleVisit(principal, request.params.id);
-        const deps = await depsFor(visit.hostel_id);
-        await disputeArrival(deps, {
-          principal,
-          requestId: request.id,
-          visitId: request.params.id,
-          note: request.body.note,
         });
         return { status: 200, body: await freshDto(request.params.id) };
       });

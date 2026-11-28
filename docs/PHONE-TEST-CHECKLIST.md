@@ -65,7 +65,8 @@ tapped, what you saw, phone model. A screenshot helps.
 - [ ] **B** sees "Checking you're at the gate…", then **Check in** → live photo → **You're
       checked in** (green).
 - [ ] **A** sees **"… has arrived"** within about 10 seconds (banner or **Notifications**),
-      with the gate photo next to the profile photo → **Yes, that's my guest**.
+      with the gate photo and the check-in time, and no buttons to confirm or report
+      (DEC-033).
 - [ ] **C** sees the guest on **Inside** without reloading.
 - [ ] The **gate laptop** keeps showing only the QR. By design the gate screen never
       shows the guest's name or photo (SDD §0). The host and the warden see the
@@ -116,7 +117,7 @@ pnpm --filter @haven/api run staging -- escalate VAB12CD
 
 ## 8. Warden acts on an alert (C)
 
-- [ ] **C**: dashboard tiles **Overstaying** / **Disputed** → open a visit → timeline with
+- [ ] **C**: dashboard tile **Overstaying** → open a visit → timeline with
       photos and GPS distance.
 - [ ] **C** → **Force check-out** with a reason → the guest leaves the **Inside** list.
 - [ ] **C** → **Approvals** → approve the waiting **overnight** request.

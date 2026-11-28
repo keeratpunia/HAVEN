@@ -10,7 +10,7 @@ import { AdminVisitCard } from '../../components/staff/AdminVisitCard.js';
 import { Chips, ErrorText, Muted, StaffScreen } from '../../components/staff/StaffUi.js';
 
 /** W-02 Inside now: photo, guest, host + room, zone, since, flags; filter chips. */
-type Filter = 'all' | 'sweep' | 'overstay' | 'disputed' | 'location_unverified';
+type Filter = 'all' | 'sweep' | 'overstay' | 'location_unverified';
 
 export default function Inside() {
   const router = useRouter();
@@ -70,7 +70,6 @@ export default function Inside() {
           ...(sweepIds ? [{ value: 'sweep' as const, label: 'Night sweep' }] : []),
           { value: 'all', label: 'All' },
           { value: 'overstay', label: 'Overstaying' },
-          { value: 'disputed', label: 'Disputed' },
           { value: 'location_unverified', label: 'Location not verified' },
         ]}
       />

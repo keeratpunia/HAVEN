@@ -8,7 +8,8 @@
  *   warden, an office user and a super admin. Each has an SDD §9.5 test phone, so the
  *   test version's "sign in with a test number" reaches them (`TEST_PHONES`).
  * - Visits and charges relative to `seedNow`, so the dashboards always look current:
- *   three guests inside (one on time, one overstaying, one disputed), one expected
+ *   three guests inside (one on time, one overstaying, one let in by the host because
+ *   their location couldn't be checked), one expected
  *   later today, an overnight request for the warden, and yesterday's completed visit.
  *
  * The seeded guests use ordinary-looking numbers (+91 98765 0000x) on purpose: they are
@@ -208,13 +209,13 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
     visitorId: string,
     window: [number, number],
     entered: number,
-    extra: { overstaySince?: number; disputedAt?: number } = {},
+    extra: { overstaySince?: number; locationUnverified?: boolean } = {},
   ) {
     const visit = await client.query<{ id: string }>(
       `insert into haven.visits
          (code, hostel_id, host_id, visitor_id, type, status, origin, zone, window_start, window_end,
           rules_version, created_by_type, created_by_id, first_entry_at, last_entry_at,
-          host_confirmed_at, overstay_since, host_disputed_at, created_at)
+          host_confirmed_at, overstay_since, location_unverified, created_at)
        values ($1, $2, $3, $4, 'day', 'inside', 'invite', 'visitors_room', $5, $6, 1, 'user', $3, $7, $7,
                $8, $9, $10, $11)
        returning id`,
@@ -226,9 +227,10 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
         at(window[0]),
         at(window[1]),
         at(entered),
-        extra.disputedAt === undefined ? at(entered + 1) : null,
+        // F3: only a guest whose location couldn't be checked waits for the host's Confirm.
+        extra.locationUnverified ? at(entered) : null,
         extra.overstaySince === undefined ? null : at(extra.overstaySince),
-        extra.disputedAt === undefined ? null : at(extra.disputedAt),
+        extra.locationUnverified === true,
         // Invited well before the window opens, so the timeline reads in order.
         at(Math.min(window[0], entered) - 120),
       ],
@@ -236,8 +238,17 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
     await client.query(
       `insert into haven.gate_events
          (visit_id, hostel_id, gate_id, kind, actor_type, actor_id, location_verified, distance_m, accuracy_m, at)
-       values ($1, $2, $3, 'entry', 'visitor', $4, true, 12, 9, $5)`,
-      [one(visit).id, hostelId, gateId, visitorId, at(entered)],
+       values ($1, $2, $3, 'entry', 'visitor', $4, $5, $6, $7, $8)`,
+      [
+        one(visit).id,
+        hostelId,
+        gateId,
+        visitorId,
+        !extra.locationUnverified,
+        extra.locationUnverified ? null : 12,
+        extra.locationUnverified ? null : 9,
+        at(entered),
+      ],
     );
   }
   // Inside, on time.
@@ -259,16 +270,14 @@ export async function seedDemoWorld(client: pg.ClientBase, opts: SeedOptions): P
       overstaySince: -20,
     },
   );
-  // Inside, but the host said "Not my guest" (F9): waits for the warden.
+  // Inside: the phone couldn't confirm the gate location, so the host let her in (F3).
   await insideVisit(
     'VDEM003',
     resident2Id,
     await guest('+919876500003', 'Riya Das'),
     [-90, 120],
     -15,
-    {
-      disputedAt: -10,
-    },
+    { locationUnverified: true },
   );
   // Expected later today (an invite not yet claimed).
   await client.query(

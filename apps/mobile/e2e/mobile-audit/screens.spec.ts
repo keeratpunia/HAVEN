@@ -313,7 +313,7 @@ test('warden and admin screens', async ({ page }, info) => {
   ] as const) {
     await visit(page, 'warden', screen, url, p);
   }
-  // A visit detail (the disputed one has the most on it).
+  // A visit detail (the host-confirmed, location-not-verified one has the most on it).
   await page.goto('/warden/inside');
   await settle(page);
   const first = page.getByText('Riya Das').first();

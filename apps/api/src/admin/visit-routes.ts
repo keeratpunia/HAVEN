@@ -91,7 +91,6 @@ export interface ReportCsvSource {
   last_exit_at: Date | null;
   closed_at: Date | null;
   overstay_since: Date | null;
-  host_disputed_at: Date | null;
   location_unverified: boolean;
   close_reason: string | null;
 }
@@ -129,7 +128,6 @@ export function reportCsvRow(r: ReportCsvSource, zone: string): string[] {
     when(r.first_entry_at),
     when(left),
     overstay,
-    r.host_disputed_at ? 'Reported' : '',
     r.first_entry_at ? (r.location_unverified ? 'Not verified (host confirmed)' : 'Verified') : '',
     ended,
   ];
@@ -163,7 +161,6 @@ export async function registerAdminVisitRoutes(
     db,
     clock,
     signer,
-    rulesFor: async (h) => (await rules.forHostel(h)).config,
   };
 
   async function adminDtos(rows: VisitRow[]): Promise<AdminVisitDTO[]> {
@@ -758,7 +755,6 @@ export async function registerAdminVisitRoutes(
               'Checked in',
               'Checked out',
               'Overstay',
-              'Not my guest',
               'Location',
               'How it ended',
             ],

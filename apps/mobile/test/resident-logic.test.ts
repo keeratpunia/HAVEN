@@ -101,18 +101,12 @@ describe('which screen a visit card opens', () => {
     allowedActions: [] as VisitDTO['allowedActions'],
     awaitingHostConfirmation: false,
   };
-  it('pending walk-in → R-08, arrival to confirm → R-09, else R-10', () => {
+  it('pending walk-in → R-08, arrival to confirm (F3) → R-09, else R-10', () => {
     expect(screenForVisit({ ...base, status: 'pending_host' })).toBe(`/walk-in/${VISIT}`);
     expect(screenForVisit({ ...base, status: 'approved', awaitingHostConfirmation: true })).toBe(
       `/arrival/${VISIT}`,
     );
-    expect(
-      screenForVisit({
-        ...base,
-        status: 'inside',
-        allowedActions: ['confirm_arrival', 'dispute', 'mark_left'],
-      }),
-    ).toBe(`/arrival/${VISIT}`);
+    // DEC-033: a guest who is already inside has nothing to confirm or report.
     expect(screenForVisit({ ...base, status: 'inside', allowedActions: ['mark_left'] })).toBe(
       `/visit/${VISIT}`,
     );

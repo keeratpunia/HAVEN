@@ -18,7 +18,6 @@ const base: ReportCsvSource = {
   last_exit_at: new Date('2026-11-28T08:40:00Z'),
   closed_at: new Date('2026-11-28T08:40:00Z'),
   overstay_since: new Date('2026-11-28T06:45:00Z'),
-  host_disputed_at: null,
   location_unverified: false,
   close_reason: 'checked_out',
 };
@@ -37,7 +36,6 @@ const col = (row: string[], name: string) =>
       'Checked in',
       'Checked out',
       'Overstay',
-      'Not my guest',
       'Location',
       'How it ended',
     ].indexOf(name)
@@ -72,7 +70,7 @@ describe('report CSV rows', () => {
     expect(col(onTime, 'Overstay')).toBe('');
   });
 
-  it('names a guest who never came, and a dispute', () => {
+  it('names a guest who never came', () => {
     const never = reportCsvRow(
       {
         ...base,
@@ -83,7 +81,6 @@ describe('report CSV rows', () => {
         last_exit_at: null,
         overstay_since: null,
         close_reason: 'window_ended',
-        host_disputed_at: new Date('2026-11-28T04:00:00Z'),
       },
       'Asia/Kolkata',
     );
@@ -91,6 +88,6 @@ describe('report CSV rows', () => {
     expect(col(never, 'Status')).toBe('Expired');
     expect(col(never, 'How it ended')).toBe("Guest didn't arrive");
     expect(col(never, 'Location')).toBe('');
-    expect(col(never, 'Not my guest')).toBe('Reported');
+    expect(never.length).toBe(14);
   });
 });

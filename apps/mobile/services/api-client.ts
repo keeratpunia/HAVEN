@@ -456,14 +456,6 @@ export function confirmArrival(id: string, key: string) {
   });
 }
 
-export function disputeArrival(id: string, key: string, note?: string) {
-  return request<VisitDTO>(`/v1/visits/${id}/dispute`, {
-    method: 'POST',
-    body: note ? { note } : {},
-    idempotencyKey: key,
-  });
-}
-
 export function markGuestLeft(id: string, key: string) {
   return request<VisitDTO>(`/v1/visits/${id}/mark-left`, { method: 'POST', idempotencyKey: key });
 }

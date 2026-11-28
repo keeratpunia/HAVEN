@@ -71,7 +71,7 @@ export default function Reports() {
           {Object.entries(report.byStatus).map(([k, n]) => (
             <Muted key={k}>{`${k}: ${n}`}</Muted>
           ))}
-          <Muted>{`Overstays ${report.flags.overstay} · disputes ${report.flags.disputed} · location not verified ${report.flags.locationUnverified} · forced exits ${report.flags.forced}`}</Muted>
+          <Muted>{`Overstays ${report.flags.overstay} · location not verified ${report.flags.locationUnverified} · forced exits ${report.flags.forced}`}</Muted>
         </Card>
       ) : null}
     </StaffScreen>

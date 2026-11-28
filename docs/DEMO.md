@@ -102,7 +102,7 @@ temporary internet link are demo stand-ins.
 |---|---|
 | **Device** | Phone 1, then laptop (Priya) |
 | **Do (Phone 1)** | Open the phone **camera app**, point at the gate QR, tap the link → **Allow location** (first time) → **Check in** → **Take photo** → **Use photo**. (Or in the app: *My visits* → **Scan the gate QR**.) |
-| **Audience sees** | Phone: "Checking you're at the gate…", then **You're checked in** (green). Laptop, Priya: a banner **"Ananya has arrived"** within ~10 s → opens a screen with the gate photo next to the profile photo → **Yes, that's my guest**. |
+| **Audience sees** | Phone: "Checking you're at the gate…", then **You're checked in** (green). Laptop, Priya: a banner **"Ananya has arrived"** within ~10 s → opens a screen with the gate photo and the check-in time (nothing to tap: DEC-033). |
 | **Say** | "Three checks at once: a fresh code from the screen, the phone's GPS inside the gate radius, and a live photo. The host — not a receptionist — confirms it's really her guest." |
 | **If it fails** | "You're not at the gate yet": wrong `demo.config.json` coordinates or weak indoor GPS — **Try again** near a window; after 3 tries **Ask host to confirm** works too (Priya confirms). "That code has changed": scan again (the code moves every 10 s). |
 

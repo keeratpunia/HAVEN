@@ -205,7 +205,7 @@ test('resident rejects a walk-in from Home; the guest sees "couldn’t approve"'
   await expect(page.getByText("couldn't approve this visit")).toBeVisible({ timeout: 15_000 });
 });
 
-test('N-ARRIVED in Notifications opens R-09; "Not my guest" reports the arrival', async ({
+test('N-ARRIVED in Notifications opens R-09: the gate photo and time, nothing to confirm', async ({
   page,
   browser,
 }) => {
@@ -226,15 +226,13 @@ test('N-ARRIVED in Notifications opens R-09; "Not my guest" reports the arrival'
   await host.getByRole('button', { name: /Unread\. Arrival Tester has arrived/ }).click();
   await host.waitForURL(/\/arrival\/[0-9a-f-]{36}$/);
   await expect(host.getByText('Checked in at 12:00 pm', { exact: true })).toBeVisible();
-  await expect(host.getByLabel('Live photo of Arrival Tester at the gate')).toBeVisible();
-
-  await host.getByRole('button', { name: 'Not my guest' }).click();
-  await host.getByRole('button', { name: 'Report guest' }).click();
-  await expect(host.getByText('You reported this guest', { exact: true })).toBeVisible({
-    timeout: 15_000,
-  });
-  await expect(host.getByText('✕ You reported this guest as not yours.')).toBeVisible();
+  await expect(host.getByLabel('Photo of Arrival Tester at the gate')).toBeVisible();
+  // DEC-033: an invited guest's arrival is a notice only.
+  await expect(host.getByRole('heading', { name: 'Arrival Tester has arrived' })).toBeVisible();
   await expect(host.getByRole('button', { name: 'Not my guest' })).toHaveCount(0);
+  await expect(host.getByRole('button', { name: "Yes, that's my guest" })).toHaveCount(0);
+  await host.getByRole('button', { name: 'Open visit' }).click();
+  await host.waitForURL(/\/visit\/[0-9a-f-]{36}$/);
 });
 
 test('R-11 previews nights, charge and quota, then sends the request to the warden', async ({

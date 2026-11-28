@@ -116,11 +116,6 @@ export default function ResidentDetail() {
         <Tile label="Different guests" value={s.distinctGuests} />
         <Tile label="Visits hosted" value={s.visits} />
         <Tile label="Overnight stays" value={s.overnightStays} />
-        <Tile
-          label='"Not my guest" reports'
-          value={s.disputes}
-          tone={s.disputes > 0 ? 'danger' : undefined}
-        />
         <Tile label="Latest guest" value={s.lastGuestAt ? formatDateShort(s.lastGuestAt) : '—'} />
       </View>
 
