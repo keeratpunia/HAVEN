@@ -4,6 +4,9 @@
   "private": true,
   "description": "HAVEN Expo app (Android + web) — guest web screens (SDD §13), see docs/TRACEABILITY.md",
   "main": "expo-router/entry",
+  "engines": {
+    "node": ">=22 <25"
+  },
   "scripts": {
     "dev": "expo start",
     "android": "expo start --android",
