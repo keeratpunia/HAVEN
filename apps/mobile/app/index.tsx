@@ -29,11 +29,12 @@ export default function Home() {
       <Text style={styles.title}>HAVEN</Text>
       <Text style={styles.subtitle}>Hostel guest check-in</Text>
       <View style={styles.action}>
-        <Button label="Sign in" onPress={() => router.push('/login')} />
+        {/* Phone test 2026-11-28: the admin took "Sign in" for theirs; say who each is for. */}
+        <Button label="Guest sign-in" onPress={() => router.push('/login')} />
       </View>
       <View style={styles.action}>
         <Button
-          label="Resident sign-in"
+          label="Resident or staff sign-in"
           variant="secondary"
           onPress={() => router.push('/sign-in')}
         />

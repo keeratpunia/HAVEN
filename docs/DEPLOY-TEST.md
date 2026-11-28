@@ -263,8 +263,9 @@ run unless `apps/api/.env.staging.local` says `APP_ENV=staging`.
 
 You need the laptop or tablet that will show the gate QR, and your phone.
 
-1. **On your phone**, open your Vercel address → **Sign in** → **Sign in with a test
-   number** → `9999900009` (admin) → code `123456` → **Sign in with test number**.
+1. **On your phone**, open your Vercel address → **Resident or staff sign-in** (not
+   *Guest sign-in*) → **Sign in with a test number** → `9999900009` (admin) → code
+   `123456` → **Sign in with test number**. (Or open `<your Vercel address>/sign-in`.)
 2. Bottom bar **More** → **Gates**.
 3. **Stand where the demo will happen** (the room or the gate) → **Set gate location to
    my current position** → allow location → it says "Gate moved to your position". The

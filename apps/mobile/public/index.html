@@ -16,6 +16,9 @@
     <!-- Installable web app (DEC-026 Phase 1): Android Chrome and iPhone Safari. -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0F766E" />
+    <!-- Light design only (SDD §13.2 tokens): stop browsers' automatic dark mode from
+         recolouring the app (seen on an Android phone in the 2026-11-28 phone test). -->
+    <meta name="color-scheme" content="only light" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
@@ -27,6 +30,7 @@
       html,
       body {
         height: 100%;
+        color-scheme: only light;
       }
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {

@@ -1880,6 +1880,18 @@ Source for all of Part 1: SDD §2.7.
   - Also `src/auth/test-phones.test.ts`, `src/db/ssl.test.ts`,
     `test/stream-self-test.integration.test.ts` and the updated `config.test.ts` and
     `lib/cookies.test.ts`.
+  - **Live, 2026-11-28:** `pnpm --filter @haven/api run staging:smoke --
+    https://haven-gh8-test-bay.vercel.app` passed 11/11 against the deployed test
+    version. It covered:
+    - the headers and manifest, the `/v1` rewrite, and real numbers being refused;
+    - test sign-in for every role, with the host-only cookie;
+    - the dashboard, with "live" through Vercel (the LISTEN self-test passed on
+      Supavisor's session pooler);
+    - an invite, profile, claim, check-in, walk-in and both check-outs.
+  - That run also read a guest photo back through a signed URL from the real private
+    bucket: the real-bucket check DEC-021 deferred to deployment.
+  - For phone tests, `staging -- overstay <VISIT>` / `escalate <VISIT>` move one inside
+    visit's times back and run `haven.job_flag_overstays()`, as `demo:job` does locally.
 - **SDD updated?** Not yet. These are Phase 1 deviations from §8.3 (subdomains),
   §9.5 (cookie domain, Google sign-in), §11.7 (direct connection for LISTEN) and §12
   (two new endpoints, two new error codes: `TEST_PHONES_ONLY`, `TEST_ONLY`, plus

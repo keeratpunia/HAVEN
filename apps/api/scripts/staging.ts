@@ -9,6 +9,8 @@
  *                                                     and set haven_api's password
  *   pnpm --filter @haven/api run staging -- seed      the dummy GH-8 world (refuses if already seeded)
  *   pnpm --filter @haven/api run staging -- reset     wipe everything HAVEN stored, migrate, seed again
+ *   pnpm --filter @haven/api run staging -- overstay <VISIT>   that guest's visit ended 16 min ago: overstay now
+ *   pnpm --filter @haven/api run staging -- escalate <VISIT>   that overstay was flagged 31 min ago: warden told now
  *
  * Every command refuses to run unless the file says APP_ENV=staging. `reset` also asks
  * you to type the project's host name back. It never runs against production: Phase 2
@@ -28,7 +30,8 @@ import { seedDemoWorld, SEED_PEOPLE, TEST_PHONES } from './seed-fixtures.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const API_DIR = path.resolve(__dirname, '..');
-const ENV_FILE = path.join(API_DIR, '.env.staging.local');
+// HAVEN_STAGING_ENV_FILE points elsewhere for a dry run against a throwaway database.
+const ENV_FILE = process.env.HAVEN_STAGING_ENV_FILE ?? path.join(API_DIR, '.env.staging.local');
 const MIGRATIONS_DIR = path.resolve(API_DIR, '../../supabase/migrations');
 
 function fail(message: string): never {
@@ -212,6 +215,48 @@ async function seed(client: pg.Client): Promise<void> {
   );
 }
 
+/**
+ * Phone tests (docs/PHONE-TEST-CHECKLIST.md): show an overstay without waiting. BR-13
+ * flags a guest still inside 15 min after the window ends, and FR-72 tells the warden
+ * 30 min after that; these move the visit's times back and run the same SQL job
+ * pg_cron runs every 5 minutes, so the alerts appear in the app straight away.
+ */
+async function overstay(client: pg.Client, code: string | undefined, escalate: boolean) {
+  if (!code)
+    fail('Give the visit code, e.g. staging -- overstay VAB12CD (it is on the visit screen).');
+  const visit = await client.query<{ id: string; status: string; window_start: Date }>(
+    'select id, status, window_start from haven.visits where code = $1',
+    [code.toUpperCase()],
+  );
+  const row = visit.rows[0];
+  if (!row) fail(`No visit ${code}.`);
+  if (row.status !== 'inside')
+    fail(`${code} is ${row.status}; only a guest who is inside can overstay.`);
+  if (escalate) {
+    await client.query(
+      `update haven.visits set overstay_since = now() - interval '31 minutes', overstay_escalated_at = null
+        where id = $1`,
+      [row.id],
+    );
+  } else {
+    // Keep the window at least an hour long, ending 16 minutes ago (visits_check).
+    await client.query(
+      `update haven.visits
+          set window_end = now() - interval '16 minutes',
+              window_start = least(window_start, now() - interval '76 minutes'),
+              overstay_since = null, overstay_escalated_at = null
+        where id = $1`,
+      [row.id],
+    );
+  }
+  await client.query('select haven.job_flag_overstays()');
+  console.log(
+    escalate
+      ? `${code.toUpperCase()}: the warden's overstay alert is in the app now.`
+      : `${code.toUpperCase()} is overstaying: the host's alert is in the app now (the guest's SMS is not sent: no SMS in the test version).`,
+  );
+}
+
 /** Drops everything HAVEN stored (schema, photos, cron jobs) so migrate + seed start clean. */
 async function wipe(client: pg.Client): Promise<void> {
   const hasSchema = await client.query(`select 1 from pg_namespace where nspname = 'haven'`);
@@ -250,8 +295,11 @@ async function wipe(client: pg.Client): Promise<void> {
 async function main() {
   // `pnpm run staging -- seed` passes the `--` through.
   const command = process.argv.slice(2).find((a) => a !== '--');
-  if (!['migrate', 'seed', 'reset'].includes(command ?? '')) {
-    fail('Usage: pnpm --filter @haven/api run staging -- migrate | seed | reset');
+  const commandArg = process.argv.slice(2).filter((a) => a !== '--')[1];
+  if (!['migrate', 'seed', 'reset', 'overstay', 'escalate'].includes(command ?? '')) {
+    fail(
+      'Usage: pnpm --filter @haven/api run staging -- migrate | seed | reset | overstay <VISIT> | escalate <VISIT>',
+    );
   }
   loadStagingEnv();
   const host = new URL(required('MIGRATION_DATABASE_URL')).hostname;
@@ -281,6 +329,9 @@ async function main() {
     if (command === 'seed' || command === 'reset') {
       console.log('Seeding...');
       await seed(client);
+    }
+    if (command === 'overstay' || command === 'escalate') {
+      await overstay(client, commandArg, command === 'escalate');
     }
   } finally {
     await client.end();
