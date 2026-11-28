@@ -138,7 +138,13 @@ async function migrate(client: pg.Client): Promise<void> {
 }
 
 function storage(): SupabaseMediaStorage {
-  return new SupabaseMediaStorage(required('SUPABASE_URL'), required('SUPABASE_SERVICE_ROLE_KEY'));
+  const url = new URL(required('SUPABASE_URL'));
+  if (url.pathname !== '/') {
+    fail(
+      `SUPABASE_URL must be just the project URL, e.g. https://${url.hostname} — remove "${url.pathname}".`,
+    );
+  }
+  return new SupabaseMediaStorage(url.origin, required('SUPABASE_SERVICE_ROLE_KEY'));
 }
 
 function gatePosition(): { lat: number; lng: number } | null {

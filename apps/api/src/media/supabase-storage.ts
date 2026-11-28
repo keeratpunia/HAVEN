@@ -113,6 +113,14 @@ async function isNotFound(res: Response): Promise<boolean> {
 
 /** Status only: the response body may echo the path, which is not logged (§16.4). */
 async function storageError(op: string, res: Response): Promise<Error> {
-  await res.body?.cancel().catch(() => undefined);
-  return new Error(`media storage ${op} failed: HTTP ${res.status}`);
+  // Supabase's short error name ("Bucket not found", "Invalid JWT") helps whoever reads
+  // the log; the rest of the body (which can name the object path) is dropped (§16.4).
+  let reason = '';
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    if (typeof body.error === 'string') reason = ` (${body.error.slice(0, 60)})`;
+  } catch {
+    // not JSON
+  }
+  return new Error(`media storage ${op} failed: HTTP ${res.status}${reason}`);
 }

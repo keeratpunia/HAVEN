@@ -118,7 +118,19 @@ const EnvSchema = z
     // the service-role key (server only). Local: `LocalDiskMediaStorage` under
     // MEDIA_STORAGE_DIR. `media/storage.ts` picks one; local disk outside local is
     // refused (FINAL-QA-REPORT D-03: Render's disk is ephemeral and per-instance).
-    SUPABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+    // The project URL only, e.g. https://<ref>.supabase.co — no path. A copied
+    // ".../rest/v1/" sends every photo upload to the wrong service (404).
+    SUPABASE_URL: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z
+        .string()
+        .url()
+        .refine((v) => new URL(v).pathname === '/' && !new URL(v).search, {
+          message:
+            'SUPABASE_URL must be just the project URL, e.g. https://<ref>.supabase.co (no /rest/v1/ or other path)',
+        })
+        .optional(),
+    ),
     SUPABASE_SERVICE_ROLE_KEY: z.preprocess(
       (v) => (v === '' ? undefined : v),
       z.string().min(1).optional(),

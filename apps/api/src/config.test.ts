@@ -74,6 +74,27 @@ describe('loadEnv', () => {
     ).not.toThrow();
   });
 
+  it('refuses a SUPABASE_URL with a path (a copied .../rest/v1/ breaks every upload)', () => {
+    __resetEnvCacheForTests();
+    expect(() =>
+      loadEnv({
+        ...REQUIRED,
+        APP_ENV: 'staging',
+        ...SUPABASE,
+        SUPABASE_URL: 'https://abc.supabase.co/rest/v1/',
+      }),
+    ).toThrow(/SUPABASE_URL must be just the project URL/);
+    __resetEnvCacheForTests();
+    expect(
+      loadEnv({
+        ...REQUIRED,
+        APP_ENV: 'staging',
+        ...SUPABASE,
+        SUPABASE_URL: 'https://abc.supabase.co',
+      }).SUPABASE_URL,
+    ).toBe('https://abc.supabase.co');
+  });
+
   it('parses a comma-separated CORS_ORIGINS list', () => {
     const env = loadEnv({
       ...REQUIRED,
